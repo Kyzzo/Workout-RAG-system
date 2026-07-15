@@ -1,0 +1,102 @@
+AI Workout Structuring App — Build Phases
+============================================
+Recommended order, by component. See PROJECT_CONTEXT.md for full project
+context, design.txt for the data model, TechStack.txt/TechStackExplained.txt
+for the stack.
+
+PHASE 0 — Data model (DONE)
+----------------------------
+Schema finalized in design.txt. Revisit only for v2 questions (structured
+reps/load, exercise swapping mid-mesocycle).
+
+
+PHASE 1 — Backend skeleton + CRUD (no AI yet)  <- CURRENT PHASE
+------------------------------------------------------------------
+Goal: a program can be created, stored, and rendered — zero AI involved.
+
+1. uv          — init the FastAPI project (backend/), add core deps
+                 (fastapi, sqlalchemy, alembic, psycopg[binary], etc.)
+2. PostgreSQL  — local instance via Docker (docker-compose.yml)
+3. SQLAlchemy  — model the design.txt schema: User -> Program -> Mesocycle
+                 -> DayTemplate -> ExerciseSlot -> WeeklyPrescription, plus
+                 Citation/PrescriptionCitation (unused until Phase 4)
+4. Alembic     — init migrations, generate + apply the first migration
+5. FastAPI     — plain CRUD endpoints: create a program, list a user's
+                 programs, get one program with nested mesocycles/days/
+                 exercises/prescriptions
+6. Clerk       — Next.js issues JWT, FastAPI verifies it, routes become
+                 user-scoped
+7. Next.js +
+   Tailwind    — minimal UI: login (Clerk), a form to manually create a
+                 program, a page that renders one
+
+Sequencing tip: get CRUD working with a hardcoded fake user_id first, wire
+in real Clerk auth after — don't debug the ORM and JWT verification
+simultaneously.
+
+
+PHASE 2 — Corpus ingestion
+----------------------------
+Reuse the existing RAG pipeline, point it at a new corpus.
+
+1. Qdrant    — two collections: "literature" and "user_context"
+               (user_context payload includes user_id + doc_id from day one)
+2. Inngest   — reuse/adapt the existing ingestion job (PDF -> chunk ->
+               embed -> store) for four research categories: volume,
+               frequency, intensity/load, progression
+3. Ingest a first small batch of papers to test retrieval quality before
+   doing the full corpus
+4. Postgres  — add the UserDocument table (metadata only; content lives in
+               Qdrant) even though upload UI comes later
+
+
+PHASE 3 — Single-category retrieval + structured generation
+----------------------------------------------------------------
+Prove the hardest mechanic end-to-end on ONE category before generalizing.
+
+1. Pick one category — volume first (most literature, clearest numbers)
+2. Build the retrieval query for that category from intake fields
+3. OpenAI structured outputs — schema for "generate the volume-related
+   fields of a WeeklyPrescription", get a real structured object back
+4. New endpoint that writes those fields onto an existing
+   WeeklyPrescription row
+
+
+PHASE 4 — Citation attachment
+--------------------------------
+The core differentiator — do this once Phase 3 works for one category.
+
+1. Track which retrieved chunk(s) the model actually used per generated
+   field (the open engineering problem — likely a modified structured-
+   output schema that asks the model to name source chunk IDs alongside
+   each value)
+2. Populate Citation + PrescriptionCitation from that
+3. Surface citations in the UI next to each number
+
+
+PHASE 5 — Expand generation to all categories
+-------------------------------------------------
+Repeat Phase 3+4's pattern for frequency, intensity/load, progression.
+Plumbing is proven by now — mostly volume of work, not new design.
+
+
+PHASE 6 — Chat interface + remaining product surface
+-----------------------------------------------------------
+1. Self-guided chat UI wrapping the same retrieval/generation machinery
+   (Phase 3-5 endpoints become chat-callable)
+2. Preset/suggested prompts (frontend-only convenience, submits into the
+   same chat)
+3. Program revision mode (AI-assisted edit) — same machinery, scoped to
+   existing rows
+4. Conversational Q&A mode — retrieval + citation, no structured-output
+   step
+5. User document upload -> user_context collection, user_id-filtered
+   retrieval
+
+
+PHASE 7 — Deployment
+-----------------------
+Only once there's something worth deploying:
+    Vercel          -> frontend
+    Railway/Render  -> FastAPI + Postgres
+    Qdrant Cloud (or self-hosted) -> vector DB

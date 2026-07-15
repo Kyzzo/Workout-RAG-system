@@ -1,0 +1,21 @@
+# Environment / secrets — never commit real values
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+
+# Frontend (Next.js) — populated once frontend/ is scaffolded
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+
+# Notes
+notes/

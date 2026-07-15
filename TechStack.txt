@@ -1,0 +1,34 @@
+AI Workout Structuring App — Tech Stack
+=========================================
+
+BACKEND
+-------
+Python + FastAPI   -> backend framework
+uv                 -> package manager
+SQLAlchemy 2.0     -> ORM
+Alembic            -> migrations
+PostgreSQL         -> relational DB (User, Program, Mesocycle, DayTemplate, ExerciseSlot, WeeklyPrescription, Citation — full schema in design.txt)
+Qdrant             -> vector DB (embedded scientific studies)
+Inngest            -> background jobs (PDF ingestion pipeline)
+OpenAI             -> embeddings + generation (LLM)
+
+FRONTEND
+--------
+Next.js (TypeScript) -> framework (frontend only, no API routes for logic)
+Tailwind CSS         -> styling
+Clerk                -> auth (issues JWT, verified by FastAPI)
+
+DEPLOYMENT
+----------
+Vercel              -> frontend hosting
+Railway / Render     -> backend hosting (FastAPI + Postgres)
+Qdrant Cloud (or self-hosted via Docker) -> vector DB hosting
+
+ARCHITECTURE
+------------
+Next.js (TS, Tailwind) --REST--> FastAPI (Python)
+                                    |- SQLAlchemy/Alembic --> Postgres
+                                    |- qdrant-client -------> Qdrant
+                                    |- Inngest --------------> background ingestion jobs
+                                    `- OpenAI ---------------> embeddings + generation
+Clerk --issues JWT--> Next.js (login UI) --JWT--> FastAPI (verifies)

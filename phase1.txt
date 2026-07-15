@@ -1,0 +1,115 @@
+Phase 1 — Backend Skeleton + CRUD — Building Blocks
+======================================================
+Goal: a program can be created, stored, and rendered — zero AI involved.
+Decisions already made: monorepo (backend/ + frontend/ in one repo),
+sync SQLAlchemy (not async).
+
+Suggested build order: models -> first migration -> hardcoded-user CRUD
+-> Clerk wiring -> minimal UI.
+
+
+1. REPO SKELETON
+-------------------
+AIworkoutTracker/
+├── backend/          # uv project lives here
+│   └── app/
+├── frontend/         # Next.js project lives here
+├── docker-compose.yml # Postgres + Qdrant, shared by both
+└── design.txt, TechStack.txt, etc.
+
+Run `uv init` inside backend/, add fastapi, sqlalchemy, alembic,
+psycopg[binary], python-dotenv as deps.
+
+Docker Compose — add a postgres service alongside the Qdrant service.
+One `docker compose up` should give you both DBs locally.
+
+
+2. SQLALCHEMY MODELS — the new conceptual territory
+-------------------------------------------------------
+Core concepts to understand before writing these:
+  - DeclarativeBase — one shared base class all models inherit from
+  - Mapped[...] + mapped_column(...) — SQLAlchemy 2.0's typed way of
+    declaring a column (replaced the old Column(...) style — make sure
+    any tutorial is 2.0-style, not 1.x)
+  - ForeignKey("table.column") — how a child row points at its parent
+  - relationship(...) with back_populates — the Python-side convenience
+    that lets program.mesocycles work as a list, IN ADDITION TO the FK.
+    Two separate things: FK is the DB-level link, relationship() is the
+    ORM-level convenience for navigating it in Python.
+
+Task: translate the six tables in design.txt into six model classes
+(one file each, or grouped in one models.py — no strong tradeoff either
+way). Start with User and Program only, get that one relationship
+working end-to-end before building out the rest of the chain — easier
+to debug one FK than six at once.
+
+Open question to research (not blocking for Phase 1, needed by Phase 4):
+for WeeklyPrescription <-> Citation (many-to-many), look up "SQLAlchemy
+association object" vs "secondary table" for the PrescriptionCitation
+junction table. Currently no extra columns on the junction, but
+citations might later want metadata (e.g. relevance score) — worth
+understanding both patterns before picking.
+
+
+3. ALEMBIC — migrations
+---------------------------
+  - `alembic init` generates a folder with env.py and versions/
+  - Common trip-up: env.py needs to import your models' Base.metadata
+    so Alembic knows what your models SHOULD look like, to diff against
+    the actual DB
+  - Workflow you'll repeat forever: change a model -> `alembic revision
+    --autogenerate -m "message"` -> READ the generated script (don't
+    blindly trust it) -> `alembic upgrade head`
+
+First migration is the big one — creates all six tables at once. Good
+exercise: after generating it, read the generated upgrade()/downgrade()
+functions and confirm they match what's expected from design.txt.
+
+
+4. FASTAPI STRUCTURE
+------------------------
+  - DB session dependency (Depends(get_db)) — each request gets its own
+    Session, used, then closed. Look up "FastAPI SQLAlchemy session
+    dependency" — very standard, copy-once pattern.
+  - Pydantic schemas separate from SQLAlchemy models — real concept to
+    internalize: the ORM model (Program) and the API's request/response
+    shape (ProgramCreate, ProgramOut) are NOT the same class, even
+    though they look similar. Why: avoid accidentally exposing internal
+    DB fields, and request payloads often need different required/
+    optional fields than the DB row.
+  - APIRouter() — group program-related routes in their own router/
+    module rather than one giant main.py.
+
+Start with two endpoints: POST /programs (create) and GET /programs/{id}
+(read, with nested mesocycles/days/exercises — this is where eager
+loading / joinedload comes in, to avoid N+1 queries once data is
+nested).
+
+
+5. CLERK <-> FASTAPI
+------------------------
+Most genuinely new piece.
+  - Clerk (frontend) issues a JWT after login — no login UI to write,
+    Clerk's <SignIn /> component handles it
+  - FastAPI needs to VERIFY that JWT on incoming requests — fetch
+    Clerk's public key (JWKS endpoint) and check the token's signature,
+    don't trust it blindly
+  - Practically: becomes a FastAPI dependency (Depends(get_current_user))
+    that every protected route uses, extracting user_id from the
+    verified token — same shape as the DB-session dependency above
+  - Look for clerk-backend-api or FastAPI-specific Clerk JWT
+    verification examples — don't hand-roll JWT signature verification,
+    lean on a library for anything security-sensitive
+
+Sequencing tip: get CRUD working with a hardcoded fake user_id first,
+wire in real Clerk auth after — don't debug the ORM and JWT verification
+simultaneously.
+
+
+6. NEXT.JS MINIMAL UI
+-------------------------
+Least new territory (React fundamentals transfer directly). Clerk's
+Next.js SDK wraps the app in a provider, gives <SignedIn>/<SignedOut>
+components and a way to grab the JWT to attach to fetch calls to
+FastAPI. One page, one form, one fetch call — that's the whole Phase 1
+frontend.
