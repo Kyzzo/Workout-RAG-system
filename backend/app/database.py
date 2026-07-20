@@ -1,6 +1,6 @@
 # engine, SessionLocal, DeclarativeBase
 from sqlalchemy import create_engine
-from sqlalchemy import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 DATABASE_URL = "postgresql+psycopg://user:password@localhost:5432/workout_tracker"
 

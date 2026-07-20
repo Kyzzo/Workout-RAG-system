@@ -1,0 +1,141 @@
+AI Workout Structuring App — Data Model
+==========================================
+Finalized schema for the core program-structuring domain (Phase 1),
+plus the citation/RAG-support tables planned for later phases.
+
+Overview
+----------
+A Program belongs to a user and is organized into Mesocycles (training
+blocks/phases). Each Mesocycle has a fixed weekly structure of training
+days (DayTemplate), each containing a fixed set of exercises
+(ExerciseSlot). The actual prescribed numbers — sets, reps, load — are
+tracked per exercise, per week (WeeklyPrescription), since those are
+what change as a program progresses and what the RAG citations
+ultimately attach to.
+
+    User 1---* Program 1---* Mesocycle 1---* DayTemplate 1---* ExerciseSlot 1---* WeeklyPrescription
+
+
+IMPLEMENTED (Phase 1)
+========================
+
+User
+    id                  PK
+    clerk_user_id       string, unique — links a Clerk-authenticated
+                         request to this row
+
+Program
+    id                  PK
+    user_id             FK -> User
+    goal                string — e.g. hypertrophy, strength, fat loss
+
+Mesocycle
+    id                  PK
+    program_id          FK -> Program
+    name                string — e.g. "Accumulation Block"
+    start_week          int
+    end_week             int
+
+DayTemplate
+    id                  PK
+    mesocycle_id        FK -> Mesocycle
+    name                string — e.g. "Push", "Pull", "Legs"
+    order               int — position within the mesocycle's rotation
+    rest_days_before    int, nullable — rest days before this session,
+                         relative to the previous one (see design notes)
+
+ExerciseSlot
+    id                  PK
+    day_template_id     FK -> DayTemplate
+    exercise_name       string
+    order               int — position within the day
+
+WeeklyPrescription
+    id                  PK
+    exercise_slot_id    FK -> ExerciseSlot
+    week_number         int
+    sets                int
+    reps                string — e.g. "8-10" (see design notes)
+    load                string — e.g. "70% 1RM" or an RPE value
+
+
+PLANNED (later phases)
+==========================
+
+Citation                              (Phase 4)
+    id                  PK
+    title               string
+    snippet             string
+    qdrant_point_id     string — links back to the source chunk in Qdrant
+
+PrescriptionCitation                  (Phase 4, junction table)
+    prescription_id     FK -> WeeklyPrescription
+    citation_id         FK -> Citation
+
+UserDocument                          (later — user-uploaded context)
+    id                  PK
+    user_id             FK -> User
+    title               string
+    uploaded_at         timestamp
+    (chunked/embedded content lives in Qdrant's "user_context"
+     collection, tagged with user_id + doc_id, not in Postgres)
+
+
+DESIGN DECISIONS
+====================
+
+Exercise selection is fixed per mesocycle; only the numbers change
+weekly.
+    A mesocycle's day/exercise structure (DayTemplate, ExerciseSlot) is
+    defined once and stays constant across every week of that block —
+    what changes week to week is just sets/reps/load. Modeling "week"
+    as a containing entity above "day" (Mesocycle -> Week -> Day ->
+    Exercise) would duplicate identical structural data across every
+    week just to attach different numbers to it. Instead, "week" only
+    enters the schema as a column (week_number) on the lowest-level
+    table, WeeklyPrescription — one row per (exercise, week) pair. This
+    also matches where citations need to attach: the research-backed
+    claim is about the numbers for a given week, not the one-time
+    choice of which exercises are in the program.
+
+Day timing is relative rest-days-before, not a fixed weekday.
+    Recovery time between sessions targeting the same muscle group is
+    a real variable in training-frequency research, so it needed to be
+    represented in the schema somehow. A DayTemplate.day_of_week field
+    would tie a program to one specific calendar (Mon/Wed/Fri only, for
+    example), even though what actually matters is the rest interval,
+    not the literal weekday. rest_days_before also correctly handles
+    irregular, deliberately-uneven splits (e.g. a 4-day powerlifting
+    split like Mon/Wed/Fri/Sat, a 2-2-1 rest pattern) without needing
+    a special case, and the same DayTemplate structure remains reusable
+    regardless of which real calendar day a given user starts on.
+
+reps and load are stored as strings in v1.
+    Real prescriptions are often expressed as ranges or non-numeric
+    values ("8-10" reps, "70% 1RM" or an RPE value for load) that don't
+    cleanly fit a single numeric column. Storing them as strings avoids
+    forcing an early, restrictive numeric schema. Open v2 improvement:
+    structured numeric ranges (min/max reps, a typed load
+    percentage/RPE field) once the generation and citation-attachment
+    logic is proven and the exact query needs are clearer.
+
+A user can own multiple, independent programs.
+    Program.user_id is a plain one-to-many foreign key with no
+    uniqueness constraint — a user can have a hypertrophy program and a
+    separate strength program active at the same time. No "one active
+    program" restriction exists anywhere in the schema.
+
+Citations attach to WeeklyPrescription rows, not to exercise selection.
+    The RAG-grounding differentiator of this project is auditable
+    numbers, not auditable exercise choice — so PrescriptionCitation
+    links Citation rows to WeeklyPrescription rows specifically, via a
+    many-to-many junction table (a single prescription can cite
+    multiple studies, and a study can support multiple prescriptions).
+
+User-uploaded context is isolated from the shared literature corpus.
+    UserDocument tracks metadata only; the actual chunked/embedded
+    content lives in a separate Qdrant collection ("user_context")
+    from the shared research corpus ("literature"), and every query
+    against it is filtered by user_id — a privacy boundary, not just a
+    relevance filter, since one user's uploaded injury history/notes
+    must never surface in another user's retrieval results.
