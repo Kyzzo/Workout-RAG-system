@@ -10,28 +10,25 @@ type Program = {
   mesocycles: unknown[];
 };
 
-export default function ProgramForm() {
+export default function ProgramViewer() {
   const { getToken } = useAuth();
-  const [goal, setGoal] = useState("");
+  const [programId, setProgramId] = useState("");
   const [program, setProgram] = useState<Program | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleLoad(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setSubmitting(true);
+    setProgram(null);
+    setLoading(true);
 
     try {
       const token = await getToken();
-
-      const res = await fetch("http://localhost:8000/programs/", {
-        method: "POST",
+      const res = await fetch(`http://localhost:8000/programs/${programId}`, {
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ goal }),
       });
 
       if (!res.ok) {
@@ -41,29 +38,28 @@ export default function ProgramForm() {
 
       setProgram(await res.json());
     } catch (err) {
-      console.error("submit error:", err);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   }
 
   return (
     <div className="flex flex-col items-center gap-6 p-8 w-full max-w-lg">
-      <form onSubmit={handleSubmit} className="flex gap-2 w-full">
+      <form onSubmit={handleLoad} className="flex gap-2 w-full">
         <input
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          placeholder="Program goal (e.g. hypertrophy)"
+          value={programId}
+          onChange={(e) => setProgramId(e.target.value)}
+          placeholder="Program id (e.g. 1)"
           className="border rounded px-3 py-2 flex-1"
           required
         />
         <button
           type="submit"
-          disabled={submitting}
+          disabled={loading}
           className="rounded bg-black text-white px-4 py-2 disabled:opacity-50 dark:bg-white dark:text-black"
         >
-          {submitting ? "Creating..." : "Create Program"}
+          {loading ? "Loading..." : "View Program"}
         </button>
       </form>
       {error && <p className="text-red-600">{error}</p>}
