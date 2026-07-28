@@ -2,6 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { useState } from "react";
+import { API_URL } from "./apiUrl";
 
 type Program = {
   id: number;
@@ -25,7 +26,7 @@ export default function ProgramForm() {
     try {
       const token = await getToken();
 
-      const res = await fetch("http://localhost:8000/programs/", {
+      const res = await fetch(`${API_URL}/programs/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
