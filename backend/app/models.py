@@ -1,13 +1,14 @@
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
+import datetime
 
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
     clerk_user_id: Mapped[str] = mapped_column(String, unique=True)
     programs: Mapped[list["Program"]] = relationship(back_populates="user")
-
+    documents: Mapped[list["UserDocument"]] = relationship(back_populates="user")
 
 class Program(Base):
     __tablename__ = "programs"
@@ -65,3 +66,13 @@ class WeeklyPrescription(Base):
     load: Mapped[str] = mapped_column(String)
 
     exercise_slot: Mapped["ExerciseSlot"] = relationship(back_populates="weekly_prescriptions")
+
+class UserDocument(Base):
+    __tablename__ = "user_documents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    title: Mapped[str] = mapped_column(String)
+    uploaded_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="documents")

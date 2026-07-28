@@ -53,3 +53,25 @@ uv run fastapi dev app/main.py
 ## Environment variables
 
 Copy `.env.example` to `.env` and fill in real values (DB connection string, OpenAI key, Clerk secret key, etc.) once those are added.
+
+## Ingesting research papers (RAG corpus)
+
+Three processes need to be running simultaneously, in separate terminals:
+
+```powershell
+# Terminal 1 — FastAPI app
+uv run fastapi dev app/main.py
+
+# Terminal 2 — Inngest dev server (requires Node.js/npm)
+npx inngest-cli@latest dev -u http://localhost:8000/api/inngest
+```
+
+Once both are up, ingest a PDF into the shared `literature` Qdrant collection:
+
+```powershell
+uv run python -m scripts.ingest_literature "<path-to-pdf>" <category> [source_id]
+```
+
+- `<category>` must be one of: `volume`, `frequency`, `intensity`, `progression`
+- `source_id` is optional (defaults to the PDF path) — worth naming something readable, since it's what shows up as the source in retrieval results
+- Check ingestion run status/logs at the Inngest dev server's dashboard: http://localhost:8288
