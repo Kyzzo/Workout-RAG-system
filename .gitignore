@@ -19,3 +19,6 @@ frontend/.env*.local
 
 # Notes
 notes/
+
+# Research paper PDFs (copyright, large binaries — not for the public repo)
+lifting_science_dataset/

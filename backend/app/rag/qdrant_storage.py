@@ -2,12 +2,21 @@ import os
 
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, Filter, PointStruct, VectorParams
+from qdrant_client.models import Distance, Filter, PayloadSchemaType, PointStruct, VectorParams
 
 load_dotenv()
 
 QDRANT_URL = os.environ["QDRANT_URL"]
 QDRANT_API_KEY = os.environ["QDRANT_API_KEY"]
+
+# Qdrant Cloud's strict mode refuses to filter on a payload field at all
+# unless it has an index — each collection needs the field its retrieval
+# filtering actually depends on: "literature" filters by research category,
+# "user_context" will filter by user_id (the privacy boundary).
+REQUIRED_PAYLOAD_INDEXES = {
+    "literature": "category",
+    "user_context": "user_id",
+}
 
 
 class QdrantStorage:
@@ -19,6 +28,13 @@ class QdrantStorage:
                 collection_name=self.collection,
                 vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
             )
+            index_field = REQUIRED_PAYLOAD_INDEXES.get(collection)
+            if index_field:
+                self.client.create_payload_index(
+                    collection_name=self.collection,
+                    field_name=index_field,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
 
     def upsert(self, ids: list[str], vectors: list[list[float]], payloads: list[dict]):
         points = [
