@@ -98,6 +98,42 @@ weekly.
     claim is about the numbers for a given week, not the one-time
     choice of which exercises are in the program.
 
+ExerciseSlot has a muscle_group field, added in Phase 3.
+    Sports-science volume research is framed around muscle groups
+    ("quadriceps," "chest"), not specific named exercises ("Barbell
+    Back Squat") — a RAG retrieval query built from exercise_name alone
+    matches the literature more weakly than one built from the actual
+    muscle group the exercise trains. Added as a plain additive
+    muscle_group column alongside exercise_name, not a schema
+    restructuring.
+
+    Known deferred problem this does NOT solve by itself: volume is
+    currently generated per ExerciseSlot independently. Two exercises
+    in the same week targeting the same muscle group (e.g. squats and
+    leg press, both quads) could each independently be told the full
+    research-backed volume range and collectively overshoot the real
+    weekly total for that muscle group — a generation-COHERENCE
+    problem, not a retrieval-quality one. The likely real fix belongs
+    in generation orchestration logic later (aggregate volume already
+    allocated across sibling ExerciseSlots sharing a muscle_group
+    before generating the next one), not a further schema change —
+    muscle_group is exactly the field that logic would need to look up
+    "which other slots share this muscle group," so adding it now is
+    prerequisite infrastructure for that fix either way. Deferred until
+    generation expands beyond a single isolated exercise slot (Phase 5+
+    territory) — not a blocker for Phase 3's single-field pilot, which
+    generates one number for one exercise slot in isolation.
+
+    Related open question: exercises that hit MULTIPLE muscle groups
+    (e.g. a deadlift training back, glutes, and hamstrings at once)
+    make "which muscle group's weekly budget does this set count
+    against" genuinely ambiguous — muscle_group is currently a single
+    value per ExerciseSlot, not a set of muscle groups with per-group
+    contribution weights. Possibly resolved by fractional set-counting
+    (e.g. a deadlift set counts as 0.5 toward hamstrings and 0.5 toward
+    back) once this becomes a real problem — same Phase 5+ territory as
+    the coherence problem above, not solved now.
+
 Day timing is relative rest-days-before, not a fixed weekday.
     Recovery time between sessions targeting the same muscle group is
     a real variable in training-frequency research, so it needed to be
