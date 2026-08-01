@@ -50,6 +50,7 @@ class ExerciseSlot(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     day_template_id: Mapped[int] = mapped_column(ForeignKey("day_templates.id"))
     exercise_name: Mapped[str] = mapped_column(String)
+    muscle_group: Mapped[str] = mapped_column(String)
     order: Mapped[int] = mapped_column()
 
     day_template: Mapped["DayTemplate"] = relationship(back_populates="exercise_slots")

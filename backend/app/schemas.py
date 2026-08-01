@@ -38,6 +38,7 @@ class ExerciseSlotOut(BaseModel):
     id: int
     day_template_id: int
     exercise_name: str
+    muscle_group: str
     order: int
     weekly_prescriptions: list["WeeklyPrescriptionOut"]
 
