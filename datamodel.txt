@@ -155,6 +155,36 @@ reps and load are stored as strings in v1.
     percentage/RPE field) once the generation and citation-attachment
     logic is proven and the exact query needs are clearer.
 
+Exercise swapping mid-mesocycle is unsupported in v1 (real problem,
+elaborated here for the first time — previously just a name-only
+reference with no actual reasoning behind it).
+    Because exercise selection is fixed per mesocycle (see above), one
+    ExerciseSlot row is shared across every week of that block — every
+    WeeklyPrescription for weeks 1 through N of a mesocycle all point
+    at the SAME ExerciseSlot. If a user wants to swap one exercise for
+    another partway through (injury, equipment unavailability,
+    preference, or an AI-assisted revision like "swap squats for leg
+    press, my knee's bothering me" — see the planned AI-assisted-edit
+    product feature), there's no clean way to represent it:
+      - Changing ExerciseSlot.exercise_name directly retroactively
+        rewrites history — every earlier week's WeeklyPrescription (and
+        any citations already attached to it) would now appear
+        associated with the NEW exercise, even though it was actually
+        generated/performed for the old one.
+      - Creating a whole new Mesocycle just to represent the swap is
+        heavyweight and breaks the "one mesocycle = one coherent
+        training block" semantic the schema is built around.
+    Open v2 question, not yet decided: likely needs either a validity
+    range on ExerciseSlot (e.g. start_week/end_week) or an explicit
+    "supersedes" pointer from an old ExerciseSlot to its replacement,
+    so history stays intact for already-generated/cited weeks while
+    future weeks pick up the new exercise. Deferred specifically
+    because it doesn't block anything through Phase 4 (citation
+    attachment doesn't require mid-block exercise changes to work),
+    and the right structure isn't obvious enough to guess at without
+    the AI-assisted-edit feature (Phase 6) actually being designed
+    first.
+
 A user can own multiple, independent programs.
     Program.user_id is a plain one-to-many foreign key with no
     uniqueness constraint — a user can have a hypertrophy program and a
