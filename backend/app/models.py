@@ -67,6 +67,7 @@ class WeeklyPrescription(Base):
     load: Mapped[str] = mapped_column(String)
 
     exercise_slot: Mapped["ExerciseSlot"] = relationship(back_populates="weekly_prescriptions")
+    prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="prescription")
 
 class UserDocument(Base):
     __tablename__ = "user_documents"
@@ -77,3 +78,24 @@ class UserDocument(Base):
     uploaded_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="documents")
+
+class Citation(Base):
+    __tablename__ = "citations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String)
+    snippet: Mapped[str] = mapped_column(String)
+    qdrant_point_id: Mapped[str] = mapped_column(String)
+
+    prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="citation")
+
+class PrescriptionCitation(Base):
+    __tablename__ = "prescription_citations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    prescription_id: Mapped[int] = mapped_column(ForeignKey("weekly_prescriptions.id"))
+    citation_id: Mapped[int] = mapped_column(ForeignKey("citations.id"))
+    verification_status: Mapped[str] = mapped_column(String)
+
+    prescription: Mapped["WeeklyPrescription"] = relationship(back_populates="prescription_citations")
+    citation: Mapped["Citation"] = relationship(back_populates="prescription_citations")

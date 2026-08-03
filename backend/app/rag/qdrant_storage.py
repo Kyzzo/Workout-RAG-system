@@ -52,14 +52,11 @@ class QdrantStorage:
             limit=top_k,
         ).points
 
-        contexts = []
-        sources = set()
+        chunks = []
         for r in results:
             payload = getattr(r, "payload", None) or {}
             text = payload.get("text", "")
-            source = payload.get("source", "")
             if text:
-                contexts.append(text)
-                sources.add(source)
+                chunks.append({"id": str(r.id), "text": text, "source": payload.get("source", "")})
 
-        return {"contexts": contexts, "sources": list(sources)}
+        return chunks

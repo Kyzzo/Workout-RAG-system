@@ -5,8 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import CLERK_ALLOWED_ORIGINS
 from .rag.ingest import ingest_literature_pdf, inngest_client
-from .routers import programs
-from .routers import generation
+from .routers import programs, generation
 
 app = FastAPI()
 

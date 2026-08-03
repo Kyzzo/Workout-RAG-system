@@ -71,6 +71,12 @@ Citation                              (Phase 4)
 PrescriptionCitation                  (Phase 4, junction table)
     prescription_id     FK -> WeeklyPrescription
     citation_id         FK -> Citation
+    verification_status string — verified / contradicted / unresolved,
+                         set by the citation verification pipeline (see
+                         notes/design_choices/citation_verification.txt).
+                         Only "verified" rows are surfaced to the user as
+                         supporting evidence; contradicted/unresolved rows
+                         are retained for QA but not displayed as if valid.
 
 UserDocument                          (later — user-uploaded context)
     id                  PK
