@@ -51,6 +51,7 @@ class WeeklyPrescriptionOut(BaseModel):
     sets: int
     reps: str
     load: str
+    grounding_note: str | None = None
 
     model_config = {"from_attributes": True}
 

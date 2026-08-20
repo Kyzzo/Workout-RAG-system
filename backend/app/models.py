@@ -65,6 +65,7 @@ class WeeklyPrescription(Base):
     sets: Mapped[int] = mapped_column()
     reps: Mapped[str] = mapped_column(String)
     load: Mapped[str] = mapped_column(String)
+    grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
 
     exercise_slot: Mapped["ExerciseSlot"] = relationship(back_populates="weekly_prescriptions")
     prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="prescription")
