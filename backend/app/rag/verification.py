@@ -54,29 +54,39 @@ class JudgeVerdict(pydantic.BaseModel):
 
 _JUDGE_SYSTEM_PROMPT = """You are verifying whether a specific research excerpt \
 supports a specific generated answer. You will be given a question, a generated \
-numeric answer, and one excerpt that was cited as a source for that answer. \
-Classify the relationship as exactly one of:
+answer (a number, a range, or a specific category/recommendation), and one \
+excerpt that was cited as a source for that answer. Classify the relationship \
+as exactly one of:
 
-- primary_support: the excerpt's own stated data (a range, a specific value) \
-directly and substantially accounts for the generated answer.
-- contextual_support: the excerpt does not directly state a range containing \
-the answer, but it discusses related factors (population, training \
-experience, fatigue/recovery considerations, progression logic, or similar) \
-that could reasonably explain how the answer was adjusted using this \
+- primary_support: the excerpt's own stated content directly and substantially \
+accounts for the generated answer - it states the same value/range, or makes \
+the same categorical recommendation.
+- contextual_support: the excerpt does not itself state or recommend the \
+answer, but it discusses related factors (population, training experience, \
+fatigue/recovery considerations, methodology, or similar) that could \
+reasonably explain how the answer was informed or adjusted using this \
 excerpt alongside other sources - a legitimate contributing influence, not \
-the literal numeric source.
+the literal source of the claim.
 - contradicted: the excerpt bears no real relationship to the answer at \
-all - a different exercise, a different population, or an unrelated claim. \
-This also includes excerpts that are merely bibliographic (author names, \
-paper titles, journal citations, DOIs) with no actual discussion, finding, \
-or reasoning in them - a topically-related paper TITLE in a reference list \
-is not itself content that could have informed the answer, so classify \
-these as contradicted even if the titles look relevant.
+all - a different exercise, a different population, an unrelated claim, or \
+a different recommendation than the one given (e.g. the excerpt recommends \
+the opposite category). This also includes reference-list excerpts: text \
+made up of numbered citation entries (author names, a paper title, a \
+journal name, a year, a DOI - repeated for multiple entries in a list, \
+often looking like "42. Smith J, Lee K. Some Paper Title. J Something. \
+(2020) 12:34-56. doi: 10.xxxx/..."). A block of citation entries is a \
+bibliography, not a discussion, NO MATTER how many entries it has or how \
+closely individual entry TITLES echo the topic - listing that other papers \
+exist on a topic is not the same as discussing what they found. If the \
+excerpt is structurally a reference list (look for the repeated \
+author/title/journal/year/DOI pattern), classify it as contradicted even \
+if it takes up the whole excerpt and even if several entry titles look \
+highly relevant.
 
 Give brief reasoning for your classification."""
 
 
-def judge_citation(query: str, value: int, chunk_text: str) -> JudgeVerdict:
+def judge_citation(query: str, value: int | str, chunk_text: str) -> JudgeVerdict:
     completion = client.chat.completions.parse(
         model="gpt-4o-mini",
         temperature=0,
@@ -96,13 +106,25 @@ def judge_citation(query: str, value: int, chunk_text: str) -> JudgeVerdict:
     return message.parsed
 
 
-def verify_citation(query: str, value: int, chunk_text: str, grounding: str) -> str:
+def verify_citation(
+    query: str, value: int | str, chunk_text: str, grounding: str, use_mechanical_check: bool = True
+) -> str:
     # Mechanical fast-path-accept only fires on a full self-report - per
     # citation_verification.txt section 4 trigger (b), a "blended" or
     # "general_knowledge" self-report escalates to the judge even if the
     # raw numbers would otherwise pass, since the model's own admission
     # casts doubt on whether this citation is really the primary source.
-    if grounding == "fully_grounded" and check_point_in_range(value, chunk_text):
+    #
+    # use_mechanical_check=False for load specifically: it's stored as a
+    # string ("70% 1RM" or an RPE value), and range-containment has no
+    # reliable way to compare across those two unit systems - rather than
+    # guess, load always escalates straight to the judge
+    # (citation_verification.txt section 3).
+    if (
+        use_mechanical_check
+        and grounding == "fully_grounded"
+        and check_point_in_range(value, chunk_text)
+    ):
         return "primary_support"
     try:
         return judge_citation(query, value, chunk_text).outcome

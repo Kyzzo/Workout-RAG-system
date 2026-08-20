@@ -18,5 +18,6 @@ app.add_middleware(
 
 app.include_router(programs.router)
 app.include_router(generation.router)
+app.include_router(generation.mesocycle_router)
 
 inngest.fast_api.serve(app, inngest_client, [ingest_literature_pdf])

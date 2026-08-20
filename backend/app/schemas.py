@@ -56,3 +56,41 @@ class WeeklyPrescriptionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class GenerateFrequencyRequest(BaseModel):
+    muscle_group: str
+
+
+class MuscleGroupFrequencyOut(BaseModel):
+    id: int
+    mesocycle_id: int
+    muscle_group: str
+    frequency: int
+    grounding_note: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class GenerateFrequencyResponse(BaseModel):
+    frequency: MuscleGroupFrequencyOut
+    days_added: list["DayTemplateOut"]
+
+
+class GenerateProgressionRequest(BaseModel):
+    muscle_group: str
+
+
+class ProgressionSchemeOut(BaseModel):
+    id: int
+    mesocycle_id: int
+    muscle_group: str
+    scheme: str
+    grounding_note: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class GenerateProgressionResponse(BaseModel):
+    scheme: ProgressionSchemeOut
+    updated_prescriptions: list["WeeklyPrescriptionOut"]
+
+

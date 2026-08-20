@@ -31,6 +31,8 @@ class Mesocycle(Base):
 
     program: Mapped["Program"] = relationship(back_populates="mesocycles")
     day_templates: Mapped[list["DayTemplate"]] = relationship(back_populates="mesocycle")
+    muscle_group_frequencies: Mapped[list["MuscleGroupFrequency"]] = relationship(back_populates="mesocycle")
+    progression_schemes: Mapped[list["ProgressionScheme"]] = relationship(back_populates="mesocycle")
 
 class DayTemplate(Base):
     __tablename__ = "day_templates"
@@ -89,6 +91,8 @@ class Citation(Base):
     qdrant_point_id: Mapped[str] = mapped_column(String)
 
     prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="citation")
+    frequency_citations: Mapped[list["FrequencyCitation"]] = relationship(back_populates="citation")
+    progression_scheme_citations: Mapped[list["ProgressionSchemeCitation"]] = relationship(back_populates="citation")
 
 class PrescriptionCitation(Base):
     __tablename__ = "prescription_citations"
@@ -100,3 +104,49 @@ class PrescriptionCitation(Base):
 
     prescription: Mapped["WeeklyPrescription"] = relationship(back_populates="prescription_citations")
     citation: Mapped["Citation"] = relationship(back_populates="prescription_citations")
+
+class MuscleGroupFrequency(Base):
+    __tablename__ = "muscle_group_frequencies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mesocycle_id: Mapped[int] = mapped_column(ForeignKey("mesocycles.id"))
+    muscle_group: Mapped[str] = mapped_column(String)
+    frequency: Mapped[int] = mapped_column()
+    grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    mesocycle: Mapped["Mesocycle"] = relationship(back_populates="muscle_group_frequencies")
+    frequency_citations: Mapped[list["FrequencyCitation"]] = relationship(back_populates="frequency")
+
+class FrequencyCitation(Base):
+    __tablename__ = "frequency_citations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    frequency_id: Mapped[int] = mapped_column(ForeignKey("muscle_group_frequencies.id"))
+    citation_id: Mapped[int] = mapped_column(ForeignKey("citations.id"))
+    verification_status: Mapped[str] = mapped_column(String)
+
+    frequency: Mapped["MuscleGroupFrequency"] = relationship(back_populates="frequency_citations")
+    citation: Mapped["Citation"] = relationship(back_populates="frequency_citations")
+
+class ProgressionScheme(Base):
+    __tablename__ = "progression_schemes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mesocycle_id: Mapped[int] = mapped_column(ForeignKey("mesocycles.id"))
+    muscle_group: Mapped[str] = mapped_column(String)
+    scheme: Mapped[str] = mapped_column(String)  # "linear" or "undulating"
+    grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    mesocycle: Mapped["Mesocycle"] = relationship(back_populates="progression_schemes")
+    progression_scheme_citations: Mapped[list["ProgressionSchemeCitation"]] = relationship(back_populates="scheme")
+
+class ProgressionSchemeCitation(Base):
+    __tablename__ = "progression_scheme_citations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scheme_id: Mapped[int] = mapped_column(ForeignKey("progression_schemes.id"))
+    citation_id: Mapped[int] = mapped_column(ForeignKey("citations.id"))
+    verification_status: Mapped[str] = mapped_column(String)
+
+    scheme: Mapped["ProgressionScheme"] = relationship(back_populates="progression_scheme_citations")
+    citation: Mapped["Citation"] = relationship(back_populates="progression_scheme_citations")
