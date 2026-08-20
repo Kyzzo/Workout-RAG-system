@@ -1,0 +1,60 @@
+name: Backend tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: workout_tracker_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/workout_tracker_test
+      # Not real, and not needed for real network calls - every test mocks
+      # the functions that would actually use these (generate_volume_sets,
+      # verify_citation). They only need to exist so the app's module-level
+      # `os.environ[...]` reads succeed at import time.
+      CLERK_PUBLISHABLE_KEY: pk_test_cGxhY2Vob2xkZXIuY2xlcmsuYWNjb3VudHMuZGV2JA==
+      CLERK_ALLOWED_ORIGINS: http://localhost:3000
+      QDRANT_URL: http://localhost:6333
+      QDRANT_API_KEY: placeholder
+      OPENAI_API_KEY: placeholder
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Apply database migrations
+        run: uv run alembic upgrade head
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
