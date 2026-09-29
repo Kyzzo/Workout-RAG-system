@@ -57,26 +57,77 @@ WeeklyPrescription
     sets                int
     reps                string — e.g. "8-10" (see design notes)
     load                string — e.g. "70% 1RM" or an RPE value
+    grounding_note      string, nullable — set once at generation time
+                         when nothing verified the generated value (see
+                         notes/design_choices/citation_verification.txt
+                         section 7); null when a value was fully
+                         supported or hasn't been generated yet
 
 
-PLANNED (later phases)
+IMPLEMENTED (Phase 4/5)
 ==========================
 
-Citation                              (Phase 4)
+Citation
     id                  PK
     title               string
     snippet             string
     qdrant_point_id     string — links back to the source chunk in Qdrant
 
-PrescriptionCitation                  (Phase 4, junction table)
+PrescriptionCitation                  (junction table)
     prescription_id     FK -> WeeklyPrescription
     citation_id         FK -> Citation
-    verification_status string — verified / contradicted / unresolved,
-                         set by the citation verification pipeline (see
+    verification_status string — primary_support / contextual_support /
+                         contradicted / unresolved, set by the citation
+                         verification pipeline (see
                          notes/design_choices/citation_verification.txt).
-                         Only "verified" rows are surfaced to the user as
-                         supporting evidence; contradicted/unresolved rows
-                         are retained for QA but not displayed as if valid.
+                         Only primary_support/contextual_support rows are
+                         surfaced to the user as supporting evidence;
+                         contradicted/unresolved rows are retained for QA
+                         but not displayed as if valid.
+
+MuscleGroupFrequency                  (Phase 5)
+    id                  PK
+    mesocycle_id        FK -> Mesocycle
+    muscle_group        string
+    frequency           int — recommended sessions/week for this muscle
+                         group within this mesocycle
+    grounding_note       string, nullable — same convention as
+                         WeeklyPrescription.grounding_note
+
+FrequencyCitation                     (Phase 5, junction table)
+    frequency_id        FK -> MuscleGroupFrequency
+    citation_id          FK -> Citation
+    verification_status  string — same convention as
+                         PrescriptionCitation.verification_status
+
+ProgressionScheme                     (Phase 5)
+    id                  PK
+    mesocycle_id        FK -> Mesocycle
+    muscle_group        string
+    scheme              string — "linear" or "undulating"
+    grounding_note       string, nullable — same convention as
+                         WeeklyPrescription.grounding_note
+
+ProgressionSchemeCitation             (Phase 5, junction table)
+    scheme_id           FK -> ProgressionScheme
+    citation_id          FK -> Citation
+    verification_status  string — same convention as
+                         PrescriptionCitation.verification_status
+
+    MuscleGroupFrequency and ProgressionScheme are scoped to
+    Mesocycle+muscle_group rather than to a single WeeklyPrescription,
+    because neither value is a property of one exercise/week — frequency
+    describes how many training days per week a muscle group gets across
+    the whole block, and a progression scheme describes which
+    periodization model the whole block uses. Full reasoning, including
+    the split between the cited classification and its separate,
+    non-cited mechanical consequence (day-cloning for frequency, a
+    weekly load-increment formula for progression): notes/design_choices/
+    mesocycle_scoped_generation.txt.
+
+
+PLANNED (later phases)
+==========================
 
 UserDocument                          (later — user-uploaded context)
     id                  PK
@@ -125,10 +176,20 @@ ExerciseSlot has a muscle_group field, added in Phase 3.
     before generating the next one), not a further schema change —
     muscle_group is exactly the field that logic would need to look up
     "which other slots share this muscle group," so adding it now is
-    prerequisite infrastructure for that fix either way. Deferred until
-    generation expands beyond a single isolated exercise slot (Phase 5+
-    territory) — not a blocker for Phase 3's single-field pilot, which
-    generates one number for one exercise slot in isolation.
+    prerequisite infrastructure for that fix either way. Partially
+    addressed in Phase 6: volume generation for one ExerciseSlot now
+    looks up sibling ExerciseSlots in the same Mesocycle sharing its
+    muscle_group, and passes their already-generated set counts for
+    that week to the model as context, with an instruction to treat
+    the research range as a shared budget for the muscle group rather
+    than a fresh allowance per exercise. Siblings still at the
+    placeholder state (sets=0, empty load) are skipped rather than
+    reported as zero. This used the existing muscle_group column
+    exactly as anticipated above and needed no schema change. It is
+    soft guidance, not an enforced split: nothing validates the
+    combined total afterward, and the outcome depends on generation
+    order (the first slot generated sees no siblings). A hard up-front
+    allocation across sibling slots is still open.
 
     Related open question: exercises that hit MULTIPLE muscle groups
     (e.g. a deadlift training back, glutes, and hamstrings at once)
@@ -137,8 +198,8 @@ ExerciseSlot has a muscle_group field, added in Phase 3.
     value per ExerciseSlot, not a set of muscle groups with per-group
     contribution weights. Possibly resolved by fractional set-counting
     (e.g. a deadlift set counts as 0.5 toward hamstrings and 0.5 toward
-    back) once this becomes a real problem — same Phase 5+ territory as
-    the coherence problem above, not solved now.
+    back) once this becomes a real problem — same still-open territory
+    as the coherence problem above, not solved now.
 
 Day timing is relative rest-days-before, not a fixed weekday.
     Recovery time between sessions targeting the same muscle group is
@@ -203,6 +264,14 @@ Citations attach to WeeklyPrescription rows, not to exercise selection.
     links Citation rows to WeeklyPrescription rows specifically, via a
     many-to-many junction table (a single prescription can cite
     multiple studies, and a study can support multiple prescriptions).
+
+    Extended in Phase 5: not every citable claim is a WeeklyPrescription
+    field (frequency and progression scheme are properties of a whole
+    Mesocycle+muscle_group, not one exercise/week row), so
+    FrequencyCitation and ProgressionSchemeCitation follow the exact
+    same junction-table shape, just pointed at MuscleGroupFrequency/
+    ProgressionScheme instead of WeeklyPrescription. Full reasoning:
+    notes/design_choices/mesocycle_scoped_generation.txt.
 
 User-uploaded context is isolated from the shared literature corpus.
     UserDocument tracks metadata only; the actual chunked/embedded

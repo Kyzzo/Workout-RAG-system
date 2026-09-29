@@ -3,33 +3,32 @@
 import { useAuth } from "@clerk/nextjs";
 import { useState } from "react";
 import { API_URL } from "./apiUrl";
+import ChatWindow from "./ChatWindow";
+import ProgramTree from "./ProgramTree";
+import type { Program, WeeklyPrescription } from "./types";
 
-type Program = {
-  id: number;
-  user_id: number;
-  goal: string;
-  mesocycles: unknown[];
-};
-
-export default function ProgramViewer() {
+export default function ProgramWorkspace() {
   const { getToken } = useAuth();
   const [programId, setProgramId] = useState("");
   const [program, setProgram] = useState<Program | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const [anchoredFieldId, setAnchoredFieldId] = useState<number | null>(null);
+  const [anchorLabel, setAnchorLabel] = useState<string | null>(null);
+
   async function handleLoad(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setProgram(null);
+    setAnchoredFieldId(null);
+    setAnchorLabel(null);
     setLoading(true);
 
     try {
       const token = await getToken();
       const res = await fetch(`${API_URL}/programs/${programId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!res.ok) {
@@ -43,6 +42,11 @@ export default function ProgramViewer() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleAskAbout(prescription: WeeklyPrescription, label: string) {
+    setAnchoredFieldId(prescription.id);
+    setAnchorLabel(label);
   }
 
   return (
@@ -65,10 +69,17 @@ export default function ProgramViewer() {
       </form>
       {error && <p className="text-red-600">{error}</p>}
       {program && (
-        <pre className="bg-zinc-100 text-zinc-900 p-4 rounded text-sm w-full overflow-auto">
-          {JSON.stringify(program, null, 2)}
-        </pre>
+        <ProgramTree program={program} anchoredFieldId={anchoredFieldId} onAskAbout={handleAskAbout} />
       )}
+
+      <ChatWindow
+        fieldId={anchoredFieldId}
+        anchorLabel={anchorLabel}
+        onClearAnchor={() => {
+          setAnchoredFieldId(null);
+          setAnchorLabel(null);
+        }}
+      />
     </div>
   );
 }

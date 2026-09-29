@@ -1,4 +1,6 @@
 # Pydantic request/response schemas
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -92,5 +94,27 @@ class ProgressionSchemeOut(BaseModel):
 class GenerateProgressionResponse(BaseModel):
     scheme: ProgressionSchemeOut
     updated_prescriptions: list["WeeklyPrescriptionOut"]
+
+
+class ChatMessageRequest(BaseModel):
+    message: str
+    # Set when the chat was opened FROM a specific WeeklyPrescription (e.g.
+    # a "why is this 5-8 reps" affordance in the UI) - structural context,
+    # trusted over anything the router model would otherwise have to guess.
+    # See notes/phase6/phase6_chat_routing_concepts.txt section 2.
+    field_id: int | None = None
+
+
+class ChatCitationOut(BaseModel):
+    title: str
+    snippet: str
+
+
+class ChatResponse(BaseModel):
+    mode: Literal["adjust_prescription", "discuss_prescription", "answer_general_question"]
+    prescription: WeeklyPrescriptionOut | None = None
+    answer: str | None = None
+    citations: list[ChatCitationOut] = []
+    grounding_note: str | None = None
 
 

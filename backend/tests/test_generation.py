@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from app import models, schemas
 from app.routers.generation import (
+    _sibling_volume_summary,
     generate_frequency_endpoint,
     generate_intensity,
     generate_progression_endpoint,
@@ -186,6 +187,90 @@ def test_generate_intensity_success(mock_generate, mock_verify, db_session, owne
     )
     assert len(rows) == 1
     assert rows[0].verification_status == "primary_support"
+
+
+# --- sibling-exercise volume context: the cross-exercise volume-coherence
+# fix (datamodel.txt) - generation for one exercise now gets told what's
+# already prescribed for OTHER exercises sharing its muscle_group this
+# week, so it doesn't independently re-allocate the full research range.
+
+def _add_sibling_slot(db_session, day_template, muscle_group, exercise_name, week_number, sets, load=""):
+    slot = models.ExerciseSlot(
+        day_template_id=day_template.id, exercise_name=exercise_name, muscle_group=muscle_group, order=2,
+    )
+    db_session.add(slot)
+    db_session.flush()
+    db_session.add(models.WeeklyPrescription(
+        exercise_slot_id=slot.id, week_number=week_number, sets=sets, reps="8-10", load=load,
+    ))
+    db_session.flush()
+    return slot
+
+
+def test_sibling_volume_summary_includes_same_muscle_group_same_week(db_session, owner_and_prescription):
+    _, prescription = owner_and_prescription
+    day_template = prescription.exercise_slot.day_template
+    _add_sibling_slot(db_session, day_template, "chest", "Incline Dumbbell Press", week_number=1, sets=3)
+
+    summary = _sibling_volume_summary(prescription, db_session)
+
+    assert summary == "- Incline Dumbbell Press: 3 sets"
+
+
+def test_sibling_volume_summary_excludes_other_muscle_groups_and_weeks(db_session, owner_and_prescription):
+    _, prescription = owner_and_prescription  # chest, week 1
+    day_template = prescription.exercise_slot.day_template
+    _add_sibling_slot(db_session, day_template, "back", "Barbell Row", week_number=1, sets=4)  # different muscle group
+    _add_sibling_slot(db_session, day_template, "chest", "Incline Dumbbell Press", week_number=2, sets=3)  # different week
+
+    summary = _sibling_volume_summary(prescription, db_session)
+
+    assert summary is None
+
+
+def test_sibling_volume_summary_skips_ungenerated_siblings(db_session, owner_and_prescription):
+    _, prescription = owner_and_prescription
+    day_template = prescription.exercise_slot.day_template
+    # sets=0, load="" is the honest "not generated yet" placeholder from
+    # day-cloning/manual creation, not a real allocation - reporting "0
+    # sets" would misleadingly suggest that budget is confirmed free.
+    _add_sibling_slot(db_session, day_template, "chest", "Incline Dumbbell Press", week_number=1, sets=0, load="")
+
+    summary = _sibling_volume_summary(prescription, db_session)
+
+    assert summary is None
+
+
+@patch("app.routers.generation.verify_citation")
+@patch("app.routers.generation.generate_volume_sets")
+def test_generate_volume_passes_sibling_context(mock_generate, mock_verify, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    day_template = prescription.exercise_slot.day_template
+    _add_sibling_slot(db_session, day_template, "chest", "Incline Dumbbell Press", week_number=1, sets=3)
+    mock_generate.return_value = (_fake_result(8, [], "general_knowledge"), [])
+    mock_verify.return_value = "unresolved"
+
+    generate_volume(prescription_id=prescription.id, db=db_session, current_user=user)
+
+    _, kwargs = mock_generate.call_args
+    assert kwargs["sibling_context"] == "- Incline Dumbbell Press: 3 sets"
+
+
+@patch("app.routers.generation.verify_citation")
+@patch("app.routers.generation.generate_intensity_load")
+def test_generate_intensity_never_receives_sibling_context(mock_generate, mock_verify, db_session, owner_and_prescription):
+    # Deliberately scoped to volume only - load doesn't have volume's
+    # additive shared-weekly-budget problem.
+    user, prescription = owner_and_prescription
+    day_template = prescription.exercise_slot.day_template
+    _add_sibling_slot(db_session, day_template, "chest", "Incline Dumbbell Press", week_number=1, sets=3)
+    mock_generate.return_value = (_fake_intensity_result("70% 1RM", [], "general_knowledge"), [])
+    mock_verify.return_value = "unresolved"
+
+    generate_intensity(prescription_id=prescription.id, db=db_session, current_user=user)
+
+    _, kwargs = mock_generate.call_args
+    assert kwargs["sibling_context"] is None
 
 
 @patch("app.routers.generation.verify_citation")

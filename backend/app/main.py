@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import CLERK_ALLOWED_ORIGINS
 from .rag.ingest import ingest_literature_pdf, inngest_client
-from .routers import programs, generation
+from .routers import chat, generation, programs
 
 app = FastAPI()
 
@@ -19,5 +19,6 @@ app.add_middleware(
 app.include_router(programs.router)
 app.include_router(generation.router)
 app.include_router(generation.mesocycle_router)
+app.include_router(chat.router)
 
 inngest.fast_api.serve(app, inngest_client, [ingest_literature_pdf])

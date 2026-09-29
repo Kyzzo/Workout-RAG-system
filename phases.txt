@@ -10,8 +10,8 @@ Schema finalized in design.txt. Revisit only for v2 questions (structured
 reps/load, exercise swapping mid-mesocycle).
 
 
-PHASE 1 — Backend skeleton + CRUD (no AI yet)  <- CURRENT PHASE
-------------------------------------------------------------------
+PHASE 1 — Backend skeleton + CRUD (no AI yet) (DONE)
+------------------------------------------------------
 Goal: a program can be created, stored, and rendered — zero AI involved.
 
 1. uv          — init the FastAPI project (backend/), add core deps
@@ -35,8 +35,8 @@ in real Clerk auth after — don't debug the ORM and JWT verification
 simultaneously.
 
 
-PHASE 2 — Corpus ingestion
-----------------------------
+PHASE 2 — Corpus ingestion (DONE)
+-----------------------------------
 Reuse the existing RAG pipeline, point it at a new corpus.
 
 1. Qdrant    — two collections: "literature" and "user_context"
@@ -50,8 +50,8 @@ Reuse the existing RAG pipeline, point it at a new corpus.
                Qdrant) even though upload UI comes later
 
 
-PHASE 3 — Single-category retrieval + structured generation
-----------------------------------------------------------------
+PHASE 3 — Single-category retrieval + structured generation (DONE)
+-----------------------------------------------------------------------
 Prove the hardest mechanic end-to-end on ONE category before generalizing.
 
 1. Pick one category — volume first (most literature, clearest numbers)
@@ -62,8 +62,8 @@ Prove the hardest mechanic end-to-end on ONE category before generalizing.
    WeeklyPrescription row
 
 
-PHASE 4 — Citation attachment
---------------------------------
+PHASE 4 — Citation attachment (DONE except step 3)
+-----------------------------------------------------
 The core differentiator — do this once Phase 3 works for one category.
 
 1. Track which retrieved chunk(s) the model actually used per generated
@@ -71,31 +71,37 @@ The core differentiator — do this once Phase 3 works for one category.
    output schema that asks the model to name source chunk IDs alongside
    each value)
 2. Populate Citation + PrescriptionCitation from that
-3. Surface citations in the UI next to each number
+3. Surface citations in the UI next to each number — NOT DONE: the
+   program view shows values and grounding notes only; citations are
+   currently reachable only through chat's discuss mode
 
 
-PHASE 5 — Expand generation to all categories
--------------------------------------------------
+PHASE 5 — Expand generation to all categories (DONE)
+--------------------------------------------------------
 Repeat Phase 3+4's pattern for frequency, intensity/load, progression.
 Plumbing is proven by now — mostly volume of work, not new design.
 
 
-PHASE 6 — Chat interface + remaining product surface
------------------------------------------------------------
+PHASE 6 — Chat interface + remaining product surface  <- CURRENT PHASE
+-------------------------------------------------------------------------
 1. Self-guided chat UI wrapping the same retrieval/generation machinery
-   (Phase 3-5 endpoints become chat-callable)
+   (Phase 3-5 endpoints become chat-callable) — DONE: POST /chat/message
+   routes to adjust / discuss / general-question; chat can be anchored to
+   a prescription from the program view. Stateless per message for now.
 2. Preset/suggested prompts (frontend-only convenience, submits into the
-   same chat)
+   same chat) — not started
 3. Program revision mode (AI-assisted edit) — same machinery, scoped to
-   existing rows
+   existing rows — PARTIAL: sets/load can be regenerated from chat, but
+   the requested direction/target isn't used yet (regenerates, doesn't
+   adjust)
 4. Conversational Q&A mode — retrieval + citation, no structured-output
-   step
+   step — DONE, with claim-level citations verified per claim
 5. User document upload -> user_context collection, user_id-filtered
-   retrieval
+   retrieval — not started
 
 
-PHASE 7 — Deployment
------------------------
+PHASE 7 — Deployment (DONE early, right after Phase 1)
+---------------------------------------------------------
 Only once there's something worth deploying:
     Vercel          -> frontend
     Railway/Render  -> FastAPI + Postgres

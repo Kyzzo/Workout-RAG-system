@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..auth import get_current_user
 from ..database import get_db
+from ..ownership import get_owned_prescription
 
 router = APIRouter(prefix="/weekly-prescriptions", tags=["generation"])
 mesocycle_router = APIRouter(prefix="/mesocycles", tags=["generation"])
@@ -49,28 +50,51 @@ def _get_or_create_citation(db: Session, chunk: dict) -> models.Citation:
     return citation
 
 
-def _get_owned_prescription(prescription_id: int, db: Session, current_user: models.User) -> models.WeeklyPrescription:
-    prescription = (
-        db.query(models.WeeklyPrescription)
-        .options(
-            joinedload(models.WeeklyPrescription.exercise_slot)
-            .joinedload(models.ExerciseSlot.day_template)
-            .joinedload(models.DayTemplate.mesocycle)
-            .joinedload(models.Mesocycle.program)
+def _sibling_volume_summary(prescription: models.WeeklyPrescription, db: Session) -> str | None:
+    # The cross-exercise volume-coherence problem (datamodel.txt, "ExerciseSlot
+    # has a muscle_group field"): two exercises sharing a muscle_group in the
+    # same week could each independently be told the full research-backed
+    # range and collectively overshoot the real weekly total. This doesn't
+    # fix that by enforcing a hard split - it just tells the model what's
+    # already prescribed elsewhere so it can reason about the shared budget,
+    # the same way a human coach making this one call by hand would already
+    # know what the rest of the week looks like.
+    slot = prescription.exercise_slot
+    mesocycle = slot.day_template.mesocycle
+
+    sibling_slots = (
+        db.query(models.ExerciseSlot)
+        .join(models.DayTemplate)
+        .filter(
+            models.DayTemplate.mesocycle_id == mesocycle.id,
+            models.ExerciseSlot.muscle_group == slot.muscle_group,
+            models.ExerciseSlot.id != slot.id,
         )
-        .filter(models.WeeklyPrescription.id == prescription_id)
-        .first()
+        .all()
     )
-    if (
-        prescription is None
-        or prescription.exercise_slot.day_template.mesocycle.program.user_id != current_user.id
-    ):
-        raise HTTPException(status_code=404, detail="Weekly prescription not found")
-    return prescription
+
+    lines = []
+    for sibling in sibling_slots:
+        sibling_wp = next(
+            (wp for wp in sibling.weekly_prescriptions if wp.week_number == prescription.week_number),
+            None,
+        )
+        # Skip a sibling with nothing generated yet (sets=0, load="" is the
+        # honest placeholder state from day-cloning/manual creation, not a
+        # real allocation) - reporting it as "0 sets" would misleadingly
+        # suggest the budget is fully free rather than simply unknown yet.
+        if sibling_wp is None or (sibling_wp.sets == 0 and not sibling_wp.load):
+            continue
+        lines.append(f"- {sibling.exercise_name}: {sibling_wp.sets} sets")
+
+    return "\n".join(lines) if lines else None
 
 
-def _attempt_generation(generate_fn, query_fn, field_name: str, muscle_group: str, goal: str, use_mechanical_check: bool):
-    result, chunks = generate_fn(muscle_group, goal)
+def _attempt_generation(
+    generate_fn, query_fn, field_name: str, muscle_group: str, goal: str, use_mechanical_check: bool,
+    sibling_context: str | None = None,
+):
+    result, chunks = generate_fn(muscle_group, goal, sibling_context=sibling_context)
     query = query_fn(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
     value = getattr(result, field_name)
@@ -96,9 +120,12 @@ def _generate_and_persist(
 ) -> models.WeeklyPrescription:
     muscle_group = prescription.exercise_slot.muscle_group
     goal = prescription.exercise_slot.day_template.mesocycle.program.goal
+    # Scoped to volume only - load doesn't have a shared weekly budget the
+    # way sets do, see generate_intensity_load's own note on this.
+    sibling_context = _sibling_volume_summary(prescription, db) if field_name == "sets" else None
 
     result, verified, any_supported = _attempt_generation(
-        generate_fn, query_fn, field_name, muscle_group, goal, use_mechanical_check
+        generate_fn, query_fn, field_name, muscle_group, goal, use_mechanical_check, sibling_context
     )
 
     # A single bounded retry (never a loop) is worth attempting when the
@@ -110,7 +137,7 @@ def _generate_and_persist(
     # that (citation_verification.txt section 7).
     if not any_supported and result.grounding != "general_knowledge":
         result, verified, any_supported = _attempt_generation(
-            generate_fn, query_fn, field_name, muscle_group, goal, use_mechanical_check
+            generate_fn, query_fn, field_name, muscle_group, goal, use_mechanical_check, sibling_context
         )
 
     setattr(prescription, field_name, getattr(result, field_name))
@@ -153,7 +180,7 @@ def generate_volume(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    prescription = _get_owned_prescription(prescription_id, db, current_user)
+    prescription = get_owned_prescription(prescription_id, db, current_user)
     return _generate_and_persist(
         prescription, db, generate_volume_sets, build_volume_query, "sets", use_mechanical_check=True
     )
@@ -165,7 +192,7 @@ def generate_intensity(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    prescription = _get_owned_prescription(prescription_id, db, current_user)
+    prescription = get_owned_prescription(prescription_id, db, current_user)
     # use_mechanical_check=False for load: it's a string ("70% 1RM" or an
     # RPE value), and range-containment has no reliable way to compare
     # across those two unit systems - load always escalates to the judge
