@@ -54,6 +54,18 @@ this becomes a real problem, same territory as the coherence issue above.
 
 ## Retrieval and generation
 
+**Exercise selection is AI-chosen and uncited.** The program wizard has a
+model pick exercises for each day of the chosen split. Each pick is
+constrained to the muscle groups that day targets, and every target must be
+covered, but no research backs which exercises were chosen — the corpus has
+no exercise-selection literature, and citations attach to the generated
+numbers, not to the program's structure. Exercise ordering (compound before
+isolation) is requested but not enforced, and load generation still
+produces a percentage-of-max value for bodyweight or isometric exercises
+where that doesn't really apply. Grounding selection would need
+exercise-selection research in the corpus and an exercise-level citation
+target in the schema.
+
 **Training goal isn't a hard filter on retrieved content, only a soft
 semantic influence.** Research category (volume, frequency, intensity,
 progression) is an exact-match filter on retrieval. Training goal

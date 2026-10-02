@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import ChatWindow from "./ChatWindow";
 import ProgramForm from "./ProgramForm";
 import ProgramTree from "./ProgramTree";
+import ProgramWizard from "./ProgramWizard";
 import type { Program, ProgramSummary, WeeklyPrescription } from "./types";
 import { useApi } from "./useApi";
 
@@ -13,6 +14,8 @@ export default function ProgramWorkspace() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [program, setProgram] = useState<Program | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [wizardRunning, setWizardRunning] = useState(false);
 
   const [anchoredFieldId, setAnchoredFieldId] = useState<number | null>(null);
   const [anchorLabel, setAnchorLabel] = useState<string | null>(null);
@@ -41,16 +44,11 @@ export default function ProgramWorkspace() {
 
   // Refetches the whole nested program after any structural change or
   // generation call, rather than patching nested state by hand - the
-  // backend's response is the single source of truth for what changed
-  // (e.g. frequency generation can add whole days).
-  const reloadProgram = useCallback(async () => {
-    if (selectedId === null) return;
-    try {
-      setProgram(await api<Program>(`/programs/${selectedId}`));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [api, selectedId]);
+  // backend's response is the single source of truth for what changed.
+  // A counter rather than a fetch closure, so a long-running caller (the
+  // wizard) always refreshes whichever program is selected NOW, not the one
+  // selected when it started.
+  const reloadProgram = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +64,7 @@ export default function ProgramWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [api, selectedId]);
+  }, [api, selectedId, refreshKey]);
 
   function handleSelect(id: number) {
     setError(null);
@@ -87,6 +85,7 @@ export default function ProgramWorkspace() {
 
   return (
     <div className="flex flex-col items-center gap-6 p-8 w-full max-w-3xl">
+      <ProgramWizard onCreated={handleCreated} onRefresh={reloadProgram} onRunningChange={setWizardRunning} />
       <ProgramForm onCreated={handleCreated} />
 
       {programs.length > 0 && (
@@ -116,6 +115,7 @@ export default function ProgramWorkspace() {
           anchoredFieldId={anchoredFieldId}
           onAskAbout={handleAskAbout}
           onChanged={reloadProgram}
+          externalBusy={wizardRunning}
         />
       )}
 

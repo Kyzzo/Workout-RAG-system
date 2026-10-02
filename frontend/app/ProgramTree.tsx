@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { runBlockGeneration } from "./blockGeneration";
 import { SourcesBadge, SourcesPanel } from "./Citations";
 import { AddDayForm, AddExerciseForm, AddMesocycleForm } from "./StructureForms";
 import type { DayTemplate, ExerciseSlot, Mesocycle, Program, WeeklyPrescription } from "./types";
@@ -35,6 +36,12 @@ function deleteWarning(what: string, slots: ExerciseSlot[]) {
     : `Delete ${what}? This can't be undone.`;
 }
 
+// How many of the block's weekly sessions train this muscle group - what
+// the user actually committed to, shown next to the research frequency.
+function daysTraining(mesocycle: Mesocycle, group: string) {
+  return mesocycle.day_templates.filter((d) => d.exercise_slots.some((s) => s.muscle_group === group)).length;
+}
+
 function muscleGroupsIn(mesocycle: Mesocycle) {
   const groups = new Set<string>();
   for (const day of mesocycle.day_templates) {
@@ -48,11 +55,15 @@ export default function ProgramTree({
   anchoredFieldId,
   onAskAbout,
   onChanged,
+  externalBusy = false,
 }: {
   program: Program;
   anchoredFieldId: number | null;
   onAskAbout: (prescription: WeeklyPrescription, label: string) => void;
   onChanged: () => void;
+  // True while something outside the tree (the program wizard) is
+  // generating this program, so the tree's own actions don't race it.
+  externalBusy?: boolean;
 }) {
   const api = useApi();
   // One generation at a time: each call is several seconds of retrieval +
@@ -132,12 +143,11 @@ export default function ProgramTree({
   }
 
   async function generateBlock(mesocycle: Mesocycle) {
-    const groups = muscleGroupsIn(mesocycle);
     const strength = program.goal === "strength";
     const confirmed = window.confirm(
       `Generate every number in "${mesocycle.name}"?\n\n` +
-        `1. Frequency for each muscle group (${groups.join(", ")}) - this can ADD training days.\n` +
-        `2. Sets and load for every exercise, applied to all weeks.\n` +
+        "1. Research frequency for each muscle group, shown next to how often you actually train it (no days are added).\n" +
+        "2. Sets and load for every exercise, applied to all weeks.\n" +
         (strength ? "3. Progression for each muscle group.\n" : "") +
         "\nExisting generated values in this block are replaced. This can take a few minutes.",
     );
@@ -147,48 +157,13 @@ export default function ProgramTree({
     setError(null);
     setNotice(null);
     cancelBlock.current = false;
-    const failures: string[] = [];
-
-    // Each step is independent: a failure is recorded and the run moves on,
-    // so one bad exercise doesn't throw away the rest of the block.
-    async function step(label: string, path: string, body?: unknown) {
-      if (cancelBlock.current) return;
-      setBlockProgress(label);
-      try {
-        await api(path, { method: "POST", body });
-      } catch (err) {
-        failures.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      onChanged();
-    }
-
     try {
-      for (const [i, group] of groups.entries()) {
-        await step(`Frequency ${i + 1}/${groups.length}: ${group}`, `/mesocycles/${mesocycle.id}/generate-frequency`, {
-          muscle_group: group,
-        });
-      }
-
-      // Frequency may have cloned days, so re-read the block's exercises.
-      const fresh = await api<Program>(`/programs/${program.id}`);
-      const block = fresh.mesocycles.find((m) => m.id === mesocycle.id);
-      // Day order, so exercises sharing a muscle group are generated one
-      // after another and each sees its siblings' sets (shared weekly budget).
-      const slots = (block?.day_templates ?? []).flatMap((d) => d.exercise_slots);
-      for (const [i, slot] of slots.entries()) {
-        await step(`Exercise ${i + 1}/${slots.length}: ${slot.exercise_name}`, `/exercise-slots/${slot.id}/generate`);
-      }
-
-      if (strength) {
-        for (const [i, group] of groups.entries()) {
-          await step(`Progression ${i + 1}/${groups.length}: ${group}`, `/mesocycles/${mesocycle.id}/generate-progression`, {
-            muscle_group: group,
-          });
-        }
-      }
-
-      const outcome = cancelBlock.current ? "Stopped" : "Finished generating";
-      setNotice(`${outcome} "${mesocycle.name}".`);
+      const { failures, cancelled } = await runBlockGeneration(api, program.id, mesocycle.id, {
+        onProgress: setBlockProgress,
+        onStepDone: onChanged,
+        isCancelled: () => cancelBlock.current,
+      });
+      setNotice(`${cancelled ? "Stopped" : "Finished generating"} "${mesocycle.name}".`);
       if (failures.length > 0) setError(`${failures.length} step(s) failed:\n${failures.join("\n")}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -215,7 +190,7 @@ export default function ProgramTree({
     });
   }
 
-  const busy = busyKey !== null;
+  const busy = busyKey !== null || externalBusy;
 
   return (
     <div className="flex flex-col gap-4 w-full text-sm">
@@ -275,9 +250,10 @@ export default function ProgramTree({
                     <div key={group} className="pl-3">
                       <div className="flex flex-wrap items-center gap-3">
                         <span className="w-24">{group}</span>
+                        <span className="text-zinc-500">you: {daysTraining(mesocycle, group)}x/week</span>
                         {frequency && (
                           <span>
-                            {frequency.frequency}x/week
+                            research: {frequency.frequency}x/week
                             <SourcesBadge
                               citations={frequency.supporting_citations}
                               note={frequency.grounding_note}
@@ -318,7 +294,7 @@ export default function ProgramTree({
                       </div>
                       {frequency && openSources === freqKey && (
                         <SourcesPanel
-                          heading={`Why ${frequency.frequency}x/week for ${group}`}
+                          heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
                           citations={frequency.supporting_citations}
                           note={frequency.grounding_note}
                         />

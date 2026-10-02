@@ -458,7 +458,8 @@ def generate_frequency_endpoint(
         if any(slot.muscle_group == muscle_group for slot in day.exercise_slots)
     })
     days_added = []
-    for _ in range(max(0, result.frequency - current_frequency)):
+    shortfall = max(0, result.frequency - current_frequency) if request.add_days else 0
+    for _ in range(shortfall):
         days_added.append(_clone_day_for_muscle_group(db, mesocycle, muscle_group))
 
     db.commit()

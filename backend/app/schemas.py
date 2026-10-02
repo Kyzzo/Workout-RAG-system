@@ -3,6 +3,8 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, Field, model_validator
 
+from .splits import SPLITS
+
 
 def _normalize_muscle_group(value: str) -> str:
     # Sibling-volume lookup, frequency day-counting, and progression all
@@ -19,6 +21,30 @@ MuscleGroup = Annotated[str, AfterValidator(_normalize_muscle_group)]
 
 class ProgramCreate(BaseModel):
     goal: str
+
+
+class ProgramGenerateRequest(BaseModel):
+    goal: Literal["hypertrophy", "strength"]
+    split: str
+    days_per_week: int
+    weeks: int = Field(default=6, ge=2, le=12)
+
+    @model_validator(mode="after")
+    def _check_split(self):
+        split = SPLITS.get(self.split)
+        if split is None:
+            raise ValueError(f"Unknown split '{self.split}'")
+        if self.days_per_week not in split.allowed_days:
+            allowed = ", ".join(str(d) for d in split.allowed_days)
+            raise ValueError(f"{split.label} fits {allowed} days per week, not {self.days_per_week}")
+        return self
+
+
+class SplitOut(BaseModel):
+    key: str
+    label: str
+    allowed_days: list[int]
+    day_types: list[str]
 
 
 class ProgramSummaryOut(BaseModel):
@@ -123,6 +149,10 @@ class SupportingCitationOut(BaseModel):
 
 class GenerateFrequencyRequest(BaseModel):
     muscle_group: MuscleGroup
+    # False = research comparison only: the frequency is generated and cited
+    # but no days are added, because the user already committed to their
+    # own days per week (wizard-built programs, whole-block generation).
+    add_days: bool = True
 
 
 class MuscleGroupFrequencyOut(BaseModel):

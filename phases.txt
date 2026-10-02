@@ -112,6 +112,12 @@ PHASE 6 — Chat interface + remaining product surface  <- CURRENT PHASE
    reported.
 8. (added) Conversation history — DONE (session only): recent turns sent
    with each message, used by the router to resolve follow-ups.
+9. (added) Program wizard — DONE: pick goal, split (Upper/Lower, PPL,
+   Anterior/Posterior, Torso/Limbs, Arnold, Full Body/FBEOD), days per
+   week (only counts the split repeats cleanly in) and block length; the
+   structure is built with AI-picked exercises (uncited), then every
+   number is generated and cited automatically. Research frequency is
+   shown next to the user's actual frequency instead of adding days.
 
 
 PHASE 7 — Deployment (DONE early, right after Phase 1)

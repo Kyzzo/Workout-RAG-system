@@ -31,7 +31,7 @@ export default function ProgramForm({ onCreated }: { onCreated: (program: Progra
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-2 w-full">
-      <label className="text-sm text-zinc-500">New program, goal:</label>
+      <label className="text-sm text-zinc-500">Or build one yourself - empty program, goal:</label>
       <select
         value={goal}
         onChange={(e) => setGoal(e.target.value)}
@@ -48,7 +48,7 @@ export default function ProgramForm({ onCreated }: { onCreated: (program: Progra
         disabled={submitting}
         className="rounded bg-black text-white px-4 py-2 disabled:opacity-50 dark:bg-white dark:text-black"
       >
-        {submitting ? "Creating..." : "Create Program"}
+        {submitting ? "Creating..." : "Create empty"}
       </button>
       {error && <p className="w-full text-red-600 text-sm">{error}</p>}
     </form>
