@@ -36,7 +36,7 @@ def test_generate_volume_success(mock_generate, mock_verify, db_session, owner_a
     result = generate_volume(prescription_id=prescription.id, db=db_session, current_user=user)
 
     assert result.sets == 12
-    assert result.grounding_note is None
+    assert result.sets_grounding_note is None
     mock_generate.assert_called_once()  # no retry needed - it was supported on the first try
 
     rows = (
@@ -72,7 +72,7 @@ def test_general_knowledge_skips_retry(mock_generate, mock_verify, db_session, o
     result = generate_volume(prescription_id=prescription.id, db=db_session, current_user=user)
 
     assert result.sets == 10
-    assert result.grounding_note == (
+    assert result.sets_grounding_note == (
         "This is a general estimate based on established training principles, "
         "not a specific study."
     )
@@ -99,7 +99,7 @@ def test_retry_recovers(mock_generate, mock_verify, db_session, owner_and_prescr
     result = generate_volume(prescription_id=prescription.id, db=db_session, current_user=user)
 
     assert result.sets == 14  # the RETRY's value, not the first (discarded) attempt's
-    assert result.grounding_note is None
+    assert result.sets_grounding_note is None
     assert mock_generate.call_count == 2
 
     rows = (
@@ -125,7 +125,7 @@ def test_retry_exhausted_shows_value_with_caveat(mock_generate, mock_verify, db_
 
     # The value is still shown - never withheld - even though grounding failed.
     assert result.sets == 13
-    assert result.grounding_note == "This value could not be substantiated by the current research corpus."
+    assert result.sets_grounding_note == "This value could not be substantiated by the current research corpus."
     assert mock_generate.call_count == 2  # exactly one retry, never a loop
 
     rows = (
@@ -177,7 +177,7 @@ def test_generate_intensity_success(mock_generate, mock_verify, db_session, owne
     result = generate_intensity(prescription_id=prescription.id, db=db_session, current_user=user)
 
     assert result.load == "70% 1RM"
-    assert result.grounding_note is None
+    assert result.load_grounding_note is None
     mock_generate.assert_called_once()
 
     rows = (

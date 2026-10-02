@@ -106,9 +106,3 @@ while ingestion is an admin-run local operation, but not once any
 user-facing feature depends on background jobs running in the deployed
 environment — worth revisiting before any feature that could trigger
 ingestion-like jobs in production (e.g. user-uploaded document processing).
-
-**Automatic deploy-on-push is configured for the frontend but not yet
-proven by an actual triggered deploy** — genuinely unverified rather than
-a known issue, in the same way the backend's equivalent setup initially
-looked connected but turned out not to be. Worth an explicit test the next
-time a frontend-affecting change ships.

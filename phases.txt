@@ -62,8 +62,8 @@ Prove the hardest mechanic end-to-end on ONE category before generalizing.
    WeeklyPrescription row
 
 
-PHASE 4 — Citation attachment (DONE except step 3)
------------------------------------------------------
+PHASE 4 — Citation attachment (DONE)
+---------------------------------------
 The core differentiator — do this once Phase 3 works for one category.
 
 1. Track which retrieved chunk(s) the model actually used per generated
@@ -71,9 +71,11 @@ The core differentiator — do this once Phase 3 works for one category.
    output schema that asks the model to name source chunk IDs alongside
    each value)
 2. Populate Citation + PrescriptionCitation from that
-3. Surface citations in the UI next to each number — NOT DONE: the
-   program view shows values and grounding notes only; citations are
-   currently reachable only through chat's discuss mode
+3. Surface citations in the UI next to each number — DONE (Oct 2026):
+   each sets/load value, and each block-level frequency/progression
+   result, has a "N sources" badge that expands to the papers, how
+   directly each supports the value, and the excerpt. Required tagging
+   citations by field (see datamodel.txt, PrescriptionCitation.field)
 
 
 PHASE 5 — Expand generation to all categories (DONE)

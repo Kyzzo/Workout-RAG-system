@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { API_URL } from "./apiUrl";
 import type { WeeklyPrescription } from "./types";
 
-type Citation = { title: string; snippet: string };
+type Citation = { title: string; snippet: string; field: "sets" | "load" | null };
 
 type ChatResponse = {
   mode: "adjust_prescription" | "discuss_prescription" | "answer_general_question";
@@ -170,8 +170,8 @@ function ChatTurnResult({ response }: { response: ChatResponse }) {
         <p>
           {p.sets} sets - {p.reps} reps - {p.load}
         </p>
-        {p.grounding_note ? (
-          <p className="text-amber-600 text-xs mt-1">{p.grounding_note}</p>
+        {response.grounding_note ? (
+          <p className="text-amber-600 text-xs mt-1">{response.grounding_note}</p>
         ) : (
           <p className="text-green-700 dark:text-green-500 text-xs mt-1">
             Fully supported by cited research.
@@ -212,6 +212,7 @@ function CitationList({ citations }: { citations: Citation[] }) {
       {citations.map((c, i) => (
         <li key={i} title={c.snippet}>
           {c.title}
+          {c.field && <span className="text-zinc-400"> (backs {c.field})</span>}
         </li>
       ))}
     </ul>

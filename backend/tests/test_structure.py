@@ -130,7 +130,7 @@ def _cite(db_session, prescription):
     db_session.add(citation)
     db_session.flush()
     db_session.add(models.PrescriptionCitation(
-        prescription_id=prescription.id, citation_id=citation.id, verification_status="primary_support",
+        prescription_id=prescription.id, citation_id=citation.id, field="sets", verification_status="primary_support",
     ))
     db_session.flush()
     return citation

@@ -57,11 +57,18 @@ WeeklyPrescription
     sets                int
     reps                string — e.g. "8-10" (see design notes)
     load                string — e.g. "70% 1RM" or an RPE value
-    grounding_note      string, nullable — set once at generation time
-                         when nothing verified the generated value (see
+    sets_grounding_note string, nullable — set at generation time when
+                         nothing verified the generated sets value (see
                          notes/design_choices/citation_verification.txt
-                         section 7); null when a value was fully
-                         supported or hasn't been generated yet
+                         section 7); null when it was supported or hasn't
+                         been generated yet
+    load_grounding_note string, nullable — same, for load. Also set when
+                         linear progression computes a week's load
+                         mechanically, saying the number is derived from
+                         the cited scheme rather than cited itself.
+                         (Split from a single grounding_note column, which
+                         let generating one field overwrite the other's
+                         caveat.)
 
 
 IMPLEMENTED (Phase 4/5)
@@ -76,6 +83,11 @@ Citation
 PrescriptionCitation                  (junction table)
     prescription_id     FK -> WeeklyPrescription
     citation_id         FK -> Citation
+    field               string — "sets" or "load": which generated value
+                         this citation backs. Regenerating a field
+                         replaces only that field's citations; before this
+                         column existed, generating load deleted the sets
+                         citations (and vice versa).
     verification_status string — primary_support / contextual_support /
                          contradicted / unresolved, set by the citation
                          verification pipeline (see

@@ -75,6 +75,7 @@ def _handle_adjust(decision, db: Session, current_user: models.User) -> schemas.
     return schemas.ChatResponse(
         mode="adjust_prescription",
         prescription=schemas.WeeklyPrescriptionOut.model_validate(updated),
+        grounding_note=getattr(updated, f"{decision.target_field}_grounding_note"),
     )
 
 
@@ -98,29 +99,29 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
     # answer_prescription_discussion) - "checking" cost is zero, not the
     # whole response; returning the raw stored data with no regard for
     # what was actually asked was a real bug, not a deliberate simplification.
-    citation_rows = (
-        db.query(models.PrescriptionCitation)
-        .filter(
-            models.PrescriptionCitation.prescription_id == prescription.id,
-            models.PrescriptionCitation.verification_status.in_(_SUPPORTED_STATUSES),
-        )
-        .all()
-    )
+    citation_rows = prescription.sets_citations + prescription.load_citations
     prescription_summary = f"{prescription.sets} sets, {prescription.reps} reps, {prescription.load} load"
+    # Each excerpt is labeled with the value it backs, so the answer can't
+    # present a sets citation as the reason for the load (or vice versa).
     answer = answer_prescription_discussion(
         decision.question or raw_message,
         prescription_summary,
-        [row.citation.snippet for row in citation_rows],
+        [f"[supports the {row.field} value] {row.citation.snippet}" for row in citation_rows],
     )
+    notes = [
+        f"{label}: {note}"
+        for label, note in (("Sets", prescription.sets_grounding_note), ("Load", prescription.load_grounding_note))
+        if note
+    ]
     return schemas.ChatResponse(
         mode="discuss_prescription",
         prescription=schemas.WeeklyPrescriptionOut.model_validate(prescription),
         answer=answer,
         citations=[
-            schemas.ChatCitationOut(title=row.citation.title, snippet=row.citation.snippet)
+            schemas.ChatCitationOut(title=row.citation.title, snippet=row.citation.snippet, field=row.field)
             for row in citation_rows
         ],
-        grounding_note=prescription.grounding_note,
+        grounding_note=" ".join(notes) or None,
     )
 
 

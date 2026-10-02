@@ -1,5 +1,12 @@
 // Mirrors backend/app/schemas.py's nested *Out models.
 
+// Only supported citations are ever sent (contradicted/unresolved rows stay
+// server-side for QA).
+export type SupportingCitation = {
+  verification_status: "primary_support" | "contextual_support";
+  citation: { title: string; snippet: string };
+};
+
 export type WeeklyPrescription = {
   id: number;
   exercise_slot_id: number;
@@ -7,7 +14,26 @@ export type WeeklyPrescription = {
   sets: number;
   reps: string;
   load: string;
+  sets_grounding_note: string | null;
+  load_grounding_note: string | null;
+  sets_citations: SupportingCitation[];
+  load_citations: SupportingCitation[];
+};
+
+export type MuscleGroupFrequency = {
+  id: number;
+  muscle_group: string;
+  frequency: number;
   grounding_note: string | null;
+  supporting_citations: SupportingCitation[];
+};
+
+export type ProgressionScheme = {
+  id: number;
+  muscle_group: string;
+  scheme: string;
+  grounding_note: string | null;
+  supporting_citations: SupportingCitation[];
 };
 
 export type ExerciseSlot = {
@@ -35,6 +61,8 @@ export type Mesocycle = {
   start_week: number;
   end_week: number;
   day_templates: DayTemplate[];
+  muscle_group_frequencies: MuscleGroupFrequency[];
+  progression_schemes: ProgressionScheme[];
 };
 
 export type ProgramSummary = {

@@ -96,12 +96,11 @@ def test_structural_context_field_id_overrides_model(mock_route, mock_answer, db
 @patch("app.routers.chat.route_chat_message")
 def test_discuss_prescription_reads_stored_citations_only(mock_route, mock_answer, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription
-    prescription.grounding_note = None
     citation = models.Citation(title="Some Paper", snippet="an excerpt", qdrant_point_id="chunk-1")
     db_session.add(citation)
     db_session.flush()
     db_session.add(models.PrescriptionCitation(
-        prescription_id=prescription.id, citation_id=citation.id, verification_status="primary_support",
+        prescription_id=prescription.id, citation_id=citation.id, field="sets", verification_status="primary_support",
     ))
     # A contradicted row for the same prescription should never surface as
     # if it were valid evidence (datamodel.txt's PrescriptionCitation
@@ -110,7 +109,7 @@ def test_discuss_prescription_reads_stored_citations_only(mock_route, mock_answe
     db_session.add(other_citation)
     db_session.flush()
     db_session.add(models.PrescriptionCitation(
-        prescription_id=prescription.id, citation_id=other_citation.id, verification_status="contradicted",
+        prescription_id=prescription.id, citation_id=other_citation.id, field="sets", verification_status="contradicted",
     ))
     db_session.flush()
 
@@ -127,7 +126,8 @@ def test_discuss_prescription_reads_stored_citations_only(mock_route, mock_answe
     # the contradicted one never reaches the answer either.
     passed_question, _passed_summary, passed_snippets = mock_answer.call_args[0]
     assert passed_question == "why is this 8-10 reps?"
-    assert passed_snippets == ["an excerpt"]
+    # ...and is labeled with the value it backs.
+    assert passed_snippets == ["[supports the sets value] an excerpt"]
 
 
 @patch("app.routers.chat.answer_prescription_discussion")

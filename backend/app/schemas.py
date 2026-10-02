@@ -65,6 +65,8 @@ class MesocycleOut(BaseModel):
     start_week: int
     end_week: int
     day_templates: list["DayTemplateOut"]
+    muscle_group_frequencies: list["MuscleGroupFrequencyOut"] = []
+    progression_schemes: list["ProgressionSchemeOut"] = []
 
     model_config = {"from_attributes": True}
 
@@ -95,7 +97,26 @@ class WeeklyPrescriptionOut(BaseModel):
     sets: int
     reps: str
     load: str
-    grounding_note: str | None = None
+    sets_grounding_note: str | None = None
+    load_grounding_note: str | None = None
+    # Supported citations only (primary/contextual) - see
+    # models.SUPPORTED_VERIFICATION_STATUSES.
+    sets_citations: list["SupportingCitationOut"] = []
+    load_citations: list["SupportingCitationOut"] = []
+
+    model_config = {"from_attributes": True}
+
+
+class CitationOut(BaseModel):
+    title: str
+    snippet: str
+
+    model_config = {"from_attributes": True}
+
+
+class SupportingCitationOut(BaseModel):
+    verification_status: Literal["primary_support", "contextual_support"]
+    citation: CitationOut
 
     model_config = {"from_attributes": True}
 
@@ -110,6 +131,7 @@ class MuscleGroupFrequencyOut(BaseModel):
     muscle_group: str
     frequency: int
     grounding_note: str | None = None
+    supporting_citations: list[SupportingCitationOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -129,6 +151,7 @@ class ProgressionSchemeOut(BaseModel):
     muscle_group: str
     scheme: str
     grounding_note: str | None = None
+    supporting_citations: list[SupportingCitationOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -150,6 +173,7 @@ class ChatMessageRequest(BaseModel):
 class ChatCitationOut(BaseModel):
     title: str
     snippet: str
+    field: Literal["sets", "load"] | None = None  # discuss mode only
 
 
 class ChatResponse(BaseModel):

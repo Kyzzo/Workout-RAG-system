@@ -30,7 +30,11 @@ _GENERAL_KNOWLEDGE_NOTE = (
     "not a specific study."
 )
 _UNSUBSTANTIATED_NOTE = "This value could not be substantiated by the current research corpus."
-_SUPPORTED_STATUSES = ("primary_support", "contextual_support")
+_PROGRESSION_DERIVED_NOTE = (
+    "Calculated from week 1's load by the block's linear progression scheme "
+    "- the scheme is cited, this specific week's number is not."
+)
+_SUPPORTED_STATUSES = models.SUPPORTED_VERIFICATION_STATUSES
 
 
 def _get_or_create_citation(db: Session, chunk: dict) -> models.Citation:
@@ -142,12 +146,15 @@ def _generate_and_persist(
 
     setattr(prescription, field_name, getattr(result, field_name))
 
+    # field_name is "sets" or "load" - each has its own note and citations,
+    # so regenerating one never touches the other's.
+    note_attr = f"{field_name}_grounding_note"
     if any_supported:
-        prescription.grounding_note = None
+        setattr(prescription, note_attr, None)
     elif result.grounding == "general_knowledge":
-        prescription.grounding_note = _GENERAL_KNOWLEDGE_NOTE
+        setattr(prescription, note_attr, _GENERAL_KNOWLEDGE_NOTE)
     else:
-        prescription.grounding_note = _UNSUBSTANTIATED_NOTE
+        setattr(prescription, note_attr, _UNSUBSTANTIATED_NOTE)
         logger.warning(
             "Citation verification could not substantiate a generated %s "
             "even after retry - possible corpus gap: muscle_group=%s goal=%s",
@@ -155,10 +162,12 @@ def _generate_and_persist(
         )
 
     # Replace, don't accumulate: this call's citations fully supersede any
-    # citations left over from a previous generation call on this same
-    # prescription (otherwise re-generating would just pile up stale rows).
+    # left over from a previous generation of THIS field (otherwise
+    # re-generating would pile up stale rows). Scoped to the field - the
+    # other field's citations still back its own, unchanged value.
     db.query(models.PrescriptionCitation).filter(
-        models.PrescriptionCitation.prescription_id == prescription.id
+        models.PrescriptionCitation.prescription_id == prescription.id,
+        models.PrescriptionCitation.field == field_name,
     ).delete()
 
     for chunk, status in verified:
@@ -166,6 +175,7 @@ def _generate_and_persist(
         db.add(models.PrescriptionCitation(
             prescription_id=prescription.id,
             citation_id=citation.id,
+            field=field_name,
             verification_status=status,
         ))
 
@@ -216,6 +226,24 @@ def _attempt_frequency_generation(muscle_group: str, goal: str):
             any_supported = True
         verified.append((chunk, status))
     return result, verified, any_supported
+
+
+def _delete_existing(db: Session, model, mesocycle_id: int, muscle_group: str) -> None:
+    # ORM-level delete (not a bulk query delete) so the citation junction
+    # rows go with it via the relationship cascade.
+    for record in db.query(model).filter(model.mesocycle_id == mesocycle_id, model.muscle_group == muscle_group):
+        db.delete(record)
+    db.flush()
+
+
+def _set_derived_load(wp: models.WeeklyPrescription, load: str) -> None:
+    # A mechanically-computed load is a different claim than whatever was
+    # generated for this week before: any load citations still attached
+    # would now vouch for a number they never backed, so they're removed
+    # and the note says where the number actually came from.
+    wp.load = load
+    wp.load_grounding_note = _PROGRESSION_DERIVED_NOTE
+    wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != "load"]
 
 
 def _clone_day_for_muscle_group(db: Session, mesocycle: models.Mesocycle, muscle_group: str) -> models.DayTemplate:
@@ -297,6 +325,10 @@ def generate_frequency_endpoint(
     result, verified, any_supported = _attempt_frequency_generation(muscle_group, goal)
     if not any_supported and result.grounding != "general_knowledge":
         result, verified, any_supported = _attempt_frequency_generation(muscle_group, goal)
+
+    # Replace, don't accumulate - same rule as prescription citations. One
+    # frequency per mesocycle+muscle_group; its citations cascade with it.
+    _delete_existing(db, models.MuscleGroupFrequency, mesocycle.id, muscle_group)
 
     frequency_record = models.MuscleGroupFrequency(
         mesocycle_id=mesocycle.id,
@@ -408,14 +440,14 @@ def _apply_linear_progression(mesocycle: models.Mesocycle, muscle_group: str) ->
                 offset = week - mesocycle.start_week
                 percent = baseline_percent + offset * _LINEAR_WEEKLY_INCREMENT_PERCENT
                 peak_percent = max(peak_percent, percent)
-                wp.load = f"{percent:g}% 1RM"
+                _set_derived_load(wp, f"{percent:g}% 1RM")
                 updated.append(wp)
 
             if has_deload:
                 deload_wp = prescriptions_by_week.get(mesocycle.end_week)
                 if deload_wp is not None:
                     deload_percent = peak_percent * _DELOAD_FRACTION_OF_PEAK
-                    deload_wp.load = f"{deload_percent:g}% 1RM"
+                    _set_derived_load(deload_wp, f"{deload_percent:g}% 1RM")
                     updated.append(deload_wp)
 
     return updated
@@ -460,6 +492,8 @@ def generate_progression_endpoint(
     result, verified, any_supported = _attempt_progression_generation(muscle_group, goal)
     if not any_supported and result.grounding != "general_knowledge":
         result, verified, any_supported = _attempt_progression_generation(muscle_group, goal)
+
+    _delete_existing(db, models.ProgressionScheme, mesocycle.id, muscle_group)
 
     scheme_record = models.ProgressionScheme(
         mesocycle_id=mesocycle.id,

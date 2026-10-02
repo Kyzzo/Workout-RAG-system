@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from .. import models, schemas
 from ..auth import get_current_user
@@ -40,13 +40,26 @@ def get_program(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    mesocycles = joinedload(models.Program.mesocycles)
     program = (
         db.query(models.Program)
         .options(
-            joinedload(models.Program.mesocycles)
+            mesocycles
             .joinedload(models.Mesocycle.day_templates)
             .joinedload(models.DayTemplate.exercise_slots)
             .joinedload(models.ExerciseSlot.weekly_prescriptions)
+            .joinedload(models.WeeklyPrescription.prescription_citations)
+            .joinedload(models.PrescriptionCitation.citation),
+            # Separate SELECT ... IN queries for the block-level results, so
+            # they don't multiply the rows of the big joined tree above.
+            mesocycles
+            .selectinload(models.Mesocycle.muscle_group_frequencies)
+            .selectinload(models.MuscleGroupFrequency.frequency_citations)
+            .joinedload(models.FrequencyCitation.citation),
+            mesocycles
+            .selectinload(models.Mesocycle.progression_schemes)
+            .selectinload(models.ProgressionScheme.progression_scheme_citations)
+            .joinedload(models.ProgressionSchemeCitation.citation),
         )
         .filter(models.Program.id == program_id, models.Program.user_id == current_user.id)
         .first()

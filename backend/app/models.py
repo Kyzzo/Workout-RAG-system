@@ -3,6 +3,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 import datetime
 
+# Verification outcomes that count as real evidence for a value. Only these
+# are ever shown to the user as citations; contradicted/unresolved rows are
+# kept for QA but never displayed as if they backed anything.
+SUPPORTED_VERIFICATION_STATUSES = ("primary_support", "contextual_support")
+
+
+def _supported(junction_rows):
+    return [row for row in junction_rows if row.verification_status in SUPPORTED_VERIFICATION_STATUSES]
+
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -31,8 +41,8 @@ class Mesocycle(Base):
 
     program: Mapped["Program"] = relationship(back_populates="mesocycles")
     day_templates: Mapped[list["DayTemplate"]] = relationship(back_populates="mesocycle", order_by="DayTemplate.order")
-    muscle_group_frequencies: Mapped[list["MuscleGroupFrequency"]] = relationship(back_populates="mesocycle")
-    progression_schemes: Mapped[list["ProgressionScheme"]] = relationship(back_populates="mesocycle")
+    muscle_group_frequencies: Mapped[list["MuscleGroupFrequency"]] = relationship(back_populates="mesocycle", order_by="MuscleGroupFrequency.muscle_group")
+    progression_schemes: Mapped[list["ProgressionScheme"]] = relationship(back_populates="mesocycle", order_by="ProgressionScheme.muscle_group")
 
 class DayTemplate(Base):
     __tablename__ = "day_templates"
@@ -67,10 +77,22 @@ class WeeklyPrescription(Base):
     sets: Mapped[int] = mapped_column()
     reps: Mapped[str] = mapped_column(String)
     load: Mapped[str] = mapped_column(String)
-    grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
+    # One caveat per generated field: sets and load are generated, cited and
+    # verified independently, so a shared note would let generating one
+    # silently overwrite the other's caveat.
+    sets_grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
+    load_grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
 
     exercise_slot: Mapped["ExerciseSlot"] = relationship(back_populates="weekly_prescriptions")
     prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="prescription", cascade="all, delete-orphan")
+
+    @property
+    def sets_citations(self) -> list["PrescriptionCitation"]:
+        return _supported(pc for pc in self.prescription_citations if pc.field == "sets")
+
+    @property
+    def load_citations(self) -> list["PrescriptionCitation"]:
+        return _supported(pc for pc in self.prescription_citations if pc.field == "load")
 
 class UserDocument(Base):
     __tablename__ = "user_documents"
@@ -100,6 +122,7 @@ class PrescriptionCitation(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     prescription_id: Mapped[int] = mapped_column(ForeignKey("weekly_prescriptions.id"))
     citation_id: Mapped[int] = mapped_column(ForeignKey("citations.id"))
+    field: Mapped[str] = mapped_column(String)  # "sets" or "load" - which value this citation backs
     verification_status: Mapped[str] = mapped_column(String)
 
     prescription: Mapped["WeeklyPrescription"] = relationship(back_populates="prescription_citations")
@@ -115,7 +138,11 @@ class MuscleGroupFrequency(Base):
     grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
 
     mesocycle: Mapped["Mesocycle"] = relationship(back_populates="muscle_group_frequencies")
-    frequency_citations: Mapped[list["FrequencyCitation"]] = relationship(back_populates="frequency")
+    frequency_citations: Mapped[list["FrequencyCitation"]] = relationship(back_populates="frequency", cascade="all, delete-orphan")
+
+    @property
+    def supporting_citations(self) -> list["FrequencyCitation"]:
+        return _supported(self.frequency_citations)
 
 class FrequencyCitation(Base):
     __tablename__ = "frequency_citations"
@@ -138,7 +165,11 @@ class ProgressionScheme(Base):
     grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
 
     mesocycle: Mapped["Mesocycle"] = relationship(back_populates="progression_schemes")
-    progression_scheme_citations: Mapped[list["ProgressionSchemeCitation"]] = relationship(back_populates="scheme")
+    progression_scheme_citations: Mapped[list["ProgressionSchemeCitation"]] = relationship(back_populates="scheme", cascade="all, delete-orphan")
+
+    @property
+    def supporting_citations(self) -> list["ProgressionSchemeCitation"]:
+        return _supported(self.progression_scheme_citations)
 
 class ProgressionSchemeCitation(Base):
     __tablename__ = "progression_scheme_citations"
