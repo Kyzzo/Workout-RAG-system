@@ -11,6 +11,7 @@
 # optional field instead - pressing and hinging usually train them as a
 # secondary. Picks also name secondary muscles (half a set each toward
 # weekly volume).
+from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 import pydantic
@@ -95,20 +96,31 @@ def _response_schema(days: list[PlannedDay]) -> type[pydantic.BaseModel]:
 
 
 def _flatten(day: PlannedDay, day_response) -> list[tuple[str, str, list[str], bool]]:
-    """(exercise_name, primary, secondaries, is_compound), compounds first."""
-    picks = []
+    """(exercise_name, primary, secondaries, is_compound), compounds first,
+    trimmed to MAX_EXERCISES deterministically rather than failing: every
+    required-target exercise stays; an optional-target one (front delts,
+    lower back) stays only if nothing already trains that muscle as a
+    secondary; extras fill whatever room is left."""
+    def pick_tuple(pick, primary):
+        secondaries = _clean_secondaries(primary, pick.secondary_muscle_groups)
+        return (pick.exercise_name.strip(), primary, secondaries, pick.is_compound)
+
+    required, optional = [], []
     for group in day.muscle_groups:
         pick = getattr(day_response, _field(group), None)
         if pick is not None:
-            picks.append((pick.exercise_name.strip(), group, pick.secondary_muscle_groups, pick.is_compound))
-    for pick in day_response.extras[:MAX_EXTRAS]:
-        picks.append((pick.exercise_name.strip(), pick.muscle_group, pick.secondary_muscle_groups, pick.is_compound))
+            (optional if group in COVERED_AS_SECONDARY_OK else required).append(pick_tuple(pick, group))
+    extras = [pick_tuple(pick, pick.muscle_group) for pick in day_response.extras[:MAX_EXTRAS]]
+
+    covered = {g for p in required + extras for g in p[2]}
+    needed_optional = [p for p in optional if p[1] not in covered]
+    redundant_optional = [p for p in optional if p[1] in covered]
+    picks = required + needed_optional
+    room = MAX_EXERCISES - len(picks)
+    picks += (extras + redundant_optional)[:max(0, room)]
+
     # Stable sort: compounds before isolation, otherwise in target order.
-    return sorted(
-        [(name, primary, _clean_secondaries(primary, secondaries), compound)
-         for name, primary, secondaries, compound in picks],
-        key=lambda p: not p[3],
-    )
+    return sorted(picks, key=lambda p: not p[3])
 
 
 def _problems(days: list[PlannedDay], selection) -> list[str]:
@@ -140,12 +152,38 @@ def _clean_secondaries(primary: str, secondaries: list[str]) -> list[str]:
 def select_exercises(
     days: list[PlannedDay], goal: str, split_label: str,
 ) -> list[list[tuple[str, str, list[str]]]]:
-    """Returns, per planned day, a list of (exercise_name, primary, secondaries)."""
+    """Returns, per planned day, a list of (exercise_name, primary, secondaries).
+
+    One model call per DAY TYPE (all the Upper days together, all the Lower
+    days together), run in parallel. A single call for the whole week hit
+    OpenAI's limit of 1000 enum values per structured-output schema on
+    6-day splits (every exercise's secondary-muscle field repeats the
+    14-muscle enum). Repeated days of one type still share a call, so they
+    can still vary from each other."""
+    groups: dict[str, list[int]] = {}
+    for i, day in enumerate(days):
+        groups.setdefault(day.day_type or day.name, []).append(i)
+
+    results: list = [None] * len(days)
+    with ThreadPoolExecutor(max_workers=len(groups)) as pool:
+        futures = {
+            tuple(indices): pool.submit(
+                _select_group, [days[i] for i in indices], goal, f"{split_label}, {len(days)} days per week",
+            )
+            for indices in groups.values()
+        }
+        for indices, future in futures.items():
+            for i, picks in zip(indices, future.result()):
+                results[i] = picks
+    return results
+
+
+def _select_group(days: list[PlannedDay], goal: str, split_description: str) -> list[list[tuple[str, str, list[str]]]]:
     schema = _response_schema(days)
     day_lines = "\n".join(f"- {d.name}: {', '.join(d.muscle_groups)}" for d in days)
     request = (
-        f"Goal: {goal}. Split: {split_label}, {len(days)} days per week.\n"
-        f"Training days and their target muscle groups:\n{day_lines}"
+        f"Goal: {goal}. Split: {split_description}.\n"
+        f"Choose exercises for these training days and their target muscle groups:\n{day_lines}"
     )
 
     feedback = ""

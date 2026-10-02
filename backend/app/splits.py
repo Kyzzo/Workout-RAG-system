@@ -83,6 +83,7 @@ class PlannedDay:
     name: str
     muscle_groups: tuple[str, ...]
     rest_days_before: int | None
+    day_type: str = ""  # e.g. "Upper" for "Upper 2"
 
 
 def plan_days(split: Split, days_per_week: int) -> list[PlannedDay]:
@@ -102,5 +103,5 @@ def plan_days(split: Split, days_per_week: int) -> list[PlannedDay]:
     for i, day_type in enumerate(types):
         seen[day_type.name] = seen.get(day_type.name, 0) + 1
         name = f"{day_type.name} {seen[day_type.name]}" if repeats[day_type.name] > 1 else day_type.name
-        days.append(PlannedDay(name, day_type.muscle_groups, None if i == 0 else gaps[i]))
+        days.append(PlannedDay(name, day_type.muscle_groups, None if i == 0 else gaps[i], day_type.name))
     return days

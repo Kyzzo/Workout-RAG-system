@@ -157,7 +157,7 @@ export default function ProgramWorkspace() {
         )}
       </div>
 
-      <aside className="lg:sticky lg:top-4 lg:self-start lg:h-[calc(100vh-2rem)]">
+      <aside className="lg:sticky lg:top-6 lg:self-start lg:h-[calc(100vh-10rem)] lg:max-h-[44rem]">
         <ChatWindow
           fieldId={anchoredFieldId}
           anchorLabel={anchorLabel}
