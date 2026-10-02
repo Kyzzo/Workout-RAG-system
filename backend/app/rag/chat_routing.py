@@ -40,8 +40,17 @@ _ROUTER_SYSTEM_PROMPT = (
     "If the message is already anchored to a specific field (you'll be "
     "told so explicitly), assume adjust_prescription or "
     "discuss_prescription unless the message clearly asks something "
-    "unrelated to that field."
+    "unrelated to that field.\n"
+    "You may be shown the earlier conversation. Use it ONLY to work out "
+    "what the new message refers to (e.g. 'ok lower it' after discussing a "
+    "set count means decrease sets) - classify the NEW message, not the "
+    "earlier ones. Write question, topic and requested_change as "
+    "standalone text that makes sense without the conversation."
 )
+
+# How many earlier turns the router sees - enough for a follow-up to
+# resolve "it"/"that", not so many that old topics bleed into new ones.
+_HISTORY_TURNS = 6
 
 
 class ChatRouteDecision(pydantic.BaseModel):
@@ -83,19 +92,27 @@ class ChatRouteDecision(pydantic.BaseModel):
     )
 
 
-def route_chat_message(message: str, known_field_id: int | None = None) -> ChatRouteDecision:
+def route_chat_message(
+    message: str, known_field_id: int | None = None, history: list | None = None
+) -> ChatRouteDecision:
     context = (
         f"This message is already anchored to WeeklyPrescription id "
         f"{known_field_id} - do not report a different field_id."
         if known_field_id is not None
         else "This message is not anchored to any specific field."
     )
+    # Passed as a labeled transcript inside one user message rather than as
+    # real prior chat turns, so the model reads it as reference material
+    # rather than as its own earlier outputs to continue from.
+    recent = (history or [])[-_HISTORY_TURNS:]
+    transcript = "\n".join(f"{turn.role}: {turn.content}" for turn in recent)
+    conversation = f"Earlier conversation (for resolving references only):\n{transcript}\n\n" if transcript else ""
     completion = client.chat.completions.parse(
         model="gpt-4o-mini",
         temperature=0,
         messages=[
             {"role": "system", "content": _ROUTER_SYSTEM_PROMPT},
-            {"role": "user", "content": f"{context}\n\nMessage: {message}"},
+            {"role": "user", "content": f"{context}\n\n{conversation}New message: {message}"},
         ],
         response_format=ChatRouteDecision,
     )

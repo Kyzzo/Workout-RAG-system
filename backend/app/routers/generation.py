@@ -20,10 +20,11 @@ from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..auth import get_current_user
 from ..database import get_db
-from ..ownership import get_owned_prescription
+from ..ownership import get_owned_exercise_slot, get_owned_prescription
 
 router = APIRouter(prefix="/weekly-prescriptions", tags=["generation"])
 mesocycle_router = APIRouter(prefix="/mesocycles", tags=["generation"])
+exercise_slot_router = APIRouter(prefix="/exercise-slots", tags=["generation"])
 logger = logging.getLogger("uvicorn")
 
 _GENERAL_KNOWLEDGE_NOTE = (
@@ -259,6 +260,46 @@ def generate_intensity(
     return _generate_and_persist(
         prescription, db, generate_intensity_load, build_intensity_query, "load", use_mechanical_check=False
     )
+
+
+@exercise_slot_router.post("/{exercise_slot_id}/generate", response_model=schemas.ExerciseSlotOut)
+def generate_exercise(
+    exercise_slot_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    # Generates sets and load ONCE per exercise and applies them to every
+    # week of the block. The retrieval query has no week in it, so asking
+    # again for week 2..N would return the same claim from the same chunks
+    # at N times the cost - the research backs "this exercise in this
+    # block", not a specific week. Week-to-week change comes from
+    # progression (generate-progression), applied on top afterwards.
+    slot = get_owned_exercise_slot(exercise_slot_id, db, current_user)
+    weeks = sorted(slot.weekly_prescriptions, key=lambda wp: wp.week_number)
+    if not weeks:
+        raise HTTPException(status_code=400, detail="This exercise has no weeks to generate.")
+    base, rest = weeks[0], weeks[1:]
+
+    _generate_and_persist(base, db, generate_volume_sets, build_volume_query, "sets", use_mechanical_check=True)
+    _generate_and_persist(base, db, generate_intensity_load, build_intensity_query, "load", use_mechanical_check=False)
+
+    for wp in rest:
+        wp.sets = base.sets
+        wp.load = base.load
+        wp.sets_grounding_note = base.sets_grounding_note
+        wp.load_grounding_note = base.load_grounding_note
+        # Same claim, so the same citations - copied with their verdicts
+        # (including retained contradicted/unresolved rows, for QA parity).
+        wp.prescription_citations = [
+            models.PrescriptionCitation(
+                citation_id=pc.citation_id, field=pc.field, verification_status=pc.verification_status,
+            )
+            for pc in base.prescription_citations
+        ]
+
+    db.commit()
+    db.refresh(slot)
+    return slot
 
 
 def _attempt_frequency_generation(muscle_group: str, goal: str):

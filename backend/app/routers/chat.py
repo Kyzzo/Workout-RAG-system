@@ -45,7 +45,7 @@ def send_chat_message(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    decision = route_chat_message(request.message, request.field_id)
+    decision = route_chat_message(request.message, request.field_id, request.history)
 
     if decision.tool == "adjust_prescription":
         return _handle_adjust(decision, db, current_user, request.message)

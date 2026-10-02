@@ -16,9 +16,40 @@ type ChatResponse = {
 };
 
 type ChatTurn =
-  | { role: "user"; text: string }
+  // anchor: which prescription the message was about when sent, so the
+  // history stays unambiguous if the user re-anchors mid-conversation.
+  | { role: "user"; text: string; anchor: string | null }
   | { role: "assistant"; response: ChatResponse }
   | { role: "error"; text: string };
+
+type HistoryTurn = { role: "user" | "assistant"; content: string };
+
+// Recent turns sent with each message so follow-ups ("ok lower it") can be
+// resolved. Session-only: history lives in this component's state and is
+// gone on refresh. The backend uses it purely as context for routing.
+const HISTORY_TURNS = 10;
+const MAX_TURN_CHARS = 2000; // matches the backend's ChatTurn limit
+
+function summarizeResponse(r: ChatResponse): string {
+  const p = r.prescription;
+  const values = p ? `${p.sets} sets, ${p.reps || "reps n/a"}, ${p.load || "load n/a"}` : "";
+  if (r.mode === "adjust_prescription") {
+    return r.answer ? `Kept as is: ${r.answer}` : `Updated it to ${values}.${r.grounding_note ? ` ${r.grounding_note}` : ""}`;
+  }
+  if (r.mode === "discuss_prescription") return `${r.answer ?? ""} (Current: ${values}.)`;
+  return r.answer ?? "";
+}
+
+function toHistory(turns: ChatTurn[]): HistoryTurn[] {
+  return turns
+    .flatMap((t): HistoryTurn[] => {
+      if (t.role === "user") return [{ role: "user", content: t.anchor ? `[about ${t.anchor}] ${t.text}` : t.text }];
+      if (t.role === "assistant") return [{ role: "assistant", content: summarizeResponse(t.response) }];
+      return []; // failed requests carry nothing to resolve against
+    })
+    .slice(-HISTORY_TURNS)
+    .map((t) => ({ ...t, content: t.content.slice(0, MAX_TURN_CHARS) }));
+}
 
 export default function ChatWindow({
   fieldId,
@@ -53,7 +84,9 @@ export default function ChatWindow({
     setSending(true);
 
     const sentMessage = message;
-    setTurns((prev) => [...prev, { role: "user", text: sentMessage }]);
+    const sentAnchor = fieldId !== null ? (anchorLabel ?? `prescription #${fieldId}`) : null;
+    const history = toHistory(turns); // the conversation BEFORE this message
+    setTurns((prev) => [...prev, { role: "user", text: sentMessage, anchor: sentAnchor }]);
     setMessage("");
 
     try {
@@ -67,6 +100,7 @@ export default function ChatWindow({
         body: JSON.stringify({
           message: sentMessage,
           field_id: fieldId,
+          history,
         }),
       });
 

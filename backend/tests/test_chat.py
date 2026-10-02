@@ -91,7 +91,7 @@ def test_structural_context_field_id_overrides_model(mock_route, mock_answer, db
     request = schemas.ChatMessageRequest(message="why is this?", field_id=prescription.id)
     send_chat_message(request=request, db=db_session, current_user=user)
 
-    mock_route.assert_called_once_with("why is this?", prescription.id)
+    mock_route.assert_called_once_with("why is this?", prescription.id, [])
 
 
 @patch("app.routers.chat.answer_prescription_discussion")

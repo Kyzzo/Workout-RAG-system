@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { SourcesBadge, SourcesPanel } from "./Citations";
 import { AddDayForm, AddExerciseForm, AddMesocycleForm } from "./StructureForms";
 import type { DayTemplate, ExerciseSlot, Mesocycle, Program, WeeklyPrescription } from "./types";
@@ -65,6 +65,11 @@ export default function ProgramTree({
   // one at a time so the tree doesn't turn into a wall of excerpts.
   const [openSources, setOpenSources] = useState<string | null>(null);
   const toggleSources = (key: string) => setOpenSources((current) => (current === key ? null : key));
+  // Whole-block generation runs as many sequential requests; progress shows
+  // where it is, and cancel takes effect between requests (the one already
+  // in flight finishes and is saved).
+  const [blockProgress, setBlockProgress] = useState<string | null>(null);
+  const cancelBlock = useRef(false);
 
   async function runAction(key: string, action: () => Promise<string | null>) {
     setBusyKey(key);
@@ -119,6 +124,81 @@ export default function ProgramTree({
     });
   }
 
+  function generateExercise(slot: ExerciseSlot) {
+    return runAction(`exercise-${slot.id}`, async () => {
+      await api(`/exercise-slots/${slot.id}/generate`, { method: "POST" });
+      return `Generated sets and load for "${slot.exercise_name}" across every week.`;
+    });
+  }
+
+  async function generateBlock(mesocycle: Mesocycle) {
+    const groups = muscleGroupsIn(mesocycle);
+    const strength = program.goal === "strength";
+    const confirmed = window.confirm(
+      `Generate every number in "${mesocycle.name}"?\n\n` +
+        `1. Frequency for each muscle group (${groups.join(", ")}) - this can ADD training days.\n` +
+        `2. Sets and load for every exercise, applied to all weeks.\n` +
+        (strength ? "3. Progression for each muscle group.\n" : "") +
+        "\nExisting generated values in this block are replaced. This can take a few minutes.",
+    );
+    if (!confirmed) return;
+
+    setBusyKey(`block-${mesocycle.id}`);
+    setError(null);
+    setNotice(null);
+    cancelBlock.current = false;
+    const failures: string[] = [];
+
+    // Each step is independent: a failure is recorded and the run moves on,
+    // so one bad exercise doesn't throw away the rest of the block.
+    async function step(label: string, path: string, body?: unknown) {
+      if (cancelBlock.current) return;
+      setBlockProgress(label);
+      try {
+        await api(path, { method: "POST", body });
+      } catch (err) {
+        failures.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      onChanged();
+    }
+
+    try {
+      for (const [i, group] of groups.entries()) {
+        await step(`Frequency ${i + 1}/${groups.length}: ${group}`, `/mesocycles/${mesocycle.id}/generate-frequency`, {
+          muscle_group: group,
+        });
+      }
+
+      // Frequency may have cloned days, so re-read the block's exercises.
+      const fresh = await api<Program>(`/programs/${program.id}`);
+      const block = fresh.mesocycles.find((m) => m.id === mesocycle.id);
+      // Day order, so exercises sharing a muscle group are generated one
+      // after another and each sees its siblings' sets (shared weekly budget).
+      const slots = (block?.day_templates ?? []).flatMap((d) => d.exercise_slots);
+      for (const [i, slot] of slots.entries()) {
+        await step(`Exercise ${i + 1}/${slots.length}: ${slot.exercise_name}`, `/exercise-slots/${slot.id}/generate`);
+      }
+
+      if (strength) {
+        for (const [i, group] of groups.entries()) {
+          await step(`Progression ${i + 1}/${groups.length}: ${group}`, `/mesocycles/${mesocycle.id}/generate-progression`, {
+            muscle_group: group,
+          });
+        }
+      }
+
+      const outcome = cancelBlock.current ? "Stopped" : "Finished generating";
+      setNotice(`${outcome} "${mesocycle.name}".`);
+      if (failures.length > 0) setError(`${failures.length} step(s) failed:\n${failures.join("\n")}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBlockProgress(null);
+      setBusyKey(null);
+      onChanged();
+    }
+  }
+
   function deleteDay(day: DayTemplate) {
     if (!window.confirm(deleteWarning(`day "${day.name}" and its ${day.exercise_slots.length} exercise(s)`, day.exercise_slots))) return;
     return runAction(`delete-day-${day.id}`, async () => {
@@ -143,9 +223,19 @@ export default function ProgramTree({
         Program #{program.id} - goal: {program.goal}
       </p>
 
-      {busy && <p className="text-indigo-600 dark:text-indigo-400 text-xs">Generating - this can take a little while...</p>}
+      {busy && !blockProgress && (
+        <p className="text-indigo-600 dark:text-indigo-400 text-xs">Generating - this can take a little while...</p>
+      )}
+      {blockProgress && (
+        <div className="flex items-center gap-3 text-indigo-600 dark:text-indigo-400 text-xs">
+          <span>{blockProgress}...</span>
+          <button type="button" onClick={() => (cancelBlock.current = true)} className={actionClass}>
+            cancel
+          </button>
+        </div>
+      )}
       {notice && <p className="text-green-700 dark:text-green-500 text-xs">{notice}</p>}
-      {error && <p className="text-red-600 text-xs">{error}</p>}
+      {error && <p className="text-red-600 text-xs whitespace-pre-line">{error}</p>}
 
       {program.mesocycles.length === 0 && (
         <p className="text-zinc-500 text-xs">
@@ -157,9 +247,21 @@ export default function ProgramTree({
         const muscleGroups = muscleGroupsIn(mesocycle);
         return (
           <div key={mesocycle.id} className="border rounded p-3 flex flex-col gap-3">
-            <p className="font-medium">
-              {mesocycle.name} (weeks {mesocycle.start_week}-{mesocycle.end_week})
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-medium">
+                {mesocycle.name} (weeks {mesocycle.start_week}-{mesocycle.end_week})
+              </p>
+              {muscleGroups.length > 0 && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => generateBlock(mesocycle)}
+                  className="rounded bg-black text-white px-3 py-1 text-xs disabled:opacity-50 dark:bg-white dark:text-black shrink-0"
+                >
+                  {busyKey === `block-${mesocycle.id}` ? "Generating block..." : "Generate whole block"}
+                </button>
+              )}
+            </div>
 
             {muscleGroups.length > 0 && (
               <div className="flex flex-col gap-1 text-xs">
@@ -260,14 +362,24 @@ export default function ProgramTree({
                       <p className="text-zinc-600 dark:text-zinc-400">
                         {slot.exercise_name} ({slot.muscle_group})
                       </p>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => deleteExercise(slot)}
-                        className={`${actionClass} text-red-600`}
-                      >
-                        {busyKey === `delete-exercise-${slot.id}` ? "deleting..." : "delete exercise"}
-                      </button>
+                      <span className="flex gap-3">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => generateExercise(slot)}
+                          className={actionClass}
+                        >
+                          {busyKey === `exercise-${slot.id}` ? "generating..." : "generate exercise"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => deleteExercise(slot)}
+                          className={`${actionClass} text-red-600`}
+                        >
+                          {busyKey === `delete-exercise-${slot.id}` ? "deleting..." : "delete exercise"}
+                        </button>
+                      </span>
                     </div>
                     <ul className="flex flex-col gap-1 mt-1">
                       {slot.weekly_prescriptions.map((wp) => {

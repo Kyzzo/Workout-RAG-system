@@ -122,9 +122,14 @@ real input:
 
 - What happens when a message gets routed to the wrong action — still no
   detection or recovery mechanism.
-- Conversation state. Each message is currently routed and answered on its
-  own, with no conversation history, so a discussion can't carry context
-  into a follow-up edit request yet.
+- Durable conversations. Recent turns are now sent with each message and
+  used by the routing step only to resolve references: "ok lower it" after
+  a discussion of a load value is routed as "decrease the load", where the
+  same message with no history defaults to sets. The routing step rewrites
+  the request into standalone text, so nothing downstream needs the
+  history. It's held in the browser session, though, so it's lost on
+  refresh, and it's client-supplied — usable as context, never as a source
+  of which value to touch or of authority.
 - Edits beyond numbers. Representing an in-place exercise swap without
   rewriting already-cited history is still an open schema question (see
   [future work](../future-work.md)).

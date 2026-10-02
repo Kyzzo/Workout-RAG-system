@@ -161,6 +161,11 @@ class GenerateProgressionResponse(BaseModel):
     updated_prescriptions: list["WeeklyPrescriptionOut"]
 
 
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=2000)
+
+
 class ChatMessageRequest(BaseModel):
     message: str
     # Set when the chat was opened FROM a specific WeeklyPrescription (e.g.
@@ -168,6 +173,11 @@ class ChatMessageRequest(BaseModel):
     # trusted over anything the router model would otherwise have to guess.
     # See notes/phase6/phase6_chat_routing_concepts.txt section 2.
     field_id: int | None = None
+    # Recent turns of this browser session's conversation, oldest first.
+    # Client-supplied, so it's only ever used as context for resolving
+    # references ("ok lower it"), never as a source of ids or authority -
+    # field_id above and the ownership check still decide what gets touched.
+    history: list[ChatTurn] = Field(default=[], max_length=20)
 
 
 class ChatCitationOut(BaseModel):

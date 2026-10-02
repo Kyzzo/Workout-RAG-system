@@ -19,6 +19,7 @@ app.add_middleware(
 app.include_router(programs.router)
 app.include_router(generation.router)
 app.include_router(generation.mesocycle_router)
+app.include_router(generation.exercise_slot_router)
 app.include_router(chat.router)
 app.include_router(structure.router)
 
