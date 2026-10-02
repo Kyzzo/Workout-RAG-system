@@ -25,6 +25,7 @@ from .generation import (
     _UNSUBSTANTIATED_NOTE,
     AdjustmentNotHonored,
     _generate_and_persist,
+    field_pipeline,
 )
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -37,6 +38,10 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 _ADJUST_FIELDS = {
     "sets": (generate_volume_sets, build_volume_query, True),
     "load": (generate_intensity_load, build_intensity_query, False),
+    # Reps and RIR are asked per exercise; the exercise name is bound in
+    # _handle_adjust (see generation.field_pipeline).
+    "reps": None,
+    "rir": None,
 }
 
 
@@ -88,6 +93,14 @@ def _build_adjustment(decision, prescription: models.WeeklyPrescription, raw_mes
     return None
 
 
+def _summary(p: models.WeeklyPrescription) -> str:
+    parts = [f"{p.sets} sets", f"{p.reps or 'n/a'} reps"]
+    if p.load:
+        parts.append(f"{p.load} load")
+    parts.append(f"{p.rir or 'n/a'} effort")
+    return ", ".join(parts)
+
+
 def _handle_adjust(decision, db: Session, current_user: models.User, raw_message: str) -> schemas.ChatResponse:
     if decision.field_id is None:
         raise HTTPException(
@@ -97,7 +110,7 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
     if decision.target_field not in _ADJUST_FIELDS:
         raise HTTPException(
             status_code=400,
-            detail="Couldn't tell whether this is about sets or load - try being more specific.",
+            detail="Couldn't tell whether this is about sets, reps, load or effort (RIR) - try being more specific.",
         )
 
     # Never trust the model's tool selection alone to authorize acting on
@@ -106,7 +119,22 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
     # (phase6_chat_routing_concepts.txt section 3), whether field_id came
     # from anchored UI context or the model's own output.
     prescription = get_owned_prescription(decision.field_id, db, current_user)
-    generate_fn, query_fn, use_mechanical_check = _ADJUST_FIELDS[decision.target_field]
+    goal = prescription.exercise_slot.day_template.mesocycle.program.goal
+    if decision.target_field == "load" and goal != "strength":
+        return schemas.ChatResponse(
+            mode="adjust_prescription",
+            prescription=schemas.WeeklyPrescriptionOut.model_validate(prescription),
+            answer=(
+                "Hypertrophy programs don't prescribe a load - effort is set by RIR (reps in reserve) "
+                'instead. Try e.g. "take it closer to failure" or "make it 1-2 RIR".'
+            ),
+        )
+    if _ADJUST_FIELDS[decision.target_field] is None:
+        generate_fn, query_fn, use_mechanical_check = field_pipeline(
+            decision.target_field, prescription.exercise_slot.exercise_name
+        )
+    else:
+        generate_fn, query_fn, use_mechanical_check = _ADJUST_FIELDS[decision.target_field]
     adjustment = _build_adjustment(decision, prescription, raw_message)
 
     # Already at the per-exercise cap: more sets for this exercise isn't an
@@ -171,8 +199,11 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
     # answer_prescription_discussion) - "checking" cost is zero, not the
     # whole response; returning the raw stored data with no regard for
     # what was actually asked was a real bug, not a deliberate simplification.
-    citation_rows = prescription.sets_citations + prescription.load_citations
-    prescription_summary = f"{prescription.sets} sets, {prescription.reps} reps, {prescription.load} load"
+    citation_rows = (
+        prescription.sets_citations + prescription.reps_citations
+        + prescription.load_citations + prescription.rir_citations
+    )
+    prescription_summary = _summary(prescription)
     # Each excerpt is labeled with the value it backs, so the answer can't
     # present a sets citation as the reason for the load (or vice versa).
     answer = answer_prescription_discussion(
@@ -182,7 +213,10 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
     )
     notes = [
         f"{label}: {note}"
-        for label, note in (("Sets", prescription.sets_grounding_note), ("Load", prescription.load_grounding_note))
+        for label, note in (
+            ("Sets", prescription.sets_grounding_note), ("Reps", prescription.reps_grounding_note),
+            ("Load", prescription.load_grounding_note), ("RIR", prescription.rir_grounding_note),
+        )
         if note
     ]
     return schemas.ChatResponse(

@@ -22,7 +22,7 @@ const actionClass = "text-xs underline disabled:opacity-40 disabled:no-underline
 // sets=0 with an empty load is the backend's "not generated yet" placeholder
 // state (see create_exercise_slot / _clone_day_for_muscle_group).
 function isPlaceholder(wp: WeeklyPrescription) {
-  return wp.sets === 0 && !wp.load;
+  return wp.sets === 0 && !wp.reps && !wp.load && !wp.rir;
 }
 
 function generatedCount(slots: ExerciseSlot[]) {
@@ -150,7 +150,7 @@ export default function ProgramTree({
   function generateExercise(slot: ExerciseSlot) {
     return runAction(`exercise-${slot.id}`, async () => {
       await api(`/exercise-slots/${slot.id}/generate`, { method: "POST" });
-      return `Generated load for "${slot.exercise_name}" across every week.`;
+      return `Generated reps and effort${program.goal === "strength" ? ", and load," : ""} for "${slot.exercise_name}" across every week.`;
     });
   }
 
@@ -176,7 +176,7 @@ export default function ProgramTree({
         "1. Research frequency for each muscle group, shown next to how often you actually train it (no days are added).\n" +
         "2. Weekly volume for each muscle group (cited), split across its exercises - at most " +
         `${strength ? 5 : 4} sets per exercise.\n` +
-        "3. Load for every exercise, applied to all weeks.\n" +
+        `3. Reps, effort (RIR)${strength ? " and load (%1RM)" : ""} for every exercise, applied to all weeks.\n` +
         (strength ? "4. Progression for each muscle group.\n" : "") +
         "\nExisting generated values in this block are replaced. This can take a few minutes.",
     );
@@ -220,6 +220,8 @@ export default function ProgramTree({
   }
 
   const busy = busyKey !== null || externalBusy;
+  // Strength prescribes a %1RM load as well as effort; hypertrophy only effort.
+  const strength = program.goal === "strength";
 
   return (
     <div className="flex flex-col gap-4 w-full text-sm">
@@ -412,7 +414,7 @@ export default function ProgramTree({
                           onClick={() => generateExercise(slot)}
                           className={actionClass}
                         >
-                          {busyKey === `exercise-${slot.id}` ? "generating..." : "generate load"}
+                          {busyKey === `exercise-${slot.id}` ? "generating..." : "generate reps & effort"}
                         </button>
                         <button
                           type="button"
@@ -428,13 +430,47 @@ export default function ProgramTree({
                       {slot.weekly_prescriptions.map((wp) => {
                         const label = `${slot.exercise_name}, week ${wp.week_number}`;
                         const isAnchored = anchoredFieldId === wp.id;
-                        const setsKey = `wp-${wp.id}-sets`;
                         // Split sets carry no per-exercise citations; their
                         // evidence is the muscle's cited weekly volume.
                         const muscleVolume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === slot.muscle_group);
                         const setsCitations =
                           wp.sets_citations.length > 0 ? wp.sets_citations : (muscleVolume?.supporting_citations ?? []);
-                        const loadKey = `wp-${wp.id}-load`;
+                        // Each value with its own sources: sets (a share of the
+                        // muscle's cited weekly volume), reps, load (%1RM,
+                        // strength only) and effort (RIR).
+                        const values = [
+                          {
+                            field: "sets",
+                            text: wp.sets > 0 ? `${wp.sets} sets` : "sets n/a",
+                            citations: setsCitations,
+                            note: wp.sets_grounding_note,
+                            heading: `Why ${wp.sets} sets`,
+                          },
+                          {
+                            field: "reps",
+                            text: wp.reps ? `${wp.reps} reps` : "reps n/a",
+                            citations: wp.reps_citations,
+                            note: wp.reps_grounding_note,
+                            heading: `Why ${wp.reps} reps`,
+                          },
+                          ...(strength || wp.load
+                            ? [{
+                                field: "load",
+                                text: wp.load ? `@ ${wp.load}` : "load n/a",
+                                citations: wp.load_citations,
+                                note: wp.load_grounding_note,
+                                heading: `Why ${wp.load}`,
+                              }]
+                            : []),
+                          {
+                            field: "rir",
+                            text: wp.rir || "effort n/a",
+                            citations: wp.rir_citations,
+                            note: wp.rir_grounding_note,
+                            heading: `Why ${wp.rir}`,
+                          },
+                        ];
+                        const open = values.find((v) => openSources === `wp-${wp.id}-${v.field}`);
                         return (
                           <li
                             key={wp.id}
@@ -448,25 +484,18 @@ export default function ProgramTree({
                                 {isPlaceholder(wp) ? (
                                   <span className="text-zinc-400">not generated yet</span>
                                 ) : (
-                                  <>
-                                    {wp.sets > 0 ? `${wp.sets} sets` : "sets n/a"}
-                                    <SourcesBadge
-                                      citations={setsCitations}
-                                      note={wp.sets_grounding_note}
-                                      open={openSources === setsKey}
-                                      onToggle={() => toggleSources(setsKey)}
-                                    />
-                                    {" - "}
-                                    {wp.reps || "reps n/a"}
-                                    {" - "}
-                                    {wp.load || "load n/a"}
-                                    <SourcesBadge
-                                      citations={wp.load_citations}
-                                      note={wp.load_grounding_note}
-                                      open={openSources === loadKey}
-                                      onToggle={() => toggleSources(loadKey)}
-                                    />
-                                  </>
+                                  values.map((v, i) => (
+                                    <span key={v.field}>
+                                      {i > 0 && " · "}
+                                      {v.text}
+                                      <SourcesBadge
+                                        citations={v.citations}
+                                        note={v.note}
+                                        open={openSources === `wp-${wp.id}-${v.field}`}
+                                        onToggle={() => toggleSources(`wp-${wp.id}-${v.field}`)}
+                                      />
+                                    </span>
+                                  ))
                                 )}
                               </span>
                               <span className="flex gap-3">
@@ -478,14 +507,16 @@ export default function ProgramTree({
                                 >
                                   {busyKey === `volume-${wp.id}` ? "generating..." : "gen sets"}
                                 </button>
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => generatePrescription(wp, "intensity")}
-                                  className={actionClass}
-                                >
-                                  {busyKey === `intensity-${wp.id}` ? "generating..." : "gen load"}
-                                </button>
+                                {strength && (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => generatePrescription(wp, "intensity")}
+                                    className={actionClass}
+                                  >
+                                    {busyKey === `intensity-${wp.id}` ? "generating..." : "gen load"}
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => onAskAbout(wp, label)}
@@ -495,20 +526,7 @@ export default function ProgramTree({
                                 </button>
                               </span>
                             </div>
-                            {openSources === setsKey && (
-                              <SourcesPanel
-                                heading={`Why ${wp.sets} sets`}
-                                citations={setsCitations}
-                                note={wp.sets_grounding_note}
-                              />
-                            )}
-                            {openSources === loadKey && (
-                              <SourcesPanel
-                                heading={`Why ${wp.load}`}
-                                citations={wp.load_citations}
-                                note={wp.load_grounding_note}
-                              />
-                            )}
+                            {open && <SourcesPanel heading={open.heading} citations={open.citations} note={open.note} />}
                           </li>
                         );
                       })}

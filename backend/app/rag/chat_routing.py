@@ -24,7 +24,10 @@ _ROUTER_SYSTEM_PROMPT = (
     "(sets or load) for a specific exercise/week changed or regenerated, "
     "e.g. 'add more volume for my squats' or 'update my bench load based "
     "on the latest research'. Also set target_field to whichever of "
-    "'sets' (volume/how many sets) or 'load' (intensity/%1RM/RPE) the "
+    "'sets' (how many sets), 'reps' (the rep range), 'load' (weight as "
+    "%1RM) or 'rir' (effort: reps in reserve - 'closer to failure' / "
+    "'harder' means DECREASE rir, 'further from failure' / 'easier' means "
+    "increase it) the "
     "request is actually about, and adjustment_kind to what's being asked: "
     "'set_value' if the user names an exact value (also put that value in "
     "requested_value, e.g. '4' for sets or '75% 1RM' / 'RPE 8' for load), "
@@ -60,10 +63,10 @@ class ChatRouteDecision(pydantic.BaseModel):
         description="The WeeklyPrescription id this message is about, if any. "
         "Leave null if the message didn't already tell you one.",
     )
-    target_field: Literal["sets", "load"] | None = pydantic.Field(
+    target_field: Literal["sets", "reps", "load", "rir"] | None = pydantic.Field(
         default=None,
         description="For adjust_prescription only: which value the user "
-        "wants changed - 'sets' (volume) or 'load' (intensity).",
+        "wants changed - 'sets', 'reps', 'load' (%1RM) or 'rir' (effort).",
     )
     adjustment_kind: Literal["set_value", "increase", "decrease", "regenerate"] | None = pydantic.Field(
         default=None,

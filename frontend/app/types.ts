@@ -13,11 +13,16 @@ export type WeeklyPrescription = {
   week_number: number;
   sets: number;
   reps: string;
-  load: string;
+  load: string; // %1RM - strength programs only
+  rir: string; // effort as reps in reserve, e.g. "1-2 RIR" or "0 RIR (to failure)"
   sets_grounding_note: string | null;
+  reps_grounding_note: string | null;
   load_grounding_note: string | null;
+  rir_grounding_note: string | null;
   sets_citations: SupportingCitation[];
+  reps_citations: SupportingCitation[];
   load_citations: SupportingCitation[];
+  rir_citations: SupportingCitation[];
 };
 
 // The cited weekly sets for a muscle; WeeklyPrescription.sets are its

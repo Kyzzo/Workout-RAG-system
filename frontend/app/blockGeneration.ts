@@ -28,7 +28,8 @@ function volumeRank(group: string) {
 //      days: the user committed to their own days per week
 //   2. weekly volume per muscle group - the cited weekly total, split
 //      across that muscle's exercises (capped per exercise)
-//   3. load per exercise, applied to every week
+//   3. reps, effort (RIR) and - strength only - load per exercise,
+//      applied to every week
 //   4. progression per muscle group, strength programs only
 export async function runBlockGeneration(
   api: Api,
@@ -87,9 +88,9 @@ export async function runBlockGeneration(
   }
 
   done = 0;
-  hooks.onProgress(`Load 0/${slots.length}`);
-  await runParallel(slots.map((slot) => counted("Load", slots.length, () =>
-    step(`Load (${slot.exercise_name})`, `/exercise-slots/${slot.id}/generate`),
+  hooks.onProgress(`Reps & effort 0/${slots.length}`);
+  await runParallel(slots.map((slot) => counted("Reps & effort", slots.length, () =>
+    step(`Reps & effort (${slot.exercise_name})`, `/exercise-slots/${slot.id}/generate`),
   )));
 
   if (program.goal === "strength") {

@@ -57,6 +57,15 @@ WeeklyPrescription
     sets                int
     reps                string — e.g. "8-10" (see design notes)
     load                string — e.g. "70% 1RM" or an RPE value
+    rir                 string — effort as reps in reserve, from a fixed
+                         menu ("0 RIR (to failure)", "0-1 RIR", "1-2 RIR",
+                         "2-3 RIR", "3-4 RIR"), generated + cited once per
+                         exercise. Hypertrophy programs prescribe sets,
+                         reps and RIR with NO load; strength programs also
+                         get load (%1RM only). reps is now generated + cited
+                         too (repetition-continuum research).
+    reps_grounding_note / rir_grounding_note  string, nullable — same
+                         convention as the sets/load notes below
     sets_grounding_note string, nullable — set at generation time when
                          nothing verified the generated sets value (see
                          notes/design_choices/citation_verification.txt

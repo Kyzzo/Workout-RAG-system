@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { API_URL } from "./apiUrl";
 import type { WeeklyPrescription } from "./types";
 
-type Citation = { title: string; snippet: string; field: "sets" | "load" | null };
+type Citation = { title: string; snippet: string; field: "sets" | "reps" | "load" | "rir" | null };
 
 type ChatResponse = {
   mode: "adjust_prescription" | "discuss_prescription" | "answer_general_question";
@@ -30,9 +30,13 @@ type HistoryTurn = { role: "user" | "assistant"; content: string };
 const HISTORY_TURNS = 10;
 const MAX_TURN_CHARS = 2000; // matches the backend's ChatTurn limit
 
+function describe(p: WeeklyPrescription): string {
+  return [`${p.sets} sets`, `${p.reps || "n/a"} reps`, ...(p.load ? [p.load] : []), p.rir || "effort n/a"].join(", ");
+}
+
 function summarizeResponse(r: ChatResponse): string {
   const p = r.prescription;
-  const values = p ? `${p.sets} sets, ${p.reps || "reps n/a"}, ${p.load || "load n/a"}` : "";
+  const values = p ? describe(p) : "";
   if (r.mode === "adjust_prescription") {
     return r.answer ? `Kept as is: ${r.answer}` : `Updated it to ${values}.${r.grounding_note ? ` ${r.grounding_note}` : ""}`;
   }
@@ -73,6 +77,13 @@ export default function ChatWindow({
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [sending, setSending] = useState(false);
   const messageInputRef = useRef<HTMLInputElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+
+  // Keep the newest message in view.
+  useEffect(() => {
+    const box = messagesRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [turns, sending]);
 
   useEffect(() => {
     if (fieldId !== null) messageInputRef.current?.focus();
@@ -127,7 +138,7 @@ export default function ChatWindow({
   }
 
   return (
-    <div className="flex flex-col gap-4 w-full">
+    <div className="flex flex-col gap-4 w-full h-full">
       {fieldId !== null ? (
         <div className="flex items-center justify-between gap-2 border rounded px-3 py-2 text-sm bg-indigo-50 dark:bg-indigo-950">
           <span>
@@ -145,7 +156,12 @@ export default function ChatWindow({
         </p>
       )}
 
-      <div className="flex flex-col gap-3 min-h-40 max-h-[28rem] overflow-y-auto border rounded p-4 bg-zinc-50 dark:bg-zinc-900">
+      {/* Stacked (narrow): a fixed-height box. Side panel (wide): fills the
+          panel's remaining height, so only the messages scroll. */}
+      <div
+        ref={messagesRef}
+        className="flex flex-col gap-3 min-h-40 max-h-[28rem] lg:max-h-none lg:flex-1 overflow-y-auto border rounded p-4 bg-zinc-50 dark:bg-zinc-900"
+      >
         {turns.length === 0 && (
           <p className="text-sm text-zinc-500">
             Click &quot;ask / adjust&quot; on a prescription above, then ask about
@@ -183,7 +199,7 @@ export default function ChatWindow({
           onChange={(e) => setMessage(e.target.value)}
           placeholder={
             fieldId !== null
-              ? 'e.g. "make it 4 sets", "add more volume", "why this load?"'
+              ? 'e.g. "make it 10-12 reps", "take it closer to failure", "why 3 sets?"'
               : "Ask a general research question..."
           }
           className="border rounded px-3 py-2 flex-1"
@@ -211,7 +227,7 @@ function ChatTurnResult({ response }: { response: ChatResponse }) {
         <p className="font-medium">{response.answer ? "Kept as is" : "Updated"}</p>
         {response.answer && <p>{response.answer}</p>}
         <p className={response.answer ? "text-zinc-500 text-xs mt-1" : ""}>
-          {p.sets} sets - {p.reps || "reps n/a"} - {p.load || "load n/a"}
+          {describe(p)}
         </p>
         {response.answer ? null : response.grounding_note ? (
           <p className="text-amber-600 text-xs mt-1">{response.grounding_note}</p>
@@ -230,7 +246,7 @@ function ChatTurnResult({ response }: { response: ChatResponse }) {
       <div className="self-start bg-white dark:bg-zinc-800 border rounded px-3 py-2 max-w-[90%] text-sm">
         <p>{response.answer}</p>
         <p className="text-zinc-500 text-xs mt-2">
-          Current: {p.sets} sets, {p.reps} reps, {p.load}.
+          Current: {describe(p)}.
         </p>
         {response.grounding_note && (
           <p className="text-amber-600 text-xs mt-1">{response.grounding_note}</p>
@@ -255,7 +271,7 @@ function CitationList({ citations }: { citations: Citation[] }) {
       {citations.map((c, i) => (
         <li key={i} title={c.snippet}>
           {c.title}
-          {c.field && <span className="text-zinc-400"> (backs {c.field})</span>}
+          {c.field && <span className="text-zinc-400"> (backs {c.field === "rir" ? "effort (RIR)" : c.field})</span>}
         </li>
       ))}
     </ul>

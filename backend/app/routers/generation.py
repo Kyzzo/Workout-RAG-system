@@ -6,10 +6,14 @@ from ..rag.generate import (
     build_frequency_query,
     build_intensity_query,
     build_progression_query,
+    build_reps_query,
+    build_rir_query,
     build_volume_query,
     generate_frequency,
     generate_intensity_load,
     generate_progression_scheme,
+    generate_reps,
+    generate_rir,
     generate_volume_sets,
     generate_weekly_volume,
     max_sets_per_exercise,
@@ -54,6 +58,13 @@ class AdjustmentNotHonored(Exception):
 
 
 _RPE_PATTERN = re.compile(r"RPE\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
+_RIR_PATTERN = re.compile(r"(\d+)(?:\s*-\s*(\d+))?\s*RIR", re.IGNORECASE)
+_REPS_PATTERN = re.compile(r"^\s*(\d+)(?:\s*-\s*(\d+))?\s*$")
+
+
+def _midpoint(match) -> float:
+    low = float(match.group(1))
+    return (low + float(match.group(2))) / 2 if match.group(2) else low
 
 
 def _comparable(value) -> tuple[str, float] | None:
@@ -61,6 +72,12 @@ def _comparable(value) -> tuple[str, float] | None:
     # load only compares within one unit system (%1RM vs %1RM, RPE vs RPE).
     if isinstance(value, int):
         return ("sets", value)
+    rir = _RIR_PATTERN.search(value)  # "1-2 RIR" -> 1.5; "0 RIR (to failure)" -> 0
+    if rir:
+        return ("RIR", _midpoint(rir))
+    reps = _REPS_PATTERN.match(value)  # "8-12" -> 10
+    if reps:
+        return ("reps", _midpoint(reps))
     percent = _LOAD_PERCENT_PATTERN.search(value)
     if percent:
         return ("%1RM", float(percent.group(1)))
@@ -277,37 +294,71 @@ def generate_intensity(
     )
 
 
+def field_pipeline(field: str, exercise_name: str):
+    """(generate_fn, query_fn, use_mechanical_check) for one prescription field.
+    Reps and RIR are asked per EXERCISE (a squat and a lateral raise get
+    different answers), so the exercise name is bound in here."""
+    if field == "sets":
+        return generate_volume_sets, build_volume_query, True
+    if field == "load":
+        return generate_intensity_load, build_intensity_query, False
+    if field == "reps":
+        return (
+            lambda m, g, sibling_context=None, adjustment=None: generate_reps(m, g, exercise_name, adjustment=adjustment),
+            lambda m, g: build_reps_query(m, g, exercise_name),
+            False,  # free-text ranges: always judged, never range-matched
+        )
+    if field == "rir":
+        return (
+            lambda m, g, sibling_context=None, adjustment=None: generate_rir(m, g, exercise_name, adjustment=adjustment),
+            lambda m, g: build_rir_query(m, g, exercise_name),
+            False,
+        )
+    raise ValueError(f"Unknown field {field}")
+
+
+def exercise_fields(goal: str) -> tuple[str, ...]:
+    # Hypertrophy prescribes effort (RIR) with no load; strength prescribes
+    # both a %1RM load and an RIR.
+    return ("reps", "load", "rir") if goal == "strength" else ("reps", "rir")
+
+
 @exercise_slot_router.post("/{exercise_slot_id}/generate", response_model=schemas.ExerciseSlotOut)
 def generate_exercise(
     exercise_slot_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    # Generates LOAD once per exercise and applies it to every week of the
-    # block - the retrieval query has no week in it, so asking again for
-    # weeks 2..N would return the same claim from the same chunks at N times
-    # the cost. Sets aren't generated here: they come from the muscle's
-    # cited weekly volume, split across its exercises (generate-weekly-volume).
+    # Generates reps, RIR and (strength only) load ONCE per exercise and
+    # applies them to every week of the block - the retrieval queries have
+    # no week in them, so asking again for weeks 2..N would return the same
+    # claims from the same chunks at N times the cost. Sets aren't generated
+    # here: they come from the muscle's cited weekly volume
+    # (generate-weekly-volume). Week-to-week change comes from progression.
     slot = get_owned_exercise_slot(exercise_slot_id, db, current_user)
     weeks = sorted(slot.weekly_prescriptions, key=lambda wp: wp.week_number)
     if not weeks:
         raise HTTPException(status_code=400, detail="This exercise has no weeks to generate.")
     base, rest = weeks[0], weeks[1:]
 
-    _generate_and_persist(base, db, generate_intensity_load, build_intensity_query, "load", use_mechanical_check=False)
+    fields = exercise_fields(slot.day_template.mesocycle.program.goal)
+    for field in fields:
+        generate_fn, query_fn, mechanical = field_pipeline(field, slot.exercise_name)
+        _generate_and_persist(base, db, generate_fn, query_fn, field, use_mechanical_check=mechanical)
 
-    base_load_citations = [pc for pc in base.prescription_citations if pc.field == "load"]
     for wp in rest:
-        wp.load = base.load
-        wp.load_grounding_note = base.load_grounding_note
-        # Same claim, so the same citations - copied with their verdicts
+        for field in fields:
+            setattr(wp, field, getattr(base, field))
+            setattr(wp, f"{field}_grounding_note", getattr(base, f"{field}_grounding_note"))
+        # Same claims, so the same citations - copied with their verdicts
         # (including retained contradicted/unresolved rows, for QA parity).
         # This week's sets citations are a separate claim and stay as they are.
-        wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != "load"] + [
+        wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field not in fields] + [
             models.PrescriptionCitation(
-                citation_id=pc.citation_id, field="load", verification_status=pc.verification_status,
+                citation_id=pc.citation_id, field=pc.field, verification_status=pc.verification_status,
             )
-            for pc in base_load_citations
+            for pc in base.prescription_citations
+            if pc.field in fields
         ]
 
     db.commit()

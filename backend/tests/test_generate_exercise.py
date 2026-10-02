@@ -27,54 +27,58 @@ def _slot_with_weeks(db_session, prescription, weeks):
     return prescription.exercise_slot
 
 
-@patch("app.routers.generation.verify_citation")
+def _gen(**fields):
+    return MagicMock(side_effect=lambda *a, **k: (SimpleNamespace(**fields), _chunks(*fields["chunk_ids"])))
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
 @patch("app.routers.generation.generate_intensity_load")
 @patch("app.routers.generation.generate_volume_sets")
-def test_generate_exercise_generates_load_once_for_every_week_and_leaves_sets(
-    mock_sets, mock_load, mock_verify, db_session, owner_and_prescription,
+def test_hypertrophy_exercise_gets_reps_and_rir_once_for_every_week(
+    mock_sets, mock_load, _verify, db_session, owner_and_prescription,
 ):
-    user, prescription = owner_and_prescription
+    user, prescription = owner_and_prescription  # hypertrophy
     slot = _slot_with_weeks(db_session, prescription, [2, 3])
     for wp in slot.weekly_prescriptions:
         wp.sets = 3  # e.g. already split from the muscle's weekly volume
-    mock_load.return_value = (SimpleNamespace(load="70% 1RM", chunk_ids=["i-1"], grounding="fully_grounded"), _chunks("i-1"))
-    mock_verify.return_value = "primary_support"
+        wp.load = ""
+    reps = _gen(reps="8-12", chunk_ids=["rep-1"], grounding="fully_grounded")
+    rir = _gen(rir="1-2 RIR", chunk_ids=["rir-1"], grounding="fully_grounded")
 
-    result = generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
+    with patch("app.routers.generation.generate_reps", reps), patch("app.routers.generation.generate_rir", rir):
+        result = generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
 
-    # Sets come from the muscle's weekly volume now, never from here.
+    # Sets come from the muscle's weekly volume; hypertrophy prescribes no load.
     mock_sets.assert_not_called()
-    mock_load.assert_called_once()  # once for the exercise, not once per week
+    mock_load.assert_not_called()
+    reps.assert_called_once()  # once for the exercise, not once per week
+    rir.assert_called_once()
+    assert reps.call_args.args[2] == slot.exercise_name  # asked per exercise
     weeks = schemas.ExerciseSlotOut.model_validate(result).weekly_prescriptions
-    assert [(wp.week_number, wp.sets, wp.load) for wp in weeks] == [(1, 3, "70% 1RM"), (2, 3, "70% 1RM"), (3, 3, "70% 1RM")]
+    assert [(wp.week_number, wp.sets, wp.reps, wp.load, wp.rir) for wp in weeks] == [
+        (w, 3, "8-12", "", "1-2 RIR") for w in (1, 2, 3)
+    ]
     for wp in weeks:
-        assert [c.citation.title for c in wp.load_citations] == ["paper-i-1"]
+        assert [c.citation.title for c in wp.reps_citations] == ["paper-rep-1"]
+        assert [c.citation.title for c in wp.rir_citations] == ["paper-rir-1"]
 
 
-@patch("app.routers.generation.verify_citation")
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
 @patch("app.routers.generation.generate_intensity_load")
-@patch("app.routers.generation.generate_volume_sets")
-def test_generate_exercise_replaces_previous_week_citations(
-    mock_sets, mock_load, mock_verify, db_session, owner_and_prescription,
-):
+def test_strength_exercise_also_gets_a_percent_load(mock_load, _verify, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription
+    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"
     slot = _slot_with_weeks(db_session, prescription, [2])
-    week2 = next(wp for wp in slot.weekly_prescriptions if wp.week_number == 2)
-    stale = models.Citation(title="stale", snippet="s", qdrant_point_id="stale-1")
-    db_session.add(stale)
-    db_session.flush()
-    db_session.add(models.PrescriptionCitation(
-        prescription_id=week2.id, citation_id=stale.id, field="load", verification_status="primary_support",
-    ))
-    db_session.flush()
-    mock_load.return_value = (SimpleNamespace(load="RPE 8", chunk_ids=["i-1"], grounding="fully_grounded"), _chunks("i-1"))
-    mock_verify.return_value = "primary_support"
+    mock_load.return_value = (SimpleNamespace(load="80% 1RM", chunk_ids=["i-1"], grounding="fully_grounded"), _chunks("i-1"))
+    reps = _gen(reps="3-5", chunk_ids=["rep-1"], grounding="fully_grounded")
+    rir = _gen(rir="1-2 RIR", chunk_ids=["rir-1"], grounding="fully_grounded")
 
-    generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
+    with patch("app.routers.generation.generate_reps", reps), patch("app.routers.generation.generate_rir", rir):
+        result = generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
 
-    db_session.expire_all()
-    titles = [c.citation.title for c in db_session.get(models.WeeklyPrescription, week2.id).load_citations]
-    assert titles == ["paper-i-1"]
+    weeks = schemas.ExerciseSlotOut.model_validate(result).weekly_prescriptions
+    assert [(wp.reps, wp.load, wp.rir) for wp in weeks] == [("3-5", "80% 1RM", "1-2 RIR")] * 2
+    assert all([c.citation.title for c in wp.load_citations] == ["paper-i-1"] for wp in weeks)
 
 
 def test_generate_exercise_ownership_enforced(db_session, owner_and_prescription, other_user):

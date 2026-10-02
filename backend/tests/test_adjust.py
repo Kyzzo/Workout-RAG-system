@@ -59,6 +59,7 @@ def test_exact_value_is_applied_with_override_note_when_unsupported(mock_route, 
 @patch("app.routers.chat.route_chat_message")
 def test_exact_value_supported_by_research_gets_citations_not_a_caveat(mock_route, _verify, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription
+    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"  # load is strength-only
     mock_route.return_value = _route(prescription, "load", "set_value", "75% 1RM")
     generate = MagicMock(return_value=(
         SimpleNamespace(load="75% 1RM", chunk_ids=["int-1"], grounding="fully_grounded"), _chunks("int-1"),
@@ -130,6 +131,7 @@ def test_load_direction_only_compared_within_one_unit(
     mock_route, _verify, new_load, expected, db_session, owner_and_prescription,
 ):
     user, prescription = owner_and_prescription  # load starts at "70% 1RM"
+    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"  # load is strength-only
     mock_route.return_value = _route(prescription, "load", "decrease")
     generate = MagicMock(return_value=(SimpleNamespace(load=new_load, chunk_ids=[], grounding="general_knowledge"), []))
 
@@ -191,3 +193,48 @@ def test_exact_override_can_exceed_the_cap(mock_route, _verify, db_session, owne
         result = _send(db_session, user, prescription)
 
     assert result.prescription.sets == 6  # the user's informed override wins
+
+
+@patch("app.routers.chat.route_chat_message")
+def test_hypertrophy_load_request_explains_instead_of_generating(mock_route, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription  # hypertrophy
+    mock_route.return_value = _route(prescription, "load", "increase")
+    generate = MagicMock()
+
+    with _patch_field("load", generate):
+        result = _send(db_session, user, prescription)
+
+    generate.assert_not_called()
+    assert "don't prescribe a load" in result.answer
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_rir")
+@patch("app.routers.chat.route_chat_message")
+def test_closer_to_failure_lowers_rir(mock_route, mock_rir, _verify, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    prescription.rir = "2-3 RIR"
+    mock_route.return_value = _route(prescription, "rir", "decrease")
+    mock_rir.return_value = (SimpleNamespace(rir="0-1 RIR", chunk_ids=["r-1"], grounding="fully_grounded"), _chunks("r-1"))
+
+    result = _send(db_session, user, prescription)
+
+    # The exercise name reaches the per-exercise RIR question.
+    assert mock_rir.call_args.args[2] == prescription.exercise_slot.exercise_name
+    assert result.prescription.rir == "0-1 RIR"
+    assert [c.citation.title for c in result.prescription.rir_citations] == ["paper-r-1"]
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_rir")
+@patch("app.routers.chat.route_chat_message")
+def test_rir_moving_the_wrong_way_is_kept(mock_route, mock_rir, _verify, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    prescription.rir = "1-2 RIR"
+    mock_route.return_value = _route(prescription, "rir", "decrease")
+    mock_rir.return_value = (SimpleNamespace(rir="2-3 RIR", chunk_ids=[], grounding="general_knowledge"), [])
+
+    result = _send(db_session, user, prescription)
+
+    assert result.prescription.rir == "1-2 RIR"
+    assert result.answer.startswith("Kept at 1-2 RIR")

@@ -212,8 +212,39 @@ def generate_intensity_load(
         str,
         "intensity",
         build_intensity_query(muscle_group, goal),
-        field_description="Training load as a percentage of 1RM (e.g. '70% 1RM') "
-        "or an RPE value (e.g. 'RPE 8') - never a rep range or rep count.",
+        field_description="Training load as a percentage of 1RM, e.g. '75% 1RM' - "
+        "never a rep range, rep count, RPE or RIR (effort is prescribed separately).",
+        adjustment=adjustment,
+    )
+
+
+# A fixed menu rather than free text, so every RIR value is one of a few
+# comparable, readable options (and chat can tell "harder" from "easier").
+RirOption = Literal["0 RIR (to failure)", "0-1 RIR", "1-2 RIR", "2-3 RIR", "3-4 RIR"]
+
+
+def generate_reps(
+    muscle_group: str, goal: str, exercise_name: str,
+    sibling_context: str | None = None, adjustment: Adjustment | None = None,
+) -> tuple[pydantic.BaseModel, list[dict]]:
+    # The repetition-continuum research (schoenfeld-etal-2021) is tagged
+    # "intensity" - rep range and load are two sides of the same variable.
+    return _generate_field(
+        "reps", str, "intensity", build_reps_query(muscle_group, goal, exercise_name),
+        field_description="A rep range per set, e.g. '6-10' or '8-12' - numbers only, "
+        "no load or effort.",
+        adjustment=adjustment,
+    )
+
+
+def generate_rir(
+    muscle_group: str, goal: str, exercise_name: str,
+    sibling_context: str | None = None, adjustment: Adjustment | None = None,
+) -> tuple[pydantic.BaseModel, list[dict]]:
+    return _generate_field(
+        "rir", RirOption, "intensity", build_rir_query(muscle_group, goal, exercise_name),
+        field_description="How many reps short of failure each set should end "
+        "(reps in reserve); 0 RIR means taking the set to failure.",
         adjustment=adjustment,
     )
 
@@ -241,10 +272,25 @@ def build_volume_query(muscle_group: str, goal: str) -> str:
 def build_intensity_query(muscle_group: str, goal: str) -> str:
     return (
         f"What training load is recommended for {muscle_group} to support "
-        f"a training goal of {goal}? Answer with the load ITSELF - a "
-        f"percentage of 1RM (e.g. '70% 1RM') or an RPE value (e.g. 'RPE 8') "
-        f"- not a rep range or rep count, even if the source material "
-        f"discusses reps and load together."
+        f"a training goal of {goal}? Answer with the load ITSELF as a "
+        f"percentage of 1RM (e.g. '75% 1RM') - not a rep range or rep count, "
+        f"even if the source material discusses reps and load together."
+    )
+
+
+def build_reps_query(muscle_group: str, goal: str, exercise_name: str) -> str:
+    return (
+        f"What repetition range per set is recommended for {exercise_name} "
+        f"(training {muscle_group}) to support a training goal of {goal}? "
+        f"Answer with a rep range like '8-12'."
+    )
+
+
+def build_rir_query(muscle_group: str, goal: str, exercise_name: str) -> str:
+    return (
+        f"How close to failure, in repetitions in reserve (RIR), should sets "
+        f"of {exercise_name} (training {muscle_group}) be taken to support a "
+        f"training goal of {goal}? 0 RIR means the set is taken to failure."
     )
 
 

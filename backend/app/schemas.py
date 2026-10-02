@@ -126,12 +126,17 @@ class WeeklyPrescriptionOut(BaseModel):
     sets: int
     reps: str
     load: str
+    rir: str = ""
     sets_grounding_note: str | None = None
+    reps_grounding_note: str | None = None
     load_grounding_note: str | None = None
+    rir_grounding_note: str | None = None
     # Supported citations only (primary/contextual) - see
     # models.SUPPORTED_VERIFICATION_STATUSES.
     sets_citations: list["SupportingCitationOut"] = []
+    reps_citations: list["SupportingCitationOut"] = []
     load_citations: list["SupportingCitationOut"] = []
+    rir_citations: list["SupportingCitationOut"] = []
 
     model_config = {"from_attributes": True}
 
@@ -238,7 +243,7 @@ class ChatMessageRequest(BaseModel):
 class ChatCitationOut(BaseModel):
     title: str
     snippet: str
-    field: Literal["sets", "load"] | None = None  # discuss mode only
+    field: Literal["sets", "reps", "load", "rir"] | None = None  # discuss mode only
 
 
 class ChatResponse(BaseModel):

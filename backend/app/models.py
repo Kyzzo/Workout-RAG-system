@@ -85,12 +85,18 @@ class WeeklyPrescription(Base):
     week_number: Mapped[int] = mapped_column()
     sets: Mapped[int] = mapped_column()
     reps: Mapped[str] = mapped_column(String)
+    # %1RM, strength programs only - hypertrophy programs prescribe effort
+    # (rir) instead of a load.
     load: Mapped[str] = mapped_column(String)
-    # One caveat per generated field: sets and load are generated, cited and
-    # verified independently, so a shared note would let generating one
-    # silently overwrite the other's caveat.
+    # Intensity as reps in reserve, e.g. "1-2 RIR" or "0 RIR (to failure)".
+    rir: Mapped[str] = mapped_column(String, default="", server_default="")
+    # One caveat per generated field: each is generated, cited and verified
+    # independently, so a shared note would let generating one silently
+    # overwrite another's caveat.
     sets_grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
+    reps_grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
     load_grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
+    rir_grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
 
     exercise_slot: Mapped["ExerciseSlot"] = relationship(back_populates="weekly_prescriptions")
     prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="prescription", cascade="all, delete-orphan")
@@ -100,8 +106,16 @@ class WeeklyPrescription(Base):
         return _supported(pc for pc in self.prescription_citations if pc.field == "sets")
 
     @property
+    def reps_citations(self) -> list["PrescriptionCitation"]:
+        return _supported(pc for pc in self.prescription_citations if pc.field == "reps")
+
+    @property
     def load_citations(self) -> list["PrescriptionCitation"]:
         return _supported(pc for pc in self.prescription_citations if pc.field == "load")
+
+    @property
+    def rir_citations(self) -> list["PrescriptionCitation"]:
+        return _supported(pc for pc in self.prescription_citations if pc.field == "rir")
 
 class UserDocument(Base):
     __tablename__ = "user_documents"
@@ -132,7 +146,7 @@ class PrescriptionCitation(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     prescription_id: Mapped[int] = mapped_column(ForeignKey("weekly_prescriptions.id"))
     citation_id: Mapped[int] = mapped_column(ForeignKey("citations.id"))
-    field: Mapped[str] = mapped_column(String)  # "sets" or "load" - which value this citation backs
+    field: Mapped[str] = mapped_column(String)  # "sets" / "reps" / "load" / "rir" - which value this citation backs
     verification_status: Mapped[str] = mapped_column(String)
 
     prescription: Mapped["WeeklyPrescription"] = relationship(back_populates="prescription_citations")

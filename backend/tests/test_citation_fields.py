@@ -172,6 +172,7 @@ def test_linear_progression_drops_stale_load_citations(mock_generate, mock_verif
 @patch("app.routers.chat._generate_and_persist")
 def test_chat_adjust_returns_the_target_fields_note(mock_persist, mock_route, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription
+    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"  # load is strength-only
     prescription.sets_grounding_note = "sets caveat"
     prescription.load_grounding_note = "load caveat"
     mock_persist.return_value = prescription
