@@ -39,7 +39,12 @@ export async function runBlockGeneration(
 ): Promise<BlockGenerationResult> {
   // The run lives in this tab: reloading or closing it stops generation
   // partway (finished steps are kept). Ask the browser to confirm first.
-  const warnBeforeLeaving = (e: BeforeUnloadEvent) => e.preventDefault();
+  // preventDefault is the current standard; returnValue is what older
+  // Chrome and Safari still require to show the prompt.
+  const warnBeforeLeaving = (e: BeforeUnloadEvent) => {
+    e.preventDefault();
+    e.returnValue = "";
+  };
   window.addEventListener("beforeunload", warnBeforeLeaving);
   try {
     return await runSteps(api, programId, mesocycleId, hooks);
