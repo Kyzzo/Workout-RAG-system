@@ -37,6 +37,23 @@ export async function runBlockGeneration(
   mesocycleId: number,
   hooks: { onProgress: (label: string) => void; onStepDone: () => void; isCancelled: () => boolean },
 ): Promise<BlockGenerationResult> {
+  // The run lives in this tab: reloading or closing it stops generation
+  // partway (finished steps are kept). Ask the browser to confirm first.
+  const warnBeforeLeaving = (e: BeforeUnloadEvent) => e.preventDefault();
+  window.addEventListener("beforeunload", warnBeforeLeaving);
+  try {
+    return await runSteps(api, programId, mesocycleId, hooks);
+  } finally {
+    window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }
+}
+
+async function runSteps(
+  api: Api,
+  programId: number,
+  mesocycleId: number,
+  hooks: { onProgress: (label: string) => void; onStepDone: () => void; isCancelled: () => boolean },
+): Promise<BlockGenerationResult> {
   const failures: string[] = [];
 
   async function step(label: string, path: string, body?: unknown) {

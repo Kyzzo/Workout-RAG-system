@@ -234,7 +234,7 @@ export default function ProgramTree({
       )}
       {blockProgress && (
         <div className="flex items-center gap-3 text-indigo-600 dark:text-indigo-400 text-xs">
-          <span>{blockProgress}...</span>
+          <span>{blockProgress}... keep this tab open until it finishes</span>
           <button type="button" onClick={() => (cancelBlock.current = true)} className={actionClass}>
             cancel
           </button>

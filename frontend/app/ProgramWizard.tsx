@@ -155,7 +155,9 @@ export default function ProgramWizard({
         </button>
         {running && (
           <>
-            <span className="text-indigo-600 dark:text-indigo-400 text-xs">{progress}...</span>
+            <span className="text-indigo-600 dark:text-indigo-400 text-xs">
+              {progress}... keep this tab open until it finishes
+            </span>
             <button type="button" onClick={() => (cancelled.current = true)} className="text-xs underline">
               cancel
             </button>
