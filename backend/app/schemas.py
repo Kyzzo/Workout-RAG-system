@@ -93,6 +93,7 @@ class MesocycleOut(BaseModel):
     end_week: int
     day_templates: list["DayTemplateOut"]
     muscle_group_frequencies: list["MuscleGroupFrequencyOut"] = []
+    muscle_group_volumes: list["MuscleGroupVolumeOut"] = []
     progression_schemes: list["ProgressionSchemeOut"] = []
 
     model_config = {"from_attributes": True}
@@ -147,6 +148,28 @@ class SupportingCitationOut(BaseModel):
     citation: CitationOut
 
     model_config = {"from_attributes": True}
+
+
+class GenerateWeeklyVolumeRequest(BaseModel):
+    muscle_group: MuscleGroup
+
+
+class MuscleGroupVolumeOut(BaseModel):
+    id: int
+    mesocycle_id: int
+    muscle_group: str
+    weekly_sets: int
+    grounding_note: str | None = None
+    supporting_citations: list[SupportingCitationOut] = []
+
+    model_config = {"from_attributes": True}
+
+
+class GenerateWeeklyVolumeResponse(BaseModel):
+    volume: MuscleGroupVolumeOut
+    # What the block's exercises add up to after the per-exercise cap
+    # (secondary work at half) - can fall short of the research target.
+    delivered_weekly_sets: int
 
 
 class GenerateFrequencyRequest(BaseModel):

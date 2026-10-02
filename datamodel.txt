@@ -97,6 +97,30 @@ PrescriptionCitation                  (junction table)
                          contradicted/unresolved rows are retained for QA
                          but not displayed as if valid.
 
+MuscleGroupVolume                     (Phase 6)
+    id                  PK
+    mesocycle_id        FK -> Mesocycle
+    muscle_group        string
+    weekly_sets         int — research-cited WEEKLY sets for this muscle,
+                         across all its exercises and sessions
+    grounding_note       string, nullable — same convention as
+                         WeeklyPrescription.grounding_note
+
+VolumeCitation                        (Phase 6, junction table)
+    volume_id           FK -> MuscleGroupVolume
+    citation_id          FK -> Citation
+    verification_status  string — same convention as
+                         PrescriptionCitation.verification_status
+
+    Volume research makes a claim about WEEKLY sets per muscle, not about
+    one exercise in one session, so that's what gets generated and cited.
+    WeeklyPrescription.sets is then a non-cited mechanical split (same
+    pattern as frequency/progression): sets that exercises give the muscle
+    as a secondary count at half, the rest is divided evenly across the
+    exercises where it's the main muscle, each clamped to 2..4 sets (5 for
+    strength). Before this, a 2-day split with one chest exercise got the
+    whole weekly target (12 sets of bench) in one session.
+
 MuscleGroupFrequency                  (Phase 5)
     id                  PK
     mesocycle_id        FK -> Mesocycle

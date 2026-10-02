@@ -11,6 +11,8 @@ from ..rag.generate import (
     generate_intensity_load,
     generate_progression_scheme,
     generate_volume_sets,
+    generate_weekly_volume,
+    max_sets_per_exercise,
 )
 from ..rag.verification import verify_citation
 
@@ -281,33 +283,31 @@ def generate_exercise(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    # Generates sets and load ONCE per exercise and applies them to every
-    # week of the block. The retrieval query has no week in it, so asking
-    # again for week 2..N would return the same claim from the same chunks
-    # at N times the cost - the research backs "this exercise in this
-    # block", not a specific week. Week-to-week change comes from
-    # progression (generate-progression), applied on top afterwards.
+    # Generates LOAD once per exercise and applies it to every week of the
+    # block - the retrieval query has no week in it, so asking again for
+    # weeks 2..N would return the same claim from the same chunks at N times
+    # the cost. Sets aren't generated here: they come from the muscle's
+    # cited weekly volume, split across its exercises (generate-weekly-volume).
     slot = get_owned_exercise_slot(exercise_slot_id, db, current_user)
     weeks = sorted(slot.weekly_prescriptions, key=lambda wp: wp.week_number)
     if not weeks:
         raise HTTPException(status_code=400, detail="This exercise has no weeks to generate.")
     base, rest = weeks[0], weeks[1:]
 
-    _generate_and_persist(base, db, generate_volume_sets, build_volume_query, "sets", use_mechanical_check=True)
     _generate_and_persist(base, db, generate_intensity_load, build_intensity_query, "load", use_mechanical_check=False)
 
+    base_load_citations = [pc for pc in base.prescription_citations if pc.field == "load"]
     for wp in rest:
-        wp.sets = base.sets
         wp.load = base.load
-        wp.sets_grounding_note = base.sets_grounding_note
         wp.load_grounding_note = base.load_grounding_note
         # Same claim, so the same citations - copied with their verdicts
         # (including retained contradicted/unresolved rows, for QA parity).
-        wp.prescription_citations = [
+        # This week's sets citations are a separate claim and stay as they are.
+        wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != "load"] + [
             models.PrescriptionCitation(
-                citation_id=pc.citation_id, field=pc.field, verification_status=pc.verification_status,
+                citation_id=pc.citation_id, field="load", verification_status=pc.verification_status,
             )
-            for pc in base.prescription_citations
+            for pc in base_load_citations
         ]
 
     db.commit()
@@ -642,4 +642,121 @@ def generate_progression_endpoint(
     return schemas.GenerateProgressionResponse(
         scheme=schemas.ProgressionSchemeOut.model_validate(scheme_record),
         updated_prescriptions=[schemas.WeeklyPrescriptionOut.model_validate(wp) for wp in updated_prescriptions],
+    )
+
+
+_MIN_SETS_PER_EXERCISE = 2  # convention: below this an exercise is barely worth its slot
+
+
+def _attempt_weekly_volume_generation(muscle_group: str, goal: str):
+    result, chunks = generate_weekly_volume(muscle_group, goal)
+    query = build_volume_query(muscle_group, goal)
+    chunks_by_id = {c["id"]: c for c in chunks}
+
+    verified = []
+    any_supported = False
+    for chunk_id in result.chunk_ids:
+        chunk = chunks_by_id[chunk_id]
+        # The mechanical range check fits here exactly: the excerpt states a
+        # weekly range ("10-20 sets per week") and the value is weekly too.
+        status = verify_citation(query, result.weekly_sets, chunk["text"], result.grounding, use_mechanical_check=True)
+        if status in _SUPPORTED_STATUSES:
+            any_supported = True
+        verified.append((chunk, status))
+    return result, verified, any_supported
+
+
+def _split_weekly_sets(mesocycle: models.Mesocycle, muscle_group: str, weekly_sets: int, goal: str) -> int:
+    """Splits a muscle's weekly sets across the exercises whose MAIN muscle it
+    is, writing every week of the block. Returns the weekly sets the plan
+    actually delivers (secondary work at half a set)."""
+    slots = [slot for day in mesocycle.day_templates for slot in day.exercise_slots]
+    primary = [slot for slot in slots if slot.muscle_group == muscle_group]
+
+    def first_week_sets(slot):
+        weeks = sorted(slot.weekly_prescriptions, key=lambda wp: wp.week_number)
+        return weeks[0].sets if weeks else 0
+
+    # Sets that exercises training this muscle as a SECONDARY already
+    # deliver, at half weight - rows already give the lats some work.
+    credit = 0.5 * sum(first_week_sets(slot) for slot in slots if muscle_group in slot.secondary_muscle_groups)
+    if not primary:
+        return round(credit)  # e.g. front delts covered only by pressing
+
+    cap = max_sets_per_exercise(goal)
+    remaining = max(0, round(weekly_sets - credit))
+    base, extra = divmod(remaining, len(primary))
+    shares = [
+        min(cap, max(_MIN_SETS_PER_EXERCISE, base + (1 if i < extra else 0)))
+        for i in range(len(primary))
+    ]
+    note = (
+        f"Share of {muscle_group}'s {weekly_sets} weekly sets (the weekly total is research-cited; "
+        f"it's split across {len(primary)} exercise{'s' if len(primary) != 1 else ''}, "
+        f"at most {cap} sets each)."
+    )
+    for slot, sets in zip(primary, shares):
+        for wp in slot.weekly_prescriptions:
+            wp.sets = sets
+            wp.sets_grounding_note = note
+            # Per-exercise sets citations would vouch for a share the source
+            # never stated; the muscle-level record carries the citations.
+            wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != "sets"]
+    return round(sum(shares) + credit)
+
+
+@mesocycle_router.post("/{mesocycle_id}/generate-weekly-volume", response_model=schemas.GenerateWeeklyVolumeResponse)
+def generate_weekly_volume_endpoint(
+    mesocycle_id: int,
+    request: schemas.GenerateWeeklyVolumeRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    mesocycle = (
+        db.query(models.Mesocycle)
+        .options(
+            joinedload(models.Mesocycle.program),
+            joinedload(models.Mesocycle.day_templates)
+            .joinedload(models.DayTemplate.exercise_slots)
+            .joinedload(models.ExerciseSlot.weekly_prescriptions),
+        )
+        .filter(models.Mesocycle.id == mesocycle_id)
+        .first()
+    )
+    if mesocycle is None or mesocycle.program.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Mesocycle not found")
+
+    muscle_group = request.muscle_group
+    goal = mesocycle.program.goal
+
+    result, verified, any_supported = _attempt_weekly_volume_generation(muscle_group, goal)
+    if not any_supported and result.grounding != "general_knowledge":
+        result, verified, any_supported = _attempt_weekly_volume_generation(muscle_group, goal)
+
+    _delete_existing(db, models.MuscleGroupVolume, mesocycle.id, muscle_group)
+    record = models.MuscleGroupVolume(mesocycle_id=mesocycle.id, muscle_group=muscle_group, weekly_sets=result.weekly_sets)
+    if any_supported:
+        record.grounding_note = None
+    elif result.grounding == "general_knowledge":
+        record.grounding_note = _GENERAL_KNOWLEDGE_NOTE
+    else:
+        record.grounding_note = _UNSUBSTANTIATED_NOTE
+        logger.warning(
+            "Citation verification could not substantiate a generated weekly volume "
+            "even after retry - possible corpus gap: muscle_group=%s goal=%s",
+            muscle_group, goal,
+        )
+    db.add(record)
+    db.flush()
+    for chunk, status in verified:
+        citation = _get_or_create_citation(db, chunk)
+        db.add(models.VolumeCitation(volume_id=record.id, citation_id=citation.id, verification_status=status))
+
+    delivered = _split_weekly_sets(mesocycle, muscle_group, record.weekly_sets, goal)
+
+    db.commit()
+    db.refresh(record)
+    return schemas.GenerateWeeklyVolumeResponse(
+        volume=schemas.MuscleGroupVolumeOut.model_validate(record),
+        delivered_weekly_sets=delivered,
     )

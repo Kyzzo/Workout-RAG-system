@@ -42,6 +42,18 @@ function daysTraining(mesocycle: Mesocycle, group: string) {
   return mesocycle.day_templates.filter((d) => d.exercise_slots.some((s) => s.muscle_group === group)).length;
 }
 
+// Weekly sets the block actually gives a muscle (first week): full sets
+// from exercises where it's the main muscle, half from secondaries.
+function deliveredSets(mesocycle: Mesocycle, group: string) {
+  let total = 0;
+  for (const slot of mesocycle.day_templates.flatMap((d) => d.exercise_slots)) {
+    const sets = slot.weekly_prescriptions[0]?.sets ?? 0;
+    if (slot.muscle_group === group) total += sets;
+    else if (slot.secondary_muscle_groups.includes(group)) total += sets / 2;
+  }
+  return Math.round(total);
+}
+
 function muscleGroupsIn(mesocycle: Mesocycle) {
   const groups = new Set<string>();
   for (const day of mesocycle.day_templates) {
@@ -138,7 +150,22 @@ export default function ProgramTree({
   function generateExercise(slot: ExerciseSlot) {
     return runAction(`exercise-${slot.id}`, async () => {
       await api(`/exercise-slots/${slot.id}/generate`, { method: "POST" });
-      return `Generated sets and load for "${slot.exercise_name}" across every week.`;
+      return `Generated load for "${slot.exercise_name}" across every week.`;
+    });
+  }
+
+  function generateVolume(mesocycle: Mesocycle, muscleGroup: string) {
+    return runAction(`volume-${mesocycle.id}-${muscleGroup}`, async () => {
+      const result = await api<{ volume: { weekly_sets: number }; delivered_weekly_sets: number }>(
+        `/mesocycles/${mesocycle.id}/generate-weekly-volume`,
+        { method: "POST", body: { muscle_group: muscleGroup } },
+      );
+      const { weekly_sets } = result.volume;
+      return (
+        `${muscleGroup}: research suggests ${weekly_sets} sets/week; split across its exercises the plan gives ` +
+        `${result.delivered_weekly_sets}.` +
+        (result.delivered_weekly_sets < weekly_sets ? " Add an exercise or a day to get closer." : "")
+      );
     });
   }
 
@@ -147,8 +174,10 @@ export default function ProgramTree({
     const confirmed = window.confirm(
       `Generate every number in "${mesocycle.name}"?\n\n` +
         "1. Research frequency for each muscle group, shown next to how often you actually train it (no days are added).\n" +
-        "2. Sets and load for every exercise, applied to all weeks.\n" +
-        (strength ? "3. Progression for each muscle group.\n" : "") +
+        "2. Weekly volume for each muscle group (cited), split across its exercises - at most " +
+        `${strength ? 5 : 4} sets per exercise.\n` +
+        "3. Load for every exercise, applied to all weeks.\n" +
+        (strength ? "4. Progression for each muscle group.\n" : "") +
         "\nExisting generated values in this block are replaced. This can take a few minutes.",
     );
     if (!confirmed) return;
@@ -243,14 +272,33 @@ export default function ProgramTree({
                 <p className="text-zinc-500">Per muscle group, for this block:</p>
                 {muscleGroups.map((group) => {
                   const frequency = mesocycle.muscle_group_frequencies.find((f) => f.muscle_group === group);
+                  const volume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group);
                   const scheme = mesocycle.progression_schemes.find((p) => p.muscle_group === group);
                   const freqKey = `freq-${frequency?.id}`;
+                  const volumeKey = `volume-${volume?.id}`;
                   const schemeKey = `scheme-${scheme?.id}`;
+                  const delivered = deliveredSets(mesocycle, group);
                   return (
                     <div key={group} className="pl-3">
                       <div className="flex flex-wrap items-center gap-3">
                         <span className="w-24">{group}</span>
                         <span className="text-zinc-500">you train it {daysTraining(mesocycle, group)}x/week</span>
+                        {volume && (
+                          <span>
+                            {volume.weekly_sets} sets/week suggested
+                            <SourcesBadge
+                              citations={volume.supporting_citations}
+                              note={volume.grounding_note}
+                              open={openSources === volumeKey}
+                              onToggle={() => toggleSources(volumeKey)}
+                            />
+                            <span className={delivered < volume.weekly_sets ? "text-amber-600" : "text-zinc-500"}>
+                              {" "}
+                              · plan gives {delivered}
+                              {delivered < volume.weekly_sets && " (add an exercise or a day)"}
+                            </span>
+                          </span>
+                        )}
                         {frequency && (
                           <span>
                             research suggests {frequency.frequency}x/week
@@ -276,6 +324,14 @@ export default function ProgramTree({
                         <button
                           type="button"
                           disabled={busy}
+                          onClick={() => generateVolume(mesocycle, group)}
+                          className={actionClass}
+                        >
+                          {busyKey === `volume-${mesocycle.id}-${group}` ? "generating..." : "generate volume"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
                           onClick={() => generateFrequency(mesocycle, group)}
                           className={actionClass}
                         >
@@ -292,6 +348,13 @@ export default function ProgramTree({
                           </button>
                         )}
                       </div>
+                      {volume && openSources === volumeKey && (
+                        <SourcesPanel
+                          heading={`Why research suggests ${volume.weekly_sets} weekly sets for ${group}`}
+                          citations={volume.supporting_citations}
+                          note={volume.grounding_note}
+                        />
+                      )}
                       {frequency && openSources === freqKey && (
                         <SourcesPanel
                           heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
@@ -349,7 +412,7 @@ export default function ProgramTree({
                           onClick={() => generateExercise(slot)}
                           className={actionClass}
                         >
-                          {busyKey === `exercise-${slot.id}` ? "generating..." : "generate exercise"}
+                          {busyKey === `exercise-${slot.id}` ? "generating..." : "generate load"}
                         </button>
                         <button
                           type="button"
@@ -366,6 +429,11 @@ export default function ProgramTree({
                         const label = `${slot.exercise_name}, week ${wp.week_number}`;
                         const isAnchored = anchoredFieldId === wp.id;
                         const setsKey = `wp-${wp.id}-sets`;
+                        // Split sets carry no per-exercise citations; their
+                        // evidence is the muscle's cited weekly volume.
+                        const muscleVolume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === slot.muscle_group);
+                        const setsCitations =
+                          wp.sets_citations.length > 0 ? wp.sets_citations : (muscleVolume?.supporting_citations ?? []);
                         const loadKey = `wp-${wp.id}-load`;
                         return (
                           <li
@@ -383,7 +451,7 @@ export default function ProgramTree({
                                   <>
                                     {wp.sets > 0 ? `${wp.sets} sets` : "sets n/a"}
                                     <SourcesBadge
-                                      citations={wp.sets_citations}
+                                      citations={setsCitations}
                                       note={wp.sets_grounding_note}
                                       open={openSources === setsKey}
                                       onToggle={() => toggleSources(setsKey)}
@@ -430,7 +498,7 @@ export default function ProgramTree({
                             {openSources === setsKey && (
                               <SourcesPanel
                                 heading={`Why ${wp.sets} sets`}
-                                citations={wp.sets_citations}
+                                citations={setsCitations}
                                 note={wp.sets_grounding_note}
                               />
                             )}

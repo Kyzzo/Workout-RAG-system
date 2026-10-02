@@ -4,19 +4,32 @@ type Api = <T>(path: string, options?: { method?: string; body?: unknown }) => P
 
 export type BlockGenerationResult = { failures: string[]; cancelled: boolean };
 
-// Requests in flight at once. Each exercise is ~10-15s of retrieval,
-// generation and verification, so a 30-exercise block runs ~3x faster.
+// Requests in flight at once for the independent phases. Each request is
+// several seconds of retrieval, generation and verification.
 const CONCURRENCY = 3;
+
+// Weekly volume is split across a muscle's exercises after crediting the
+// half-sets other exercises give it as a secondary, so muscles that receive
+// that credit go AFTER the ones that provide it: compound-dominant muscles
+// first (a row's sets must exist before lats can count half of them).
+const VOLUME_ORDER = [
+  "chest", "upper back", "lats", "quadriceps", "glutes", "hamstrings", "lower back",
+  "front delts", "side delts", "rear delts", "triceps", "biceps", "calves", "abs",
+];
+
+function volumeRank(group: string) {
+  const i = VOLUME_ORDER.indexOf(group);
+  return i === -1 ? VOLUME_ORDER.length : i; // unknown/legacy names (e.g. "back") last
+}
 
 // Fills in every number for one block, as many small requests driven from
 // the browser (progress is visible, nothing hits a request timeout):
 //   1. frequency per muscle group - research comparison only, never adds
 //      days: the user committed to their own days per week
-//   2. sets + load once per exercise, applied to every week
-//   3. progression per muscle group, strength programs only
-// Exercises sharing a muscle group run one after another, in day order,
-// because each is told its siblings' sets (a shared weekly budget);
-// different muscle groups are independent and run in parallel.
+//   2. weekly volume per muscle group - the cited weekly total, split
+//      across that muscle's exercises (capped per exercise)
+//   3. load per exercise, applied to every week
+//   4. progression per muscle group, strength programs only
 export async function runBlockGeneration(
   api: Api,
   programId: number,
@@ -35,58 +48,56 @@ export async function runBlockGeneration(
     hooks.onStepDone();
   }
 
-  // Runs each queue's steps in order, up to CONCURRENCY queues at a time.
-  async function runQueues(queues: (() => Promise<void>)[][]) {
+  // Runs independent steps, up to CONCURRENCY at a time.
+  async function runParallel(steps: (() => Promise<void>)[]) {
     let next = 0;
     async function worker() {
-      while (next < queues.length && !hooks.isCancelled()) {
-        const queue = queues[next++];
-        for (const run of queue) await run();
-      }
+      while (next < steps.length && !hooks.isCancelled()) await steps[next++]();
     }
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queues.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, steps.length) }, worker));
   }
 
   const program = await api<Program>(`/programs/${programId}`);
   const block = program.mesocycles.find((m) => m.id === mesocycleId);
   if (!block) throw new Error("Block not found");
   const slots = block.day_templates.flatMap((d) => d.exercise_slots);
-  const groups = [...new Set(slots.map((s) => s.muscle_group))].sort();
+  const groups = [...new Set(slots.map((s) => s.muscle_group))].sort((a, b) => volumeRank(a) - volumeRank(b));
 
   let done = 0;
-  const progress = (phase: string, total: number) => hooks.onProgress(`${phase} ${done}/${total}`);
-
-  done = 0;
-  progress("Frequency", groups.length);
-  await runQueues(groups.map((group) => [async () => {
-    await step(`Frequency (${group})`, `/mesocycles/${mesocycleId}/generate-frequency`, {
-      muscle_group: group,
-      add_days: false,
-    });
+  const counted = (phase: string, total: number, run: () => Promise<void>) => async () => {
+    await run();
     done++;
-    progress("Frequency", groups.length);
-  }]));
+    hooks.onProgress(`${phase} ${done}/${total}`);
+  };
 
   done = 0;
-  progress("Exercises", slots.length);
-  await runQueues(groups.map((group) =>
-    slots
-      .filter((s) => s.muscle_group === group)
-      .map((slot) => async () => {
-        await step(slot.exercise_name, `/exercise-slots/${slot.id}/generate`);
-        done++;
-        progress("Exercises", slots.length);
-      }),
-  ));
+  hooks.onProgress(`Frequency 0/${groups.length}`);
+  await runParallel(groups.map((group) => counted("Frequency", groups.length, () =>
+    step(`Frequency (${group})`, `/mesocycles/${mesocycleId}/generate-frequency`, { muscle_group: group, add_days: false }),
+  )));
+
+  // Sequential, in VOLUME_ORDER, so each muscle's split sees the secondary
+  // credit from muscles already split.
+  done = 0;
+  hooks.onProgress(`Weekly volume 0/${groups.length}`);
+  for (const group of groups) {
+    await counted("Weekly volume", groups.length, () =>
+      step(`Weekly volume (${group})`, `/mesocycles/${mesocycleId}/generate-weekly-volume`, { muscle_group: group }),
+    )();
+  }
+
+  done = 0;
+  hooks.onProgress(`Load 0/${slots.length}`);
+  await runParallel(slots.map((slot) => counted("Load", slots.length, () =>
+    step(`Load (${slot.exercise_name})`, `/exercise-slots/${slot.id}/generate`),
+  )));
 
   if (program.goal === "strength") {
     done = 0;
-    progress("Progression", groups.length);
-    await runQueues(groups.map((group) => [async () => {
-      await step(`Progression (${group})`, `/mesocycles/${mesocycleId}/generate-progression`, { muscle_group: group });
-      done++;
-      progress("Progression", groups.length);
-    }]));
+    hooks.onProgress(`Progression 0/${groups.length}`);
+    await runParallel(groups.map((group) => counted("Progression", groups.length, () =>
+      step(`Progression (${group})`, `/mesocycles/${mesocycleId}/generate-progression`, { muscle_group: group }),
+    )));
   }
 
   return { failures, cancelled: hooks.isCancelled() };

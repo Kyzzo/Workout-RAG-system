@@ -30,26 +30,25 @@ def _slot_with_weeks(db_session, prescription, weeks):
 @patch("app.routers.generation.verify_citation")
 @patch("app.routers.generation.generate_intensity_load")
 @patch("app.routers.generation.generate_volume_sets")
-def test_generate_exercise_generates_once_and_applies_to_every_week(
+def test_generate_exercise_generates_load_once_for_every_week_and_leaves_sets(
     mock_sets, mock_load, mock_verify, db_session, owner_and_prescription,
 ):
     user, prescription = owner_and_prescription
     slot = _slot_with_weeks(db_session, prescription, [2, 3])
-    mock_sets.return_value = (SimpleNamespace(sets=12, chunk_ids=["v-1"], grounding="fully_grounded"), _chunks("v-1"))
-    mock_load.return_value = (SimpleNamespace(load="70% 1RM", chunk_ids=[], grounding="general_knowledge"), [])
+    for wp in slot.weekly_prescriptions:
+        wp.sets = 3  # e.g. already split from the muscle's weekly volume
+    mock_load.return_value = (SimpleNamespace(load="70% 1RM", chunk_ids=["i-1"], grounding="fully_grounded"), _chunks("i-1"))
     mock_verify.return_value = "primary_support"
 
     result = generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
 
-    # One generation per field for the whole exercise, not one per week.
-    mock_sets.assert_called_once()
-    mock_load.assert_called_once()
+    # Sets come from the muscle's weekly volume now, never from here.
+    mock_sets.assert_not_called()
+    mock_load.assert_called_once()  # once for the exercise, not once per week
     weeks = schemas.ExerciseSlotOut.model_validate(result).weekly_prescriptions
-    assert [(wp.week_number, wp.sets, wp.load) for wp in weeks] == [(1, 12, "70% 1RM"), (2, 12, "70% 1RM"), (3, 12, "70% 1RM")]
+    assert [(wp.week_number, wp.sets, wp.load) for wp in weeks] == [(1, 3, "70% 1RM"), (2, 3, "70% 1RM"), (3, 3, "70% 1RM")]
     for wp in weeks:
-        assert [c.citation.title for c in wp.sets_citations] == ["paper-v-1"]
-        assert wp.sets_grounding_note is None
-        assert wp.load_grounding_note is not None  # load's general-knowledge caveat travels too
+        assert [c.citation.title for c in wp.load_citations] == ["paper-i-1"]
 
 
 @patch("app.routers.generation.verify_citation")
@@ -68,7 +67,6 @@ def test_generate_exercise_replaces_previous_week_citations(
         prescription_id=week2.id, citation_id=stale.id, field="load", verification_status="primary_support",
     ))
     db_session.flush()
-    mock_sets.return_value = (SimpleNamespace(sets=10, chunk_ids=[], grounding="general_knowledge"), [])
     mock_load.return_value = (SimpleNamespace(load="RPE 8", chunk_ids=["i-1"], grounding="fully_grounded"), _chunks("i-1"))
     mock_verify.return_value = "primary_support"
 

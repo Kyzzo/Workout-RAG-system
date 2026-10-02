@@ -123,6 +123,10 @@ def get_program(
             .selectinload(models.MuscleGroupFrequency.frequency_citations)
             .joinedload(models.FrequencyCitation.citation),
             mesocycles
+            .selectinload(models.Mesocycle.muscle_group_volumes)
+            .selectinload(models.MuscleGroupVolume.volume_citations)
+            .joinedload(models.VolumeCitation.citation),
+            mesocycles
             .selectinload(models.Mesocycle.progression_schemes)
             .selectinload(models.ProgressionScheme.progression_scheme_citations)
             .joinedload(models.ProgressionSchemeCitation.citation),

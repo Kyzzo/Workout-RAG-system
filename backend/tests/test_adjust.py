@@ -76,29 +76,29 @@ def test_exact_value_supported_by_research_gets_citations_not_a_caveat(mock_rout
 @patch("app.routers.chat.route_chat_message")
 def test_increase_moves_the_value_up(mock_route, _verify, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription
-    prescription.sets = 10
+    prescription.sets = 2
     mock_route.return_value = _route(prescription, "sets", "increase")
-    generate = MagicMock(return_value=(SimpleNamespace(sets=14, chunk_ids=["v-1"], grounding="fully_grounded"), _chunks("v-1")))
+    generate = MagicMock(return_value=(SimpleNamespace(sets=4, chunk_ids=["v-1"], grounding="fully_grounded"), _chunks("v-1")))
 
     with _patch_field("sets", generate):
         result = _send(db_session, user, prescription)
 
     adjustment = generate.call_args.kwargs["adjustment"]
-    assert (adjustment.kind, adjustment.current_value) == ("increase", 10)
-    assert result.prescription.sets == 14
+    assert (adjustment.kind, adjustment.current_value) == ("increase", 2)
+    assert result.prescription.sets == 4
     assert result.answer is None
 
 
-@pytest.mark.parametrize("kind, returned", [("increase", 10), ("decrease", 14)])
+@pytest.mark.parametrize("kind, returned", [("increase", 3), ("decrease", 4)])
 @patch("app.routers.generation.verify_citation", return_value="primary_support")
 @patch("app.routers.chat.route_chat_message")
 def test_direction_not_honored_keeps_value_and_existing_citations(
     mock_route, _verify, kind, returned, db_session, owner_and_prescription,
 ):
     # increase -> unchanged (the prompt's signal that research doesn't
-    # support moving), decrease -> moved the wrong way: both keep 10.
+    # support moving), decrease -> moved the wrong way: both keep 3.
     user, prescription = owner_and_prescription
-    prescription.sets = 10
+    prescription.sets = 3
     citation = models.Citation(title="kept-paper", snippet="s", qdrant_point_id="kept-1")
     db_session.add(citation)
     db_session.flush()
@@ -114,9 +114,9 @@ def test_direction_not_honored_keeps_value_and_existing_citations(
 
     db_session.expire_all()
     stored = db_session.get(models.WeeklyPrescription, prescription.id)
-    assert stored.sets == 10
+    assert stored.sets == 3
     assert [c.citation.title for c in stored.sets_citations] == ["kept-paper"]
-    assert result.answer.startswith("Kept at 10")
+    assert result.answer.startswith("Kept at 3")
 
 
 @pytest.mark.parametrize("new_load, expected", [
@@ -162,3 +162,32 @@ def test_exact_value_that_isnt_a_number_is_rejected(mock_route, db_session, owne
         _send(db_session, user, prescription)
 
     assert exc_info.value.status_code == 400
+
+
+@patch("app.routers.chat.route_chat_message")
+def test_increase_at_the_per_exercise_cap_is_refused_without_generating(mock_route, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription  # hypertrophy: cap is 4
+    prescription.sets = 4
+    mock_route.return_value = _route(prescription, "sets", "increase")
+    generate = MagicMock()
+
+    with _patch_field("sets", generate):
+        result = _send(db_session, user, prescription)
+
+    generate.assert_not_called()
+    assert result.prescription.sets == 4
+    assert "most one exercise gets per session (4)" in result.answer
+
+
+@patch("app.routers.generation.verify_citation", return_value="contradicted")
+@patch("app.routers.chat.route_chat_message")
+def test_exact_override_can_exceed_the_cap(mock_route, _verify, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    prescription.sets = 4
+    mock_route.return_value = _route(prescription, "sets", "set_value", "6")
+    generate = MagicMock(return_value=(SimpleNamespace(sets=6, chunk_ids=[], grounding="general_knowledge"), []))
+
+    with _patch_field("sets", generate):
+        result = _send(db_session, user, prescription)
+
+    assert result.prescription.sets == 6  # the user's informed override wins

@@ -16,6 +16,7 @@ from ..rag.generate import (
     build_volume_query,
     generate_intensity_load,
     generate_volume_sets,
+    max_sets_per_exercise,
 )
 from ..rag.verification import verify_citation
 from .generation import (
@@ -107,6 +108,22 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
     prescription = get_owned_prescription(decision.field_id, db, current_user)
     generate_fn, query_fn, use_mechanical_check = _ADJUST_FIELDS[decision.target_field]
     adjustment = _build_adjustment(decision, prescription, raw_message)
+
+    # Already at the per-exercise cap: more sets for this exercise isn't an
+    # option generation can offer, so say so without spending a call on it.
+    cap = max_sets_per_exercise(prescription.exercise_slot.day_template.mesocycle.program.goal)
+    if decision.target_field == "sets" and adjustment and adjustment.kind == "increase" and prescription.sets >= cap:
+        return schemas.ChatResponse(
+            mode="adjust_prescription",
+            prescription=schemas.WeeklyPrescriptionOut.model_validate(prescription),
+            answer=(
+                f"Kept at {prescription.sets} sets - that's the most one exercise gets per session ({cap}). "
+                f"For more {prescription.exercise_slot.muscle_group} volume, add another exercise for it, "
+                f'or set an exact value (e.g. "make it {cap + 1} sets") to override the cap.'
+            ),
+            grounding_note=prescription.sets_grounding_note,
+        )
+
     try:
         updated = _generate_and_persist(
             prescription, db, generate_fn, query_fn, decision.target_field, use_mechanical_check,

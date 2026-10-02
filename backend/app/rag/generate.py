@@ -159,11 +159,41 @@ def _generate_field(
     return message.parsed, chunks
 
 
+# Most sets one exercise gets in one session. A convention, not a research
+# claim: the literature reports WEEKLY volume per muscle, which then has to
+# be spread across exercises and sessions - without a cap, a 2-day split
+# with one chest exercise would put the whole weekly target (12 sets of
+# bench) into a single session. Strength allows 5 for 5x5-style main lifts.
+_MAX_SETS_PER_EXERCISE = {"hypertrophy": 4, "strength": 5}
+
+
+def max_sets_per_exercise(goal: str) -> int:
+    return _MAX_SETS_PER_EXERCISE.get(goal, 4)
+
+
+def generate_weekly_volume(muscle_group: str, goal: str) -> tuple[pydantic.BaseModel, list[dict]]:
+    # The claim the volume research actually makes - weekly sets for the
+    # muscle - so verification compares like with like (the mechanical
+    # range check reads ranges like "10-20 sets" straight from the excerpt).
+    return _generate_field(
+        "weekly_sets", int, "volume", build_volume_query(muscle_group, goal),
+        field_description="Total sets per WEEK for this muscle, across all of its "
+        "exercises and sessions combined.",
+    )
+
+
 def generate_volume_sets(
     muscle_group: str, goal: str, sibling_context: str | None = None, adjustment: Adjustment | None = None
 ) -> tuple[pydantic.BaseModel, list[dict]]:
+    # One exercise's sets in one session - used for single-value edits (a
+    # week's "gen sets", chat adjust). Limited to 1..cap by the schema; an
+    # exact user override still locks its own value via the adjustment.
+    cap = max_sets_per_exercise(goal)
     return _generate_field(
-        "sets", int, "volume", build_volume_query(muscle_group, goal),
+        "sets", Literal[tuple(range(1, cap + 1))], "volume", build_volume_query(muscle_group, goal),
+        field_description=f"Sets for THIS exercise in ONE session (at most {cap}). The research "
+        "gives weekly totals for the whole muscle; this exercise gets a share of that "
+        "weekly budget, never the whole of it.",
         sibling_context=sibling_context, adjustment=adjustment,
     )
 

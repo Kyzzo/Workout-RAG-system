@@ -30,6 +30,15 @@ pointer between exercise rows — deliberately left undesigned until an
 AI-assisted editing feature is actually being built, since that's the
 feature that would determine the right shape.
 
+**Cross-exercise volume coherence — resolved for whole-block generation.**
+Volume research states weekly sets per muscle, so that weekly total is now
+what gets generated and cited, once per muscle per training block; each
+exercise's sets are a mechanical split of it (secondary work counted at
+half, at most four sets per exercise for hypertrophy and five for strength),
+and a plan that can't reach the cited target says so rather than cramming
+the week into one exercise. The single-value edit paths below (regenerating
+one week's sets, chat adjustments) still use the older shared-budget
+guidance. Earlier approach, kept for context:
 **Cross-exercise volume coherence — partially addressed.** Volume is
 generated per exercise, so two exercises sharing a muscle group in the
 same week could each be told the full research-backed range and together

@@ -20,6 +20,16 @@ export type WeeklyPrescription = {
   load_citations: SupportingCitation[];
 };
 
+// The cited weekly sets for a muscle; WeeklyPrescription.sets are its
+// mechanical split across that muscle's exercises.
+export type MuscleGroupVolume = {
+  id: number;
+  muscle_group: string;
+  weekly_sets: number;
+  grounding_note: string | null;
+  supporting_citations: SupportingCitation[];
+};
+
 export type MuscleGroupFrequency = {
   id: number;
   muscle_group: string;
@@ -64,6 +74,7 @@ export type Mesocycle = {
   end_week: number;
   day_templates: DayTemplate[];
   muscle_group_frequencies: MuscleGroupFrequency[];
+  muscle_group_volumes: MuscleGroupVolume[];
   progression_schemes: ProgressionScheme[];
 };
 

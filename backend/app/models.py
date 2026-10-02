@@ -43,6 +43,7 @@ class Mesocycle(Base):
     program: Mapped["Program"] = relationship(back_populates="mesocycles")
     day_templates: Mapped[list["DayTemplate"]] = relationship(back_populates="mesocycle", order_by="DayTemplate.order", cascade="all, delete-orphan")
     muscle_group_frequencies: Mapped[list["MuscleGroupFrequency"]] = relationship(back_populates="mesocycle", order_by="MuscleGroupFrequency.muscle_group", cascade="all, delete-orphan")
+    muscle_group_volumes: Mapped[list["MuscleGroupVolume"]] = relationship(back_populates="mesocycle", order_by="MuscleGroupVolume.muscle_group", cascade="all, delete-orphan")
     progression_schemes: Mapped[list["ProgressionScheme"]] = relationship(back_populates="mesocycle", order_by="ProgressionScheme.muscle_group", cascade="all, delete-orphan")
 
 class DayTemplate(Base):
@@ -122,6 +123,7 @@ class Citation(Base):
 
     prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="citation")
     frequency_citations: Mapped[list["FrequencyCitation"]] = relationship(back_populates="citation")
+    volume_citations: Mapped[list["VolumeCitation"]] = relationship(back_populates="citation")
     progression_scheme_citations: Mapped[list["ProgressionSchemeCitation"]] = relationship(back_populates="citation")
 
 class PrescriptionCitation(Base):
@@ -135,6 +137,41 @@ class PrescriptionCitation(Base):
 
     prescription: Mapped["WeeklyPrescription"] = relationship(back_populates="prescription_citations")
     citation: Mapped["Citation"] = relationship(back_populates="prescription_citations")
+
+class MuscleGroupVolume(Base):
+    # The research claim about volume is WEEKLY sets for a muscle, not sets
+    # for one exercise in one session - so it's generated and cited here,
+    # once per block and muscle, and then split mechanically across that
+    # muscle's exercises (WeeklyPrescription.sets), the same cited-claim +
+    # mechanical-consequence pattern as frequency and progression
+    # (notes/design_choices/mesocycle_scoped_generation.txt).
+    __tablename__ = "muscle_group_volumes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mesocycle_id: Mapped[int] = mapped_column(ForeignKey("mesocycles.id"))
+    muscle_group: Mapped[str] = mapped_column(String)
+    weekly_sets: Mapped[int] = mapped_column()
+    grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    mesocycle: Mapped["Mesocycle"] = relationship(back_populates="muscle_group_volumes")
+    volume_citations: Mapped[list["VolumeCitation"]] = relationship(back_populates="volume", cascade="all, delete-orphan")
+
+    @property
+    def supporting_citations(self) -> list["VolumeCitation"]:
+        return _supported(self.volume_citations)
+
+
+class VolumeCitation(Base):
+    __tablename__ = "volume_citations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    volume_id: Mapped[int] = mapped_column(ForeignKey("muscle_group_volumes.id"))
+    citation_id: Mapped[int] = mapped_column(ForeignKey("citations.id"))
+    verification_status: Mapped[str] = mapped_column(String)
+
+    volume: Mapped["MuscleGroupVolume"] = relationship(back_populates="volume_citations")
+    citation: Mapped["Citation"] = relationship(back_populates="volume_citations")
+
 
 class MuscleGroupFrequency(Base):
     __tablename__ = "muscle_group_frequencies"
