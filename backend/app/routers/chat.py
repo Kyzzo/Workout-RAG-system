@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,7 @@ from ..database import get_db
 from ..ownership import get_owned_prescription
 from ..rag.chat_routing import route_chat_message
 from ..rag.generate import (
+    Adjustment,
     answer_general_question,
     answer_prescription_discussion,
     build_intensity_query,
@@ -19,6 +22,7 @@ from .generation import (
     _GENERAL_KNOWLEDGE_NOTE,
     _SUPPORTED_STATUSES,
     _UNSUBSTANTIATED_NOTE,
+    AdjustmentNotHonored,
     _generate_and_persist,
 )
 
@@ -44,13 +48,46 @@ def send_chat_message(
     decision = route_chat_message(request.message, request.field_id)
 
     if decision.tool == "adjust_prescription":
-        return _handle_adjust(decision, db, current_user)
+        return _handle_adjust(decision, db, current_user, request.message)
     if decision.tool == "discuss_prescription":
         return _handle_discuss(decision, db, current_user, request.message)
     return _handle_general_question(decision, request.message)
 
 
-def _handle_adjust(decision, db: Session, current_user: models.User) -> schemas.ChatResponse:
+def _build_adjustment(decision, prescription: models.WeeklyPrescription, raw_message: str) -> Adjustment | None:
+    # None means "regenerate from the research" - the original behavior,
+    # still right for "update this based on the latest research".
+    field = decision.target_field
+    current = getattr(prescription, field)
+    request = decision.requested_change or raw_message
+
+    if decision.adjustment_kind == "set_value":
+        requested = (decision.requested_value or "").strip()
+        if field == "sets":
+            match = re.search(r"\d+", requested)
+            if not match or int(match.group()) <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Couldn't tell what number of sets you want - try e.g. \"make it 4 sets\".",
+                )
+            return Adjustment("set_value", request, current, int(match.group()))
+        if not requested:
+            raise HTTPException(
+                status_code=400,
+                detail="Couldn't tell what load you want - try e.g. \"make it 75% 1RM\" or \"RPE 8\".",
+            )
+        return Adjustment("set_value", request, current, requested)
+
+    if decision.adjustment_kind in ("increase", "decrease"):
+        # Nothing generated yet means there's nothing to move up or down
+        # from - generate it fresh instead.
+        is_placeholder = current == 0 if field == "sets" else not current
+        return None if is_placeholder else Adjustment(decision.adjustment_kind, request, current)
+
+    return None
+
+
+def _handle_adjust(decision, db: Session, current_user: models.User, raw_message: str) -> schemas.ChatResponse:
     if decision.field_id is None:
         raise HTTPException(
             status_code=400,
@@ -69,9 +106,27 @@ def _handle_adjust(decision, db: Session, current_user: models.User) -> schemas.
     # from anchored UI context or the model's own output.
     prescription = get_owned_prescription(decision.field_id, db, current_user)
     generate_fn, query_fn, use_mechanical_check = _ADJUST_FIELDS[decision.target_field]
-    updated = _generate_and_persist(
-        prescription, db, generate_fn, query_fn, decision.target_field, use_mechanical_check
-    )
+    adjustment = _build_adjustment(decision, prescription, raw_message)
+    try:
+        updated = _generate_and_persist(
+            prescription, db, generate_fn, query_fn, decision.target_field, use_mechanical_check,
+            adjustment=adjustment,
+        )
+    except AdjustmentNotHonored as kept:
+        # Raised before _generate_and_persist touches the prescription or
+        # its citations, so there's nothing to undo.
+        direction = "higher" if adjustment.kind == "increase" else "lower"
+        example = "make it 5 sets" if decision.target_field == "sets" else "make it 80% 1RM"
+        return schemas.ChatResponse(
+            mode="adjust_prescription",
+            prescription=schemas.WeeklyPrescriptionOut.model_validate(prescription),
+            answer=(
+                f"Kept at {kept.current_value} - the retrieved research doesn't support going "
+                f"{direction} for {prescription.exercise_slot.muscle_group}. You can still set an "
+                f'exact value (e.g. "{example}"); it will be applied and marked as your override.'
+            ),
+            grounding_note=getattr(prescription, f"{decision.target_field}_grounding_note"),
+        )
     return schemas.ChatResponse(
         mode="adjust_prescription",
         prescription=schemas.WeeklyPrescriptionOut.model_validate(updated),

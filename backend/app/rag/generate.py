@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Literal
 
 import pydantic
@@ -34,6 +35,47 @@ _GENERATION_SYSTEM_PROMPT = (
     "for THIS exercise such that the combined total across all of them "
     "stays within what the research supports."
 )
+
+
+@dataclass
+class Adjustment:
+    """A chat request to change an existing value rather than regenerate it.
+
+    increase/decrease: generation is told the current value and the
+    direction, and to return the current value unchanged if the research
+    doesn't support moving that way (checked mechanically afterwards where
+    possible - see routers/generation.py).
+    set_value: a user override. The value field's type is locked to exactly
+    the requested value, so the model can't substitute its own number - it
+    can only report which retrieved chunks (if any) genuinely support it,
+    and verification then checks those claims as usual.
+    """
+
+    kind: Literal["increase", "decrease", "set_value"]
+    request: str
+    current_value: int | str
+    requested_value: int | str | None = None
+
+    def instruction(self) -> str:
+        if self.kind == "set_value":
+            return (
+                f"The user has chosen the value {self.requested_value!r} themselves "
+                f'("{self.request}"). Your answer must be exactly that value. In '
+                "chunk_ids, cite only chunks that genuinely support that specific "
+                "value; if none do, report grounding as general_knowledge with no "
+                "chunk_ids rather than citing something that doesn't support it."
+            )
+        direction = "higher" if self.kind == "increase" else "lower"
+        return (
+            f"The current prescribed value is {self.current_value!r}. The user asked "
+            f'to make it {direction}: "{self.request}". Choose a value {direction} '
+            f"than {self.current_value!r} that the research still supports. If the "
+            f"research doesn't support going any {direction}, return "
+            f"{self.current_value!r} unchanged."
+        )
+
+    def locked_type(self) -> type | None:
+        return Literal[self.requested_value] if self.kind == "set_value" else None
 
 
 def _build_response_schema(
@@ -78,12 +120,14 @@ def _generate_field(
     query: str,
     field_description: str | None = None,
     sibling_context: str | None = None,
+    adjustment: Adjustment | None = None,
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     chunks = _retrieve_chunks(query, category)
 
     context_block = "\n\n".join(f"[{c['id']}] {c['text']}" for c in chunks)
+    locked_type = adjustment.locked_type() if adjustment else None
     response_schema = _build_response_schema(
-        field_name, field_type, field_description, [c["id"] for c in chunks]
+        field_name, locked_type or field_type, field_description, [c["id"] for c in chunks]
     )
 
     user_content = f"Context:\n{context_block}\n\nQuestion: {query}"
@@ -97,6 +141,8 @@ def _generate_field(
             "\n\nAlready prescribed this week for other exercises training "
             f"the same muscle group:\n{sibling_context}"
         )
+    if adjustment:
+        user_content += f"\n\nAdjustment: {adjustment.instruction()}"
 
     completion = client.chat.completions.parse(
         model="gpt-4o-mini",
@@ -114,15 +160,16 @@ def _generate_field(
 
 
 def generate_volume_sets(
-    muscle_group: str, goal: str, sibling_context: str | None = None
+    muscle_group: str, goal: str, sibling_context: str | None = None, adjustment: Adjustment | None = None
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     return _generate_field(
-        "sets", int, "volume", build_volume_query(muscle_group, goal), sibling_context=sibling_context
+        "sets", int, "volume", build_volume_query(muscle_group, goal),
+        sibling_context=sibling_context, adjustment=adjustment,
     )
 
 
 def generate_intensity_load(
-    muscle_group: str, goal: str, sibling_context: str | None = None
+    muscle_group: str, goal: str, sibling_context: str | None = None, adjustment: Adjustment | None = None
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     # sibling_context accepted for call-signature symmetry with
     # generate_volume_sets (both are called through the same
@@ -137,6 +184,7 @@ def generate_intensity_load(
         build_intensity_query(muscle_group, goal),
         field_description="Training load as a percentage of 1RM (e.g. '70% 1RM') "
         "or an RPE value (e.g. 'RPE 8') - never a rep range or rep count.",
+        adjustment=adjustment,
     )
 
 

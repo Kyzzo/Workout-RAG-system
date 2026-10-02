@@ -105,17 +105,19 @@ export default function ChatWindow({
         </div>
       ) : (
         <p className="text-xs text-zinc-500">
-          Not anchored to a specific exercise - click &quot;ask about this&quot; on a
-          prescription above, or just ask a general research question below.
+          Not anchored to a specific exercise - click &quot;ask / adjust&quot; on a
+          prescription above to ask about it or change it, or just ask a general
+          research question below.
         </p>
       )}
 
       <div className="flex flex-col gap-3 min-h-40 max-h-[28rem] overflow-y-auto border rounded p-4 bg-zinc-50 dark:bg-zinc-900">
         {turns.length === 0 && (
           <p className="text-sm text-zinc-500">
-            Ask about a prescription (click &quot;ask about this&quot; above to
-            anchor the conversation to it), or ask a general research
-            question.
+            Click &quot;ask / adjust&quot; on a prescription above, then ask about
+            it (&quot;why this load?&quot;) or change it (&quot;make it 4 sets&quot;,
+            &quot;add more volume&quot;, &quot;go lighter&quot;). Or ask a general
+            research question.
           </p>
         )}
         {turns.map((turn, i) => {
@@ -145,7 +147,11 @@ export default function ChatWindow({
           ref={messageInputRef}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          placeholder="Ask a question or request a change..."
+          placeholder={
+            fieldId !== null
+              ? 'e.g. "make it 4 sets", "add more volume", "why this load?"'
+              : "Ask a general research question..."
+          }
           className="border rounded px-3 py-2 flex-1"
           required
         />
@@ -166,11 +172,14 @@ function ChatTurnResult({ response }: { response: ChatResponse }) {
     const p = response.prescription;
     return (
       <div className="self-start bg-white dark:bg-zinc-800 border rounded px-3 py-2 max-w-[90%] text-sm">
-        <p className="font-medium">Updated prescription #{p.id}</p>
-        <p>
-          {p.sets} sets - {p.reps} reps - {p.load}
+        {/* An answer on an adjust means the requested direction couldn't be
+            honored and the value was kept - see chat.py _handle_adjust. */}
+        <p className="font-medium">{response.answer ? "Kept as is" : "Updated"}</p>
+        {response.answer && <p>{response.answer}</p>}
+        <p className={response.answer ? "text-zinc-500 text-xs mt-1" : ""}>
+          {p.sets} sets - {p.reps || "reps n/a"} - {p.load || "load n/a"}
         </p>
-        {response.grounding_note ? (
+        {response.answer ? null : response.grounding_note ? (
           <p className="text-amber-600 text-xs mt-1">{response.grounding_note}</p>
         ) : (
           <p className="text-green-700 dark:text-green-500 text-xs mt-1">

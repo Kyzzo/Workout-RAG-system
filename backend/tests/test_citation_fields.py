@@ -177,6 +177,7 @@ def test_chat_adjust_returns_the_target_fields_note(mock_persist, mock_route, db
     mock_persist.return_value = prescription
     mock_route.return_value = SimpleNamespace(
         tool="adjust_prescription", field_id=prescription.id, target_field="load",
+        adjustment_kind="regenerate", requested_value=None,
         requested_change=None, question=None, topic=None,
     )
 

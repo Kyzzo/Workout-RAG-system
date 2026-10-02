@@ -13,6 +13,8 @@ def _route(tool, **kwargs):
         tool=tool,
         field_id=kwargs.get("field_id"),
         target_field=kwargs.get("target_field"),
+        adjustment_kind=kwargs.get("adjustment_kind"),
+        requested_value=kwargs.get("requested_value"),
         requested_change=kwargs.get("requested_change"),
         question=kwargs.get("question"),
         topic=kwargs.get("topic"),

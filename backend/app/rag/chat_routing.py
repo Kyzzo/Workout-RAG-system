@@ -25,7 +25,12 @@ _ROUTER_SYSTEM_PROMPT = (
     "e.g. 'add more volume for my squats' or 'update my bench load based "
     "on the latest research'. Also set target_field to whichever of "
     "'sets' (volume/how many sets) or 'load' (intensity/%1RM/RPE) the "
-    "request is actually about.\n"
+    "request is actually about, and adjustment_kind to what's being asked: "
+    "'set_value' if the user names an exact value (also put that value in "
+    "requested_value, e.g. '4' for sets or '75% 1RM' / 'RPE 8' for load), "
+    "'increase' or 'decrease' for a direction without an exact value "
+    "('more volume', 'go lighter'), or 'regenerate' to just redo it from the "
+    "research ('update based on the latest research').\n"
     "- discuss_prescription: the user is asking ABOUT a specific already-"
     "generated value without asking to change it, e.g. 'why is this 8-10 "
     "reps' or 'what's the evidence behind this'.\n"
@@ -50,6 +55,16 @@ class ChatRouteDecision(pydantic.BaseModel):
         default=None,
         description="For adjust_prescription only: which value the user "
         "wants changed - 'sets' (volume) or 'load' (intensity).",
+    )
+    adjustment_kind: Literal["set_value", "increase", "decrease", "regenerate"] | None = pydantic.Field(
+        default=None,
+        description="For adjust_prescription only: an exact value, a direction, "
+        "or a plain regenerate.",
+    )
+    requested_value: str | None = pydantic.Field(
+        default=None,
+        description="For adjust_prescription with adjustment_kind='set_value' "
+        "only: the exact value the user asked for, e.g. '4' or '75% 1RM'.",
     )
     requested_change: str | None = pydantic.Field(
         default=None,

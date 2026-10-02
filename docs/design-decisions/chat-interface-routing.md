@@ -125,11 +125,32 @@ real input:
 - Conversation state. Each message is currently routed and answered on its
   own, with no conversation history, so a discussion can't carry context
   into a follow-up edit request yet.
-- Turning a *specific* edit request into a written change. Today the edit
-  action identifies which value to change and re-runs the full generation
-  and verification pipeline for it, but doesn't yet use the direction or
-  target in the request ("more volume", "make it 4 sets") — it
-  regenerates rather than adjusts. Representing an in-place exercise swap
-  without rewriting already-cited history (an open schema question, see
-  [future work](../future-work.md)) also still needs resolving before
-  edits can go beyond numbers.
+- Edits beyond numbers. Representing an in-place exercise swap without
+  rewriting already-cited history is still an open schema question (see
+  [future work](../future-work.md)).
+
+## Edits that do what was asked
+
+The first version of the edit action identified which value to change and
+then simply regenerated it, ignoring the request itself. Edits now come in
+three structured kinds, extracted by the same routing call:
+
+- **A direction** ("more volume", "go lighter"). Generation is told the
+  current value and the direction, and to leave the value unchanged if the
+  research doesn't support moving that way. The result is then checked
+  mechanically: if the value didn't move, or moved the wrong way, nothing is
+  saved and the user is told why. The check only compares like with like —
+  a load expressed as a percentage of a max can be compared with another
+  percentage, but not with an effort rating, so a change across units is
+  accepted as a change rather than judged higher or lower.
+- **An exact value** ("make it 4 sets"). This is an informed override, the
+  case field-level attribution exists to support. The value field's type is
+  constrained to exactly the requested value, so the model can't quietly
+  substitute its own number — all it can still decide is which retrieved
+  sources genuinely support that value. Verification then checks those
+  claims exactly as it would for a generated value. If nothing supports it,
+  the value is still applied, with a caveat that says it was the user's
+  choice rather than a generic "not substantiated" message — the user
+  overruled the research knowingly, and the record should say so.
+- **A plain regenerate** ("update this based on the latest research"),
+  which behaves as before.

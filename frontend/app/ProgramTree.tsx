@@ -331,7 +331,7 @@ export default function ProgramTree({
                                   onClick={() => onAskAbout(wp, label)}
                                   className={`${actionClass} text-indigo-600 dark:text-indigo-400`}
                                 >
-                                  {isAnchored ? "anchored" : "ask about this"}
+                                  {isAnchored ? "anchored" : "ask / adjust"}
                                 </button>
                               </span>
                             </div>

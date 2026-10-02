@@ -2,6 +2,7 @@ import logging
 import re
 
 from ..rag.generate import (
+    Adjustment,
     build_frequency_query,
     build_intensity_query,
     build_progression_query,
@@ -34,7 +35,46 @@ _PROGRESSION_DERIVED_NOTE = (
     "Calculated from week 1's load by the block's linear progression scheme "
     "- the scheme is cited, this specific week's number is not."
 )
+_USER_OVERRIDE_NOTE = "Set by you - the current research corpus doesn't support this specific value."
 _SUPPORTED_STATUSES = models.SUPPORTED_VERIFICATION_STATUSES
+
+
+class AdjustmentNotHonored(Exception):
+    # Raised (before anything is saved) when an increase/decrease request
+    # came back unchanged or moved the wrong way - per the product
+    # decision, the current value is kept and the user is told why, rather
+    # than pushing past what the research supports.
+    def __init__(self, current_value):
+        super().__init__(f"Kept at {current_value}")
+        self.current_value = current_value
+
+
+_RPE_PATTERN = re.compile(r"RPE\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def _comparable(value) -> tuple[str, float] | None:
+    # Puts a value on a number line where possible: sets are plain ints;
+    # load only compares within one unit system (%1RM vs %1RM, RPE vs RPE).
+    if isinstance(value, int):
+        return ("sets", value)
+    percent = _LOAD_PERCENT_PATTERN.search(value)
+    if percent:
+        return ("%1RM", float(percent.group(1)))
+    rpe = _RPE_PATTERN.search(value)
+    if rpe:
+        return ("RPE", float(rpe.group(1)))
+    return None
+
+
+def _direction_honored(adjustment: Adjustment, old, new) -> bool:
+    if adjustment.kind == "set_value":
+        return True
+    if old == new:
+        return False  # the generation prompt's own signal for "research doesn't support moving"
+    a, b = _comparable(old), _comparable(new)
+    if a is None or b is None or a[0] != b[0]:
+        return True  # e.g. %1RM -> RPE: changed, but no honest way to call it higher or lower
+    return b[1] > a[1] if adjustment.kind == "increase" else b[1] < a[1]
 
 
 def _get_or_create_citation(db: Session, chunk: dict) -> models.Citation:
@@ -96,9 +136,9 @@ def _sibling_volume_summary(prescription: models.WeeklyPrescription, db: Session
 
 def _attempt_generation(
     generate_fn, query_fn, field_name: str, muscle_group: str, goal: str, use_mechanical_check: bool,
-    sibling_context: str | None = None,
+    sibling_context: str | None = None, adjustment: Adjustment | None = None,
 ):
-    result, chunks = generate_fn(muscle_group, goal, sibling_context=sibling_context)
+    result, chunks = generate_fn(muscle_group, goal, sibling_context=sibling_context, adjustment=adjustment)
     query = query_fn(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
     value = getattr(result, field_name)
@@ -121,6 +161,7 @@ def _generate_and_persist(
     query_fn,
     field_name: str,
     use_mechanical_check: bool,
+    adjustment: Adjustment | None = None,
 ) -> models.WeeklyPrescription:
     muscle_group = prescription.exercise_slot.muscle_group
     goal = prescription.exercise_slot.day_template.mesocycle.program.goal
@@ -129,7 +170,7 @@ def _generate_and_persist(
     sibling_context = _sibling_volume_summary(prescription, db) if field_name == "sets" else None
 
     result, verified, any_supported = _attempt_generation(
-        generate_fn, query_fn, field_name, muscle_group, goal, use_mechanical_check, sibling_context
+        generate_fn, query_fn, field_name, muscle_group, goal, use_mechanical_check, sibling_context, adjustment
     )
 
     # A single bounded retry (never a loop) is worth attempting when the
@@ -141,8 +182,12 @@ def _generate_and_persist(
     # that (citation_verification.txt section 7).
     if not any_supported and result.grounding != "general_knowledge":
         result, verified, any_supported = _attempt_generation(
-            generate_fn, query_fn, field_name, muscle_group, goal, use_mechanical_check, sibling_context
+            generate_fn, query_fn, field_name, muscle_group, goal, use_mechanical_check, sibling_context, adjustment
         )
+
+    current_value = getattr(prescription, field_name)
+    if adjustment and not _direction_honored(adjustment, current_value, getattr(result, field_name)):
+        raise AdjustmentNotHonored(current_value)
 
     setattr(prescription, field_name, getattr(result, field_name))
 
@@ -151,6 +196,10 @@ def _generate_and_persist(
     note_attr = f"{field_name}_grounding_note"
     if any_supported:
         setattr(prescription, note_attr, None)
+    elif adjustment and adjustment.kind == "set_value":
+        # Distinct from "the model estimated this": the user chose it,
+        # and it's applied anyway (an informed override, not a refusal).
+        setattr(prescription, note_attr, _USER_OVERRIDE_NOTE)
     elif result.grounding == "general_knowledge":
         setattr(prescription, note_attr, _GENERAL_KNOWLEDGE_NOTE)
     else:

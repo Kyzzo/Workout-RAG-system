@@ -93,9 +93,10 @@ PHASE 6 — Chat interface + remaining product surface  <- CURRENT PHASE
 2. Preset/suggested prompts (frontend-only convenience, submits into the
    same chat) — not started
 3. Program revision mode (AI-assisted edit) — same machinery, scoped to
-   existing rows — PARTIAL: sets/load can be regenerated from chat, but
-   the requested direction/target isn't used yet (regenerates, doesn't
-   adjust)
+   existing rows — DONE for sets/load: chat handles exact values (applied
+   as a user override, cited only by what supports it), directions
+   (moved, or kept with an explanation), and plain regenerate. Exercise
+   swaps still not supported
 4. Conversational Q&A mode — retrieval + citation, no structured-output
    step — DONE, with claim-level citations verified per claim
 5. User document upload -> user_context collection, user_id-filtered
