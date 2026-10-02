@@ -1,11 +1,53 @@
 # Pydantic request/response schemas
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import AfterValidator, BaseModel, Field, model_validator
+
+
+def _normalize_muscle_group(value: str) -> str:
+    # Sibling-volume lookup, frequency day-counting, and progression all
+    # match muscle_group by exact string equality - "Chest" and "chest "
+    # would silently count as two different muscle groups otherwise.
+    normalized = value.strip().lower()
+    if not normalized:
+        raise ValueError("muscle_group must not be empty")
+    return normalized
+
+
+MuscleGroup = Annotated[str, AfterValidator(_normalize_muscle_group)]
 
 
 class ProgramCreate(BaseModel):
     goal: str
+
+
+class ProgramSummaryOut(BaseModel):
+    id: int
+    goal: str
+
+    model_config = {"from_attributes": True}
+
+
+class MesocycleCreate(BaseModel):
+    name: str = Field(min_length=1)
+    start_week: int = Field(ge=1)
+    end_week: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _check_week_range(self):
+        if self.end_week < self.start_week:
+            raise ValueError("end_week must be on or after start_week")
+        return self
+
+
+class DayTemplateCreate(BaseModel):
+    name: str = Field(min_length=1)
+    rest_days_before: int | None = Field(default=None, ge=0)
+
+
+class ExerciseSlotCreate(BaseModel):
+    exercise_name: str = Field(min_length=1)
+    muscle_group: MuscleGroup
 
 
 class ProgramOut(BaseModel):
@@ -59,7 +101,7 @@ class WeeklyPrescriptionOut(BaseModel):
 
 
 class GenerateFrequencyRequest(BaseModel):
-    muscle_group: str
+    muscle_group: MuscleGroup
 
 
 class MuscleGroupFrequencyOut(BaseModel):
@@ -78,7 +120,7 @@ class GenerateFrequencyResponse(BaseModel):
 
 
 class GenerateProgressionRequest(BaseModel):
-    muscle_group: str
+    muscle_group: MuscleGroup
 
 
 class ProgressionSchemeOut(BaseModel):

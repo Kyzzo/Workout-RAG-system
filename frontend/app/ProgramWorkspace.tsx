@@ -1,47 +1,83 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
-import { useState } from "react";
-import { API_URL } from "./apiUrl";
+import { useCallback, useEffect, useState } from "react";
 import ChatWindow from "./ChatWindow";
+import ProgramForm from "./ProgramForm";
 import ProgramTree from "./ProgramTree";
-import type { Program, WeeklyPrescription } from "./types";
+import type { Program, ProgramSummary, WeeklyPrescription } from "./types";
+import { useApi } from "./useApi";
 
 export default function ProgramWorkspace() {
-  const { getToken } = useAuth();
-  const [programId, setProgramId] = useState("");
+  const api = useApi();
+  const [programs, setPrograms] = useState<ProgramSummary[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [program, setProgram] = useState<Program | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const [anchoredFieldId, setAnchoredFieldId] = useState<number | null>(null);
   const [anchorLabel, setAnchorLabel] = useState<string | null>(null);
 
-  async function handleLoad(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setProgram(null);
+  const clearAnchor = useCallback(() => {
     setAnchoredFieldId(null);
     setAnchorLabel(null);
-    setLoading(true);
+  }, []);
 
-    try {
-      const token = await getToken();
-      const res = await fetch(`${API_URL}/programs/${programId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) {
-        setError(`Request failed: ${res.status} ${await res.text()}`);
-        return;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await api<ProgramSummary[]>("/programs/");
+        if (cancelled) return;
+        setPrograms(list);
+        setSelectedId((current) => current ?? list[0]?.id ?? null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
-      setProgram(await res.json());
+  // Refetches the whole nested program after any structural change or
+  // generation call, rather than patching nested state by hand - the
+  // backend's response is the single source of truth for what changed
+  // (e.g. frequency generation can add whole days).
+  const reloadProgram = useCallback(async () => {
+    if (selectedId === null) return;
+    try {
+      setProgram(await api<Program>(`/programs/${selectedId}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
     }
+  }, [api, selectedId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (selectedId === null) return;
+      try {
+        const loaded = await api<Program>(`/programs/${selectedId}`);
+        if (!cancelled) setProgram(loaded);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, selectedId]);
+
+  function handleSelect(id: number) {
+    setError(null);
+    setProgram(null);
+    clearAnchor();
+    setSelectedId(id);
+  }
+
+  function handleCreated(created: ProgramSummary) {
+    setPrograms((prev) => [created, ...prev]);
+    handleSelect(created.id);
   }
 
   function handleAskAbout(prescription: WeeklyPrescription, label: string) {
@@ -50,35 +86,44 @@ export default function ProgramWorkspace() {
   }
 
   return (
-    <div className="flex flex-col items-center gap-6 p-8 w-full max-w-lg">
-      <form onSubmit={handleLoad} className="flex gap-2 w-full">
-        <input
-          value={programId}
-          onChange={(e) => setProgramId(e.target.value)}
-          placeholder="Program id (e.g. 1)"
-          className="border rounded px-3 py-2 flex-1"
-          required
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded bg-black text-white px-4 py-2 disabled:opacity-50 dark:bg-white dark:text-black"
-        >
-          {loading ? "Loading..." : "View Program"}
-        </button>
-      </form>
-      {error && <p className="text-red-600">{error}</p>}
+    <div className="flex flex-col items-center gap-6 p-8 w-full max-w-3xl">
+      <ProgramForm onCreated={handleCreated} />
+
+      {programs.length > 0 && (
+        <div className="flex items-center gap-2 w-full">
+          <label className="text-sm text-zinc-500">Program:</label>
+          <select
+            value={selectedId ?? ""}
+            onChange={(e) => handleSelect(Number(e.target.value))}
+            className="border rounded px-3 py-2 flex-1 bg-white dark:bg-zinc-900"
+          >
+            {programs.map((p) => (
+              <option key={p.id} value={p.id}>
+                #{p.id} - {p.goal}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {error && <p className="text-red-600 text-sm w-full">{error}</p>}
+      {selectedId !== null && program === null && !error && (
+        <p className="text-zinc-500 text-sm w-full">Loading program...</p>
+      )}
       {program && (
-        <ProgramTree program={program} anchoredFieldId={anchoredFieldId} onAskAbout={handleAskAbout} />
+        <ProgramTree
+          program={program}
+          anchoredFieldId={anchoredFieldId}
+          onAskAbout={handleAskAbout}
+          onChanged={reloadProgram}
+        />
       )}
 
       <ChatWindow
         fieldId={anchoredFieldId}
         anchorLabel={anchorLabel}
-        onClearAnchor={() => {
-          setAnchoredFieldId(null);
-          setAnchorLabel(null);
-        }}
+        onClearAnchor={clearAnchor}
+        onPrescriptionUpdated={reloadProgram}
       />
     </div>
   );

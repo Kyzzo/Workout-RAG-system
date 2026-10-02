@@ -37,6 +37,11 @@ export type Mesocycle = {
   day_templates: DayTemplate[];
 };
 
+export type ProgramSummary = {
+  id: number;
+  goal: string;
+};
+
 export type Program = {
   id: number;
   user_id: number;

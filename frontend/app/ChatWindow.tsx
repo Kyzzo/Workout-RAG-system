@@ -24,6 +24,7 @@ export default function ChatWindow({
   fieldId,
   anchorLabel,
   onClearAnchor,
+  onPrescriptionUpdated,
 }: {
   // Structural context (phase6_chat_routing_concepts.txt section 2): set by
   // clicking "ask about this" on a rendered prescription in ProgramTree, not
@@ -33,6 +34,8 @@ export default function ChatWindow({
   fieldId: number | null;
   anchorLabel: string | null;
   onClearAnchor: () => void;
+  // Lets the program view refetch after an adjust changes a stored value.
+  onPrescriptionUpdated?: () => void;
 }) {
   const { getToken } = useAuth();
   const [message, setMessage] = useState("");
@@ -78,6 +81,7 @@ export default function ChatWindow({
 
       const data: ChatResponse = await res.json();
       setTurns((prev) => [...prev, { role: "assistant", response: data }]);
+      if (data.mode === "adjust_prescription") onPrescriptionUpdated?.();
     } catch (err) {
       setTurns((prev) => [
         ...prev,
@@ -89,7 +93,7 @@ export default function ChatWindow({
   }
 
   return (
-    <div className="flex flex-col gap-4 p-8 w-full max-w-lg">
+    <div className="flex flex-col gap-4 w-full">
       {fieldId !== null ? (
         <div className="flex items-center justify-between gap-2 border rounded px-3 py-2 text-sm bg-indigo-50 dark:bg-indigo-950">
           <span>

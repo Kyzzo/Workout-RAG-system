@@ -21,6 +21,19 @@ def create_program(
     return db_program
 
 
+@router.get("/", response_model=list[schemas.ProgramSummaryOut])
+def list_programs(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return (
+        db.query(models.Program)
+        .filter(models.Program.user_id == current_user.id)
+        .order_by(models.Program.id.desc())
+        .all()
+    )
+
+
 @router.get("/{program_id}", response_model=schemas.ProgramOut)
 def get_program(
     program_id: int,

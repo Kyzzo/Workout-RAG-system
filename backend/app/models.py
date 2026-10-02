@@ -18,7 +18,7 @@ class Program(Base):
     goal: Mapped[str] = mapped_column(String)
 
     user: Mapped["User"] = relationship(back_populates="programs") #one ForeignKey so auto-detected, no need to specify
-    mesocycles: Mapped[list["Mesocycle"]] = relationship(back_populates="program")
+    mesocycles: Mapped[list["Mesocycle"]] = relationship(back_populates="program", order_by="Mesocycle.start_week")
 
 class Mesocycle(Base):
     __tablename__ = "mesocycles"
@@ -30,7 +30,7 @@ class Mesocycle(Base):
     end_week: Mapped[int] = mapped_column()
 
     program: Mapped["Program"] = relationship(back_populates="mesocycles")
-    day_templates: Mapped[list["DayTemplate"]] = relationship(back_populates="mesocycle")
+    day_templates: Mapped[list["DayTemplate"]] = relationship(back_populates="mesocycle", order_by="DayTemplate.order")
     muscle_group_frequencies: Mapped[list["MuscleGroupFrequency"]] = relationship(back_populates="mesocycle")
     progression_schemes: Mapped[list["ProgressionScheme"]] = relationship(back_populates="mesocycle")
 
@@ -44,7 +44,7 @@ class DayTemplate(Base):
     rest_days_before: Mapped[int | None] = mapped_column(nullable=True)
 
     mesocycle: Mapped["Mesocycle"] = relationship(back_populates="day_templates")
-    exercise_slots: Mapped[list["ExerciseSlot"]] = relationship(back_populates="day_template")
+    exercise_slots: Mapped[list["ExerciseSlot"]] = relationship(back_populates="day_template", order_by="ExerciseSlot.order", cascade="all, delete-orphan")
 
 class ExerciseSlot(Base):
     __tablename__ = "exercise_slots"
@@ -56,7 +56,7 @@ class ExerciseSlot(Base):
     order: Mapped[int] = mapped_column()
 
     day_template: Mapped["DayTemplate"] = relationship(back_populates="exercise_slots")
-    weekly_prescriptions: Mapped[list["WeeklyPrescription"]] = relationship(back_populates="exercise_slot")
+    weekly_prescriptions: Mapped[list["WeeklyPrescription"]] = relationship(back_populates="exercise_slot", order_by="WeeklyPrescription.week_number", cascade="all, delete-orphan")
 
 class WeeklyPrescription(Base):
     __tablename__ = "weekly_prescriptions"
@@ -70,7 +70,7 @@ class WeeklyPrescription(Base):
     grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
 
     exercise_slot: Mapped["ExerciseSlot"] = relationship(back_populates="weekly_prescriptions")
-    prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="prescription")
+    prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="prescription", cascade="all, delete-orphan")
 
 class UserDocument(Base):
     __tablename__ = "user_documents"
