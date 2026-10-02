@@ -3,7 +3,7 @@ import pytest
 from fastapi import HTTPException
 
 from app import models, schemas
-from app.routers.programs import list_programs
+from app.routers.programs import delete_program, list_programs
 from app.routers.structure import (
     create_day_template,
     create_exercise_slot,
@@ -105,6 +105,18 @@ def test_create_exercise_adds_placeholder_prescription_per_week(db_session, owne
     assert all(wp.sets == 0 and wp.reps == "" and wp.load == "" for wp in slot.weekly_prescriptions)
 
 
+def test_create_exercise_normalizes_secondaries(db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    day = prescription.exercise_slot.day_template
+    request = schemas.ExerciseSlotCreate(
+        exercise_name="Barbell Row", muscle_group="Upper Back", secondary_muscle_groups=[" Lats", "upper back", "lats"],
+    )
+
+    slot = create_exercise_slot(day_template_id=day.id, request=request, db=db_session, current_user=user)
+
+    assert (slot.muscle_group, slot.secondary_muscle_groups) == ("upper back", ["lats"])
+
+
 def test_exercise_create_rejects_blank_muscle_group():
     with pytest.raises(pydantic.ValidationError):
         schemas.ExerciseSlotCreate(exercise_name="Mystery Lift", muscle_group="   ")
@@ -188,3 +200,48 @@ def test_delete_exercise_ownership_enforced(db_session, owner_and_prescription, 
 
     assert exc_info.value.status_code == 404
     assert db_session.get(models.ExerciseSlot, slot_id) is not None
+
+
+# --- delete program: cascades through the whole tree, including block-level
+# frequency/progression records, but keeps shared Citation rows.
+
+def test_delete_program_removes_everything_under_it(db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    mesocycle = prescription.exercise_slot.day_template.mesocycle
+    program_id, mesocycle_id = mesocycle.program_id, mesocycle.id
+    citation = _cite(db_session, prescription)
+    frequency = models.MuscleGroupFrequency(mesocycle_id=mesocycle_id, muscle_group="chest", frequency=2)
+    scheme = models.ProgressionScheme(mesocycle_id=mesocycle_id, muscle_group="chest", scheme="linear")
+    db_session.add_all([frequency, scheme])
+    db_session.flush()
+    db_session.add_all([
+        models.FrequencyCitation(frequency_id=frequency.id, citation_id=citation.id, verification_status="primary_support"),
+        models.ProgressionSchemeCitation(scheme_id=scheme.id, citation_id=citation.id, verification_status="primary_support"),
+    ])
+    db_session.flush()
+    other_program = models.Program(user_id=user.id, goal="strength")
+    db_session.add(other_program)
+    db_session.flush()
+
+    delete_program(program_id=program_id, db=db_session, current_user=user)
+
+    db_session.expire_all()
+    assert db_session.get(models.Program, program_id) is None
+    assert db_session.get(models.Mesocycle, mesocycle_id) is None
+    assert db_session.get(models.WeeklyPrescription, prescription.id) is None
+    assert db_session.query(models.MuscleGroupFrequency).filter_by(mesocycle_id=mesocycle_id).count() == 0
+    assert db_session.query(models.ProgressionScheme).filter_by(mesocycle_id=mesocycle_id).count() == 0
+    assert db_session.query(models.FrequencyCitation).filter_by(frequency_id=frequency.id).count() == 0
+    assert db_session.get(models.Citation, citation.id) is not None  # shared, kept
+    assert db_session.get(models.Program, other_program.id) is not None  # untouched
+
+
+def test_delete_program_ownership_enforced(db_session, owner_and_prescription, other_user):
+    _, prescription = owner_and_prescription
+    program_id = prescription.exercise_slot.day_template.mesocycle.program_id
+
+    with pytest.raises(HTTPException) as exc_info:
+        delete_program(program_id=program_id, db=db_session, current_user=other_user)
+
+    assert exc_info.value.status_code == 404
+    assert db_session.get(models.Program, program_id) is not None

@@ -14,8 +14,10 @@ const buttonClass =
 
 // Muscle-group names the backend's retrieval queries are phrased around.
 // Suggestions only - any value is accepted and normalized server-side.
+// Mirrors backend/app/splits.py MUSCLE_GROUPS.
 const MUSCLE_GROUPS = [
-  "chest", "back", "shoulders", "biceps", "triceps",
+  "chest", "lats", "upper back", "lower back",
+  "front delts", "side delts", "rear delts", "biceps", "triceps",
   "quadriceps", "hamstrings", "glutes", "calves", "abs",
 ];
 
@@ -150,6 +152,7 @@ export function AddExerciseForm({ dayTemplateId, onAdded }: { dayTemplateId: num
   const { submitting, error, submit } = useSubmit(onAdded);
   const [exerciseName, setExerciseName] = useState("");
   const [muscleGroup, setMuscleGroup] = useState("");
+  const [secondaries, setSecondaries] = useState("");
   const listId = `muscle-groups-${dayTemplateId}`;
 
   return (
@@ -160,9 +163,19 @@ export function AddExerciseForm({ dayTemplateId, onAdded }: { dayTemplateId: num
           () =>
             api(`/day-templates/${dayTemplateId}/exercises`, {
               method: "POST",
-              body: { exercise_name: exerciseName, muscle_group: muscleGroup },
+              body: {
+                exercise_name: exerciseName,
+                muscle_group: muscleGroup,
+                secondary_muscle_groups: secondaries
+                  .split(",")
+                  .map((g) => g.trim())
+                  .filter(Boolean),
+              },
             }),
-          () => setExerciseName(""),
+          () => {
+            setExerciseName("");
+            setSecondaries("");
+          },
         );
       }}
       className="flex flex-wrap items-center gap-2"
@@ -177,10 +190,17 @@ export function AddExerciseForm({ dayTemplateId, onAdded }: { dayTemplateId: num
       <input
         value={muscleGroup}
         onChange={(e) => setMuscleGroup(e.target.value)}
-        placeholder="Muscle group"
+        placeholder="Main muscle"
         list={listId}
         className={`${inputClass} w-36`}
         required
+      />
+      <input
+        value={secondaries}
+        onChange={(e) => setSecondaries(e.target.value)}
+        placeholder="Also trains (optional, e.g. lats, biceps)"
+        title="Up to 3 secondary muscles, comma-separated - each counts as half a set toward that muscle's weekly volume"
+        className={`${inputClass} w-64`}
       />
       <datalist id={listId}>
         {MUSCLE_GROUPS.map((group) => (

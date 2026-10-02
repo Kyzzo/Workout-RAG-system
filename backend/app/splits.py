@@ -23,34 +23,57 @@ class Split:
     allowed_days: tuple[int, ...]
 
 
-_UPPER = DayType("Upper", ("chest", "back", "shoulders", "biceps", "triceps"))
-_LOWER = DayType("Lower", ("quadriceps", "hamstrings", "glutes", "calves", "abs"))
-_LEGS = DayType("Legs", ("quadriceps", "hamstrings", "glutes", "calves"))
+# The muscle groups splits target and exercises are tagged with. Finer
+# than "back"/"shoulders": vertical pulls (lats) and horizontal pulls
+# (upper back) train different things, as do side and rear delts.
+MUSCLE_GROUPS = (
+    "chest", "lats", "upper back", "lower back",
+    "front delts", "side delts", "rear delts", "biceps", "triceps",
+    "quadriceps", "hamstrings", "glutes", "calves", "abs",
+)
+
+# Targets that may be covered by an exercise's SECONDARY muscles rather
+# than needing a dedicated exercise: pressing already trains front delts
+# and hinging already trains the lower back, so a front raise or back
+# extension isn't forced into every day that lists them.
+COVERED_AS_SECONDARY_OK = frozenset({"front delts", "lower back"})
+
+_UPPER = DayType("Upper", (
+    "chest", "lats", "upper back", "front delts", "side delts", "rear delts", "biceps", "triceps",
+))
+_LOWER = DayType("Lower", ("quadriceps", "hamstrings", "glutes", "lower back", "calves", "abs"))
+_LEGS = DayType("Legs", ("quadriceps", "hamstrings", "glutes", "lower back", "calves", "abs"))
 
 SPLITS: dict[str, Split] = {
     "upper_lower": Split("Upper/Lower", (_UPPER, _LOWER), (2, 4, 6)),
     "ppl": Split("Push/Pull/Legs", (
-        DayType("Push", ("chest", "shoulders", "triceps")),
-        DayType("Pull", ("back", "biceps")),
+        DayType("Push", ("chest", "front delts", "side delts", "triceps")),
+        DayType("Pull", ("lats", "upper back", "rear delts", "biceps")),
         _LEGS,
     ), (3, 6)),
     "anterior_posterior": Split("Anterior/Posterior", (
-        DayType("Anterior", ("chest", "shoulders", "quadriceps", "biceps", "abs")),
-        DayType("Posterior", ("back", "hamstrings", "glutes", "triceps", "calves")),
+        DayType("Anterior", ("chest", "front delts", "side delts", "quadriceps", "biceps", "abs")),
+        DayType("Posterior", (
+            "lats", "upper back", "rear delts", "hamstrings", "glutes", "lower back", "triceps", "calves",
+        )),
     ), (2, 4, 6)),
     "torso_limbs": Split("Torso/Limbs", (
-        DayType("Torso", ("chest", "back", "shoulders", "abs")),
+        DayType("Torso", (
+            "chest", "lats", "upper back", "front delts", "side delts", "rear delts", "lower back", "abs",
+        )),
         DayType("Limbs", ("quadriceps", "hamstrings", "glutes", "calves", "biceps", "triceps")),
     ), (2, 4, 6)),
     "arnold": Split("Arnold", (
-        DayType("Chest & Back", ("chest", "back")),
-        DayType("Shoulders & Arms", ("shoulders", "biceps", "triceps")),
-        DayType("Legs", ("quadriceps", "hamstrings", "glutes", "calves", "abs")),
+        DayType("Chest & Back", ("chest", "lats", "upper back")),
+        DayType("Shoulders & Arms", ("front delts", "side delts", "rear delts", "biceps", "triceps")),
+        _LEGS,
     ), (3, 6)),
     # FBEOD: a true every-other-day cycle (3.5 sessions/week) can't repeat
     # within a fixed week, so it's offered as 2-4 full-body days, spaced out.
     "full_body": Split("Full Body (FBEOD)", (
-        DayType("Full Body", ("chest", "back", "shoulders", "quadriceps", "hamstrings", "glutes")),
+        DayType("Full Body", (
+            "chest", "lats", "upper back", "side delts", "quadriceps", "hamstrings", "glutes",
+        )),
     ), (2, 3, 4)),
 }
 

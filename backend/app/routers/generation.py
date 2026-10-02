@@ -15,6 +15,7 @@ from ..rag.generate import (
 from ..rag.verification import verify_citation
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from .. import models, schemas
@@ -107,12 +108,18 @@ def _sibling_volume_summary(prescription: models.WeeklyPrescription, db: Session
     slot = prescription.exercise_slot
     mesocycle = slot.day_template.mesocycle
 
+    # Siblings train this muscle as their primary (full sets) or as a
+    # secondary (half sets - fractional set counting, so a row's lat work
+    # counts toward the lat budget without counting as a full lat set).
     sibling_slots = (
         db.query(models.ExerciseSlot)
         .join(models.DayTemplate)
         .filter(
             models.DayTemplate.mesocycle_id == mesocycle.id,
-            models.ExerciseSlot.muscle_group == slot.muscle_group,
+            or_(
+                models.ExerciseSlot.muscle_group == slot.muscle_group,
+                models.ExerciseSlot.secondary_muscle_groups.any(slot.muscle_group),
+            ),
             models.ExerciseSlot.id != slot.id,
         )
         .all()
@@ -130,7 +137,13 @@ def _sibling_volume_summary(prescription: models.WeeklyPrescription, db: Session
         # suggest the budget is fully free rather than simply unknown yet.
         if sibling_wp is None or (sibling_wp.sets == 0 and not sibling_wp.load):
             continue
-        lines.append(f"- {sibling.exercise_name}: {sibling_wp.sets} sets")
+        if sibling.muscle_group == slot.muscle_group:
+            lines.append(f"- {sibling.exercise_name}: {sibling_wp.sets} sets")
+        else:
+            lines.append(
+                f"- {sibling.exercise_name}: {sibling_wp.sets} sets "
+                f"(trains it secondarily, counts as {sibling_wp.sets / 2:g})"
+            )
 
     return "\n".join(lines) if lines else None
 

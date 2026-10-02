@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from .. import models, schemas
 from ..auth import get_current_user
 from ..database import get_db
+from ..ownership import get_owned_program
 from ..rag.exercise_selection import ExerciseSelectionError, select_exercises
 from ..splits import SPLITS, plan_days
 
@@ -58,10 +59,10 @@ def generate_program(
         )
         db.add(day_template)
         db.flush()
-        for slot_order, (exercise_name, muscle_group) in enumerate(picks, start=1):
+        for slot_order, (exercise_name, muscle_group, secondaries) in enumerate(picks, start=1):
             slot = models.ExerciseSlot(
                 day_template_id=day_template.id, exercise_name=exercise_name,
-                muscle_group=muscle_group, order=slot_order,
+                muscle_group=muscle_group, secondary_muscle_groups=secondaries, order=slot_order,
             )
             slot.weekly_prescriptions = [
                 models.WeeklyPrescription(week_number=week, sets=0, reps="", load="")
@@ -132,3 +133,18 @@ def get_program(
     if program is None:
         raise HTTPException(status_code=404, detail="Program not found")
     return program
+
+
+@router.delete("/{program_id}", status_code=204)
+def delete_program(
+    program_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    # Cascades through the ORM: blocks -> days -> exercises -> weekly values
+    # -> citation links, plus each block's frequency/progression records.
+    # Shared Citation rows are kept (other programs may cite the same chunk).
+    program = get_owned_program(program_id, db, current_user)
+    db.delete(program)
+    db.commit()
+    return Response(status_code=204)

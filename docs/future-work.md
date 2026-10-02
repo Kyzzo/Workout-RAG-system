@@ -45,12 +45,18 @@ no siblings). A hard allocation step that divides the budget across
 sibling exercises up front would close that gap. It needs no schema
 change either way.
 
-**Multi-muscle-group exercises and fractional set-counting.** A deadlift
-trains back, glutes, and hamstrings at once — the schema currently tracks
-a single muscle group per exercise, not a set of muscle groups with
-per-group contribution weights. Possibly resolved by fractional counting
-(a deadlift set counts as half toward hamstrings, half toward back) once
-this becomes a real problem, same territory as the coherence issue above.
+**Multi-muscle exercises — addressed with fractional set counting.** Each
+exercise now has one primary muscle plus up to three secondary muscles. The
+primary drives research retrieval and counts in full toward that muscle's
+weekly volume; each secondary counts as half a set, so a set of rows adds
+half a set to the lat budget without counting as a full lat set. The half
+weighting is a fixed convention, not a research-derived per-exercise value
+— a more precise version would weight contributions by exercise. Relatedly,
+the muscle groups are now finer (lats vs. upper back, front/side/rear
+delts), which sharpens exercise selection and the volume budget, but the
+current corpus studies weekly volume in general rather than per muscle, so
+retrieval surfaces the same evidence for every muscle until muscle-specific
+research is added.
 
 ## Retrieval and generation
 

@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from app import models, schemas
-from app.rag.exercise_selection import ExerciseSelectionError, select_exercises
+from app.rag.exercise_selection import ExerciseSelectionError, _problems, select_exercises
 from app.routers.generation import generate_frequency_endpoint
 from app.routers.programs import generate_program
 from app.splits import SPLITS, plan_days
@@ -26,9 +26,9 @@ def _picks_covering(days):
     # A valid selection: one exercise per target muscle group (min 4 per day).
     result = []
     for day in days:
-        picks = [(f"{day.name} {group} lift", group) for group in day.muscle_groups]
+        picks = [(f"{day.name} {group} lift", group, []) for group in day.muscle_groups]
         while len(picks) < 4:
-            picks.append((f"{day.name} extra {len(picks)}", day.muscle_groups[0]))
+            picks.append((f"{day.name} extra {len(picks)}", day.muscle_groups[0], []))
         result.append(picks)
     return result
 
@@ -68,17 +68,34 @@ def _completion(parsed):
 
 
 def _parsed(days, picks_per_day):
-    return SimpleNamespace(**{
-        f"day_{i + 1}": [SimpleNamespace(exercise_name=n, muscle_group=g) for n, g in picks]
-        for i, picks in enumerate(picks_per_day)
-    })
+    # Builds the structured response shape: the first pick for each target
+    # muscle goes in that muscle's field (None if there isn't one), the rest
+    # go in extras.
+    def exercise(name, sec):
+        return SimpleNamespace(exercise_name=name, is_compound=False, secondary_muscle_groups=sec)
+
+    day_responses = {}
+    for i, (day, picks) in enumerate(zip(days, picks_per_day)):
+        remaining = list(picks)
+        fields = {}
+        for group in day.muscle_groups:
+            match = next((p for p in remaining if p[1] == group), None)
+            if match:
+                remaining.remove(match)
+            fields[group.replace(" ", "_")] = exercise(match[0], match[2]) if match else None
+        fields["extras"] = [
+            SimpleNamespace(exercise_name=n, is_compound=False, muscle_group=g, secondary_muscle_groups=sec)
+            for n, g, sec in remaining
+        ]
+        day_responses[f"day_{i + 1}"] = SimpleNamespace(**fields)
+    return SimpleNamespace(**day_responses)
 
 
 def test_selection_retries_once_when_a_muscle_group_is_missed():
     days = plan_days(SPLITS["ppl"], 3)
     good = _picks_covering(days)
     bad = [list(good[0]), good[1], good[2]]
-    bad[0] = [p for p in bad[0] if p[1] != "triceps"] + [("Extra Press", "chest")]  # Push skips triceps
+    bad[0] = [p for p in bad[0] if p[1] != "triceps"] + [("Extra Press", "chest", [])]  # Push skips triceps
     parse = MagicMock(side_effect=[_completion(_parsed(days, bad)), _completion(_parsed(days, good))])
 
     with patch("app.rag.exercise_selection.client.chat.completions.parse", parse):
@@ -92,7 +109,7 @@ def test_selection_retries_once_when_a_muscle_group_is_missed():
 def test_selection_gives_up_after_one_retry():
     days = plan_days(SPLITS["ppl"], 3)
     bad = _picks_covering(days)
-    bad[1] = [("Row", "back")] * 4  # Pull never covers biceps
+    bad[1] = [("Row", "upper back", ["lats", "rear delts"])] * 4  # Pull never covers biceps
     parse = MagicMock(return_value=_completion(_parsed(days, bad)))
 
     with patch("app.rag.exercise_selection.client.chat.completions.parse", parse):
@@ -155,3 +172,66 @@ def test_frequency_compare_only_never_adds_days(mock_generate, _verify, db_sessi
     assert result.days_added == []
     db_session.refresh(mesocycle)
     assert len(mesocycle.day_templates) == 1
+
+
+# --- finer muscle groups + secondary muscles ----------------------------------
+
+def test_front_delts_and_lower_back_may_be_covered_as_secondaries_but_lats_may_not():
+    days = plan_days(SPLITS["ppl"], 3)  # Push lists front delts; Legs lists lower back
+    picks = _picks_covering(days)
+    picks[0] = [p for p in picks[0] if p[1] != "front delts"] + [("Cable Fly", "chest", [])]
+    picks[0][0] = ("Barbell Bench Press", "chest", ["front delts", "triceps"])
+    picks[2] = [p for p in picks[2] if p[1] != "lower back"]
+    picks[2][1] = ("Romanian Deadlift", "hamstrings", ["glutes", "lower back"])
+    assert _problems(days, _parsed(days, picks)) == []
+
+    # lats are NOT secondary-coverable: a Pull day whose only lat work is a
+    # row's secondary is missing its vertical pull.
+    no_lats = [list(day) for day in picks]
+    no_lats[1] = [p for p in no_lats[1] if p[1] != "lats"] + [("Barbell Row", "upper back", ["lats"])]
+    assert _problems(days, _parsed(days, no_lats)) == ["Pull has no exercise for lats"]
+
+
+def test_selection_cleans_secondaries():
+    days = plan_days(SPLITS["ppl"], 3)
+    picks = _picks_covering(days)
+    row = [i for i, p in enumerate(picks[1]) if p[1] == "upper back"][0]
+    picks[1][row] = ("Barbell Row", "upper back", ["upper back", "lats", "lats", "rear delts", "biceps", "lower back"])
+    parse = MagicMock(return_value=_completion(_parsed(days, picks)))
+
+    with patch("app.rag.exercise_selection.client.chat.completions.parse", parse):
+        result = select_exercises(days, "hypertrophy", "Push/Pull/Legs")
+
+    # primary dropped from its own secondaries, duplicates removed, capped at 3
+    assert result[1][row] == ("Barbell Row", "upper back", ["lats", "rear delts", "biceps"])
+
+
+@patch("app.routers.programs.select_exercises")
+def test_generate_program_stores_secondaries(mock_select, db_session, user):
+    def picks(days, goal, label):
+        result = _picks_covering(days)
+        result[0][0] = ("Barbell Bench Press", result[0][0][1], ["front delts", "triceps"])
+        return result
+    mock_select.side_effect = picks
+    request = schemas.ProgramGenerateRequest(goal="hypertrophy", split="ppl", days_per_week=3)
+
+    program = schemas.ProgramOut.model_validate(generate_program(request=request, db=db_session, current_user=user))
+
+    first = program.mesocycles[0].day_templates[0].exercise_slots[0]
+    assert (first.exercise_name, first.secondary_muscle_groups) == ("Barbell Bench Press", ["front delts", "triceps"])
+
+
+def test_compounds_are_ordered_before_isolation():
+    from app.rag.exercise_selection import _flatten
+
+    day = plan_days(SPLITS["ppl"], 3)[0]  # Push: chest, front delts, side delts, triceps
+    response = SimpleNamespace(
+        chest=SimpleNamespace(exercise_name="Cable Fly", is_compound=False, secondary_muscle_groups=[]),
+        front_delts=None,
+        side_delts=SimpleNamespace(exercise_name="Lateral Raise", is_compound=False, secondary_muscle_groups=[]),
+        triceps=SimpleNamespace(exercise_name="Pushdown", is_compound=False, secondary_muscle_groups=[]),
+        extras=[SimpleNamespace(exercise_name="Bench Press", is_compound=True, muscle_group="chest",
+                                secondary_muscle_groups=["front delts"])],
+    )
+
+    assert [p[0] for p in _flatten(day, response)] == ["Bench Press", "Cable Fly", "Lateral Raise", "Pushdown"]

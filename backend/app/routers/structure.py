@@ -86,6 +86,10 @@ def create_exercise_slot(
         day_template_id=day.id,
         exercise_name=request.exercise_name,
         muscle_group=request.muscle_group,
+        # dict.fromkeys: dedupe keeping order; the primary isn't its own secondary
+        secondary_muscle_groups=[
+            g for g in dict.fromkeys(request.secondary_muscle_groups) if g != request.muscle_group
+        ],
         order=max((s.order for s in day.exercise_slots), default=0) + 1,
     )
     db.add(slot)

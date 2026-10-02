@@ -74,6 +74,7 @@ class DayTemplateCreate(BaseModel):
 class ExerciseSlotCreate(BaseModel):
     exercise_name: str = Field(min_length=1)
     muscle_group: MuscleGroup
+    secondary_muscle_groups: list[MuscleGroup] = Field(default=[], max_length=3)
 
 
 class ProgramOut(BaseModel):
@@ -111,6 +112,7 @@ class ExerciseSlotOut(BaseModel):
     day_template_id: int
     exercise_name: str
     muscle_group: str
+    secondary_muscle_groups: list[str] = []
     order: int
     weekly_prescriptions: list["WeeklyPrescriptionOut"]
 

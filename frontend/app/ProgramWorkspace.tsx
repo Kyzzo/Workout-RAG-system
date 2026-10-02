@@ -16,6 +16,7 @@ export default function ProgramWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [wizardRunning, setWizardRunning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [anchoredFieldId, setAnchoredFieldId] = useState<number | null>(null);
   const [anchorLabel, setAnchorLabel] = useState<string | null>(null);
@@ -73,6 +74,31 @@ export default function ProgramWorkspace() {
     setSelectedId(id);
   }
 
+  async function handleDelete() {
+    const target = programs.find((p) => p.id === selectedId);
+    if (!target) return;
+    const confirmed = window.confirm(
+      `Delete program #${target.id} (${target.goal})?\n\n` +
+        "This deletes all of its blocks, days, exercises, generated values and their citations. This can't be undone.",
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setError(null);
+    try {
+      await api(`/programs/${target.id}`, { method: "DELETE" });
+      const remaining = programs.filter((p) => p.id !== target.id);
+      setPrograms(remaining);
+      clearAnchor();
+      setProgram(null);
+      setSelectedId(remaining[0]?.id ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   function handleCreated(created: ProgramSummary) {
     setPrograms((prev) => [created, ...prev]);
     handleSelect(created.id);
@@ -102,6 +128,14 @@ export default function ProgramWorkspace() {
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting || wizardRunning || selectedId === null}
+            className="text-sm text-red-600 underline disabled:opacity-40 disabled:no-underline shrink-0"
+          >
+            {deleting ? "Deleting..." : "Delete program"}
+          </button>
         </div>
       )}
 

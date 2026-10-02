@@ -41,6 +41,8 @@ export type ExerciseSlot = {
   day_template_id: number;
   exercise_name: string;
   muscle_group: string;
+  // Each counts as half a set toward that muscle's weekly volume.
+  secondary_muscle_groups: string[];
   order: number;
   weekly_prescriptions: WeeklyPrescription[];
 };

@@ -250,10 +250,10 @@ export default function ProgramTree({
                     <div key={group} className="pl-3">
                       <div className="flex flex-wrap items-center gap-3">
                         <span className="w-24">{group}</span>
-                        <span className="text-zinc-500">you: {daysTraining(mesocycle, group)}x/week</span>
+                        <span className="text-zinc-500">you train it {daysTraining(mesocycle, group)}x/week</span>
                         {frequency && (
                           <span>
-                            research: {frequency.frequency}x/week
+                            research suggests {frequency.frequency}x/week
                             <SourcesBadge
                               citations={frequency.supporting_citations}
                               note={frequency.grounding_note}
@@ -336,7 +336,11 @@ export default function ProgramTree({
                   <div key={slot.id} className="pl-3">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-zinc-600 dark:text-zinc-400">
-                        {slot.exercise_name} ({slot.muscle_group})
+                        {slot.exercise_name} ({slot.muscle_group}
+                        {slot.secondary_muscle_groups.length > 0 && (
+                          <span className="text-zinc-400"> · also {slot.secondary_muscle_groups.join(", ")}</span>
+                        )}
+                        )
                       </p>
                       <span className="flex gap-3">
                         <button

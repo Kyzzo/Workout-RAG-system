@@ -228,6 +228,22 @@ def test_sibling_volume_summary_excludes_other_muscle_groups_and_weeks(db_sessio
     assert summary is None
 
 
+def test_sibling_volume_summary_counts_secondary_work_at_half(db_session, owner_and_prescription):
+    _, prescription = owner_and_prescription  # chest, week 1
+    day_template = prescription.exercise_slot.day_template
+    dips = _add_sibling_slot(db_session, day_template, "triceps", "Dips", week_number=1, sets=4)
+    dips.secondary_muscle_groups = ["chest", "front delts"]
+    _add_sibling_slot(db_session, day_template, "chest", "Cable Fly", week_number=1, sets=3)
+    db_session.flush()
+
+    summary = _sibling_volume_summary(prescription, db_session)
+
+    assert sorted(summary.splitlines()) == [
+        "- Cable Fly: 3 sets",
+        "- Dips: 4 sets (trains it secondarily, counts as 2)",
+    ]
+
+
 def test_sibling_volume_summary_skips_ungenerated_siblings(db_session, owner_and_prescription):
     _, prescription = owner_and_prescription
     day_template = prescription.exercise_slot.day_template

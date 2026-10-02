@@ -1,4 +1,5 @@
 from sqlalchemy import ForeignKey, String, func
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 import datetime
@@ -28,7 +29,7 @@ class Program(Base):
     goal: Mapped[str] = mapped_column(String)
 
     user: Mapped["User"] = relationship(back_populates="programs") #one ForeignKey so auto-detected, no need to specify
-    mesocycles: Mapped[list["Mesocycle"]] = relationship(back_populates="program", order_by="Mesocycle.start_week")
+    mesocycles: Mapped[list["Mesocycle"]] = relationship(back_populates="program", order_by="Mesocycle.start_week", cascade="all, delete-orphan")
 
 class Mesocycle(Base):
     __tablename__ = "mesocycles"
@@ -40,9 +41,9 @@ class Mesocycle(Base):
     end_week: Mapped[int] = mapped_column()
 
     program: Mapped["Program"] = relationship(back_populates="mesocycles")
-    day_templates: Mapped[list["DayTemplate"]] = relationship(back_populates="mesocycle", order_by="DayTemplate.order")
-    muscle_group_frequencies: Mapped[list["MuscleGroupFrequency"]] = relationship(back_populates="mesocycle", order_by="MuscleGroupFrequency.muscle_group")
-    progression_schemes: Mapped[list["ProgressionScheme"]] = relationship(back_populates="mesocycle", order_by="ProgressionScheme.muscle_group")
+    day_templates: Mapped[list["DayTemplate"]] = relationship(back_populates="mesocycle", order_by="DayTemplate.order", cascade="all, delete-orphan")
+    muscle_group_frequencies: Mapped[list["MuscleGroupFrequency"]] = relationship(back_populates="mesocycle", order_by="MuscleGroupFrequency.muscle_group", cascade="all, delete-orphan")
+    progression_schemes: Mapped[list["ProgressionScheme"]] = relationship(back_populates="mesocycle", order_by="ProgressionScheme.muscle_group", cascade="all, delete-orphan")
 
 class DayTemplate(Base):
     __tablename__ = "day_templates"
@@ -62,7 +63,14 @@ class ExerciseSlot(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     day_template_id: Mapped[int] = mapped_column(ForeignKey("day_templates.id"))
     exercise_name: Mapped[str] = mapped_column(String)
+    # Primary muscle: drives research retrieval, which day target the
+    # exercise covers, and counts in full toward that muscle's weekly volume.
     muscle_group: Mapped[str] = mapped_column(String)
+    # Muscles also meaningfully trained; each counts as HALF a set toward
+    # that muscle's weekly volume (fractional set counting).
+    secondary_muscle_groups: Mapped[list[str]] = mapped_column(
+        ARRAY(String), default=list, server_default="{}"
+    )
     order: Mapped[int] = mapped_column()
 
     day_template: Mapped["DayTemplate"] = relationship(back_populates="exercise_slots")

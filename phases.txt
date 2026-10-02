@@ -103,7 +103,7 @@ PHASE 6 — Chat interface + remaining product surface  <- CURRENT PHASE
    retrieval — not started
 6. (added) Manual structure builder — DONE: list programs, add block /
    day / exercise from the UI (placeholder prescriptions auto-created per
-   week), per-field generate buttons, delete day / exercise (cascades, with
+   week), per-field generate buttons, delete program / day / exercise (cascades, with
    confirm). No rename/edit yet.
 7. (added) Generate whole block — DONE: browser-driven run of frequency
    per muscle group (can add days), then sets + load once per exercise
