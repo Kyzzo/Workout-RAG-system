@@ -189,23 +189,38 @@ def test_program_volume_preference_reaches_weekly_volume_generation(mock_generat
     assert mock_generate.call_args.args == ("chest", "hypertrophy", "minimal")
 
 
-@pytest.mark.parametrize("preference, expected", [
-    ("minimal", "LOWEST weekly set count"),
-    ("high", "HIGH end"),
-    # moderate is guided too: unguided, it aimed for the 'no detectable
-    # superiority' point (~31 sets) as a target
-    ("moderate", "effective AND efficient"),
-])
-def test_preference_becomes_generation_guidance(preference, expected):
+def _volume_call(goal, preference):
     from app.rag import generate
 
     completion = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(refusal=None, parsed="parsed"))])
-    with patch.object(generate, "_retrieve_chunks", return_value=_chunks("v-1")), \
-            patch.object(generate.client.chat.completions, "parse", return_value=completion) as parse:
-        generate.generate_weekly_volume("chest", "hypertrophy", preference)
+    with patch.object(generate, "_retrieve_chunks", return_value=_chunks("v-1")),             patch.object(generate.client.chat.completions, "parse", return_value=completion) as parse:
+        generate.generate_weekly_volume("chest", goal, preference)
+    kwargs = parse.call_args.kwargs
+    return kwargs["messages"][-1]["content"], kwargs["response_format"]
 
-    prompt = parse.call_args.kwargs["messages"][-1]["content"]
+
+@pytest.mark.parametrize("preference, low, high", [("minimal", 5, 10), ("moderate", 11, 14), ("high", 15, 18)])
+def test_hypertrophy_preference_binds_weekly_sets_to_its_efficiency_band(preference, low, high):
+    # Pelland 2025's higher-efficiency (5-10) and intermediate (11-18) tiers:
+    # the schema only accepts values inside the preference's band.
+    prompt, schema = _volume_call("hypertrophy", preference)
+
+    assert f"between {low} and {high} weekly sets" in prompt
+    allowed = schema.model_json_schema()["properties"]["weekly_sets"]["enum"]
+    assert allowed == list(range(low, high + 1))
+
+
+@pytest.mark.parametrize("preference, expected", [
+    ("minimal", "LOWEST weekly set count"),
+    ("high", "HIGH end"),
+    # unguided, moderate aimed for the 'no detectable superiority' point (~31)
+    ("moderate", "effective AND efficient"),
+])
+def test_strength_preference_is_open_guidance(preference, expected):
+    prompt, schema = _volume_call("strength", preference)
+
     assert "User preference:" in prompt and expected in prompt
+    assert schema.model_json_schema()["properties"]["weekly_sets"]["type"] == "integer"
 
 
 

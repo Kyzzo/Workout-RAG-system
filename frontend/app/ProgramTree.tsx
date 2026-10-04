@@ -6,7 +6,7 @@ import ProgressionGuide from "./ProgressionGuide";
 import { SourcesBadge, SourcesPanel } from "./Citations";
 import { AddDayForm, AddExerciseForm, AddMesocycleForm } from "./StructureForms";
 import {
-  VOLUME_LABELS,
+  volumeLabel,
   type DayTemplate,
   type ExerciseSlot,
   type Mesocycle,
@@ -285,7 +285,7 @@ export default function ProgramTree({
   return (
     <div className="flex flex-col gap-4 w-full text-sm">
       <p className="text-zinc-500">
-        Program #{program.id} - goal: {program.goal} · {VOLUME_LABELS[program.volume_preference] ?? program.volume_preference}
+        Program #{program.id} - goal: {program.goal} · {volumeLabel(program.volume_preference, program.goal)}
       </p>
       {/* Strength progression is built into the loads (cited linear scheme);
           hypertrophy progression is a principle applied session to session. */}

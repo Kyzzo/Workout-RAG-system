@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { runBlockGeneration } from "./blockGeneration";
-import { VOLUME_LABELS, type Program, type ProgramSummary, type VolumePreference } from "./types";
+import { VOLUME_LABELS, volumeLabel, type Program, type ProgramSummary, type VolumePreference } from "./types";
 import { useApi } from "./useApi";
 
 type SplitOption = { key: string; label: string; allowed_days: number[]; day_types: string[] };
@@ -144,11 +144,11 @@ export default function ProgramWizard({
           onChange={(e) => setVolume(e.target.value as VolumePreference)}
           className={selectClass}
           disabled={running}
-          title="Where in the research-supported weekly volume range to land. Minimal pairs fewer sets with sets taken closer to failure."
+          title="Hypertrophy: weekly sets per muscle within the research's most efficient range (Pelland et al. 2025's tiers, secondary work counted as half). Minimal pairs fewer sets with sets taken closer to failure."
         >
           {(Object.keys(VOLUME_LABELS) as VolumePreference[]).map((v) => (
             <option key={v} value={v}>
-              {VOLUME_LABELS[v]}
+              {volumeLabel(v, goal)}
             </option>
           ))}
         </select>

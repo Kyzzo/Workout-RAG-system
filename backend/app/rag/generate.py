@@ -286,8 +286,30 @@ _VOLUME_GUIDANCE = {
     "volume where any benefit was still detected, and never a 'no detectable "
     "superiority' point itself.",
     "high": "a high-volume approach. Choose toward the HIGH end of the weekly set "
-    "range the provided research supports, where it still reports added benefit.",
+    "range the provided research supports, where it still reports added benefit - "
+    "never a 'no detectable superiority' point itself.",
 }
+
+# Hypertrophy weekly sets per volume preference, in fractional sets (the
+# app's count). Bound to Pelland et al. 2025's two most efficient tiers -
+# 'higher efficiency' 5-10 and 'intermediate' 11-18 weekly sets - so every
+# option stays where added sets still buy growth efficiently: minimal is
+# the higher-efficiency tier, moderate and high split the intermediate one.
+# The model picks the value within the band (schema-enforced) and cites it;
+# strength keeps the open guidance above, since these tiers are hypertrophy
+# findings.
+HYPERTROPHY_VOLUME_BANDS = {"minimal": (5, 10), "moderate": (11, 14), "high": (15, 18)}
+
+
+def _hypertrophy_band_guidance(preference: str) -> str:
+    low, high = HYPERTROPHY_VOLUME_BANDS[preference]
+    return (
+        f"a {preference}-volume approach: choose between {low} and {high} weekly sets, "
+        f"the part of the research's most efficient range (Pelland et al. 2025's "
+        f"efficiency tiers: higher efficiency 5-10, intermediate 11-18 fractional "
+        f"weekly sets) that this preference covers. Pick the value in that band the "
+        f"provided research best supports for this muscle."
+    )
 _RIR_GUIDANCE = {
     "minimal": "a low-volume approach that relies on effort: choose the closest-to-"
     "failure option the provided research supports.",
@@ -299,15 +321,21 @@ def generate_weekly_volume(
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     # The claim the volume research actually makes - weekly sets for the
     # muscle - so verification compares like with like.
+    band = HYPERTROPHY_VOLUME_BANDS.get(preference) if goal == "hypertrophy" else None
+    if band:
+        value_type = Literal[tuple(range(band[0], band[1] + 1))]
+        guidance = _hypertrophy_band_guidance(preference)
+    else:
+        value_type, guidance = int, _VOLUME_GUIDANCE.get(preference)
     return _generate_field(
-        "weekly_sets", int, "volume", build_volume_query(muscle_group, goal),
+        "weekly_sets", value_type, "volume", build_volume_query(muscle_group, goal),
         field_description="Total sets per WEEK for this muscle, across all of its "
         "exercises and sessions combined. This app counts sets FRACTIONALLY: a set "
         "where the muscle is the main target counts as 1, a set where it's a "
         "secondary muscle counts as 0.5. If a source reports direct sets only, or "
         "fractional sets, keep that distinction in mind rather than treating them "
         "as the same number.",
-        guidance=_VOLUME_GUIDANCE.get(preference),
+        guidance=guidance,
     )
 
 
