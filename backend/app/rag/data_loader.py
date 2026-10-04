@@ -1,7 +1,10 @@
+import re
+import unicodedata
+
 from dotenv import load_dotenv
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.readers.file import PDFReader
 from openai import OpenAI
+from pypdf import PdfReader
 
 load_dotenv()
 
@@ -15,12 +18,36 @@ EMBED_DIM = 3072
 splitter = SentenceSplitter(chunk_size=1000, chunk_overlap=200)
 
 
+_WORD = re.compile(r"[A-Za-z]+")
+
+
+def _merged_word_ratio(text: str) -> float:
+    # Share of 'words' over 20 letters - real words almost never are, so a
+    # high share means the extractor dropped the spaces ("Resistancetraining
+    # (RT)outcomesdependonmanyfactors...").
+    words = _WORD.findall(text)
+    return sum(len(w) > 20 for w in words) / max(len(words), 1)
+
+
+def _page_text(page) -> str:
+    """Plain extraction, falling back to layout mode on pages where it lost
+    the spaces between words. Layout mode isn't the default: it keeps the
+    page's visual layout, which interleaves the lines of two-column journal
+    pages. Ligatures ('ﬁ') are normalized to plain letters."""
+    text = page.extract_text() or ""
+    if _merged_word_ratio(text) > 0.05:
+        layout = page.extract_text(extraction_mode="layout") or ""
+        if _merged_word_ratio(layout) < _merged_word_ratio(text):
+            text = "\n".join(" ".join(line.split()) for line in layout.splitlines() if line.strip())
+    return unicodedata.normalize("NFKC", text)
+
+
 def load_and_chunk_pdf(path: str) -> list[str]:
-    docs = PDFReader().load_data(file=path)
-    texts = [d.text for d in docs if getattr(d, "text", None)]
     chunks = []
-    for t in texts:
-        chunks.extend(splitter.split_text(t))
+    for page in PdfReader(path).pages:
+        text = _page_text(page)
+        if text.strip():
+            chunks.extend(splitter.split_text(text))
     return chunks
 
 
