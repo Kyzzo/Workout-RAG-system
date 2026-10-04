@@ -44,6 +44,7 @@ app.add_middleware(
 
 app.include_router(programs.router)
 app.include_router(programs.splits_router)
+app.include_router(programs.rules_router)
 app.include_router(generation.router)
 app.include_router(generation.mesocycle_router)
 app.include_router(generation.exercise_slot_router)

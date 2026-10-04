@@ -141,6 +141,7 @@ class Citation(Base):
     prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="citation")
     frequency_citations: Mapped[list["FrequencyCitation"]] = relationship(back_populates="citation")
     volume_citations: Mapped[list["VolumeCitation"]] = relationship(back_populates="citation")
+    rule_citations: Mapped[list["RuleCitation"]] = relationship(back_populates="citation")
     progression_scheme_citations: Mapped[list["ProgressionSchemeCitation"]] = relationship(back_populates="citation")
 
 class PrescriptionCitation(Base):
@@ -154,6 +155,36 @@ class PrescriptionCitation(Base):
 
     prescription: Mapped["WeeklyPrescription"] = relationship(back_populates="prescription_citations")
     citation: Mapped["Citation"] = relationship(back_populates="prescription_citations")
+
+class RuleJustification(Base):
+    # Verified citations for one of the app's mechanical rules (see
+    # rag/rule_justifications.py) - global, not per program, since the rule
+    # is the same everywhere.
+    __tablename__ = "rule_justifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_key: Mapped[str] = mapped_column(String, unique=True)
+    claim: Mapped[str] = mapped_column(String)
+    grounding_note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    rule_citations: Mapped[list["RuleCitation"]] = relationship(back_populates="rule", cascade="all, delete-orphan")
+
+    @property
+    def supporting_citations(self) -> list["RuleCitation"]:
+        return _supported(self.rule_citations)
+
+
+class RuleCitation(Base):
+    __tablename__ = "rule_citations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_id: Mapped[int] = mapped_column(ForeignKey("rule_justifications.id"))
+    citation_id: Mapped[int] = mapped_column(ForeignKey("citations.id"))
+    verification_status: Mapped[str] = mapped_column(String)
+
+    rule: Mapped["RuleJustification"] = relationship(back_populates="rule_citations")
+    citation: Mapped["Citation"] = relationship(back_populates="rule_citations")
+
 
 class MuscleGroupVolume(Base):
     # The research claim about volume is WEEKLY sets for a muscle, not sets

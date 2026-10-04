@@ -6,10 +6,12 @@ from ..auth import get_current_user
 from ..database import get_db
 from ..ownership import get_owned_program
 from ..rag.exercise_selection import ExerciseSelectionError, select_exercises
+from ..rag.rule_justifications import RULES, justify_rule
 from ..splits import SPLITS, plan_days
 
 router = APIRouter(prefix="/programs", tags=["programs"])
 splits_router = APIRouter(prefix="/splits", tags=["programs"])
+rules_router = APIRouter(prefix="/rules", tags=["programs"])
 
 
 @splits_router.get("/", response_model=list[schemas.SplitOut])
@@ -152,3 +154,16 @@ def delete_program(
     db.delete(program)
     db.commit()
     return Response(status_code=204)
+
+
+@rules_router.get("/{rule_key}", response_model=schemas.RuleJustificationOut)
+def get_rule_justification(
+    rule_key: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    # Verified once and cached; the first request after a fresh database
+    # (or a refresh) runs the retrieval + judge pass.
+    if rule_key not in RULES:
+        raise HTTPException(status_code=404, detail="Unknown rule")
+    return justify_rule(db, rule_key)

@@ -25,6 +25,15 @@ export type WeeklyPrescription = {
   rir_citations: SupportingCitation[];
 };
 
+// Verified citations for one of the app's mechanical rules, e.g. how
+// weekly sets are spread evenly across sessions.
+export type RuleJustification = {
+  rule_key: string;
+  claim: string;
+  grounding_note: string | null;
+  supporting_citations: SupportingCitation[];
+};
+
 // The cited weekly sets for a muscle; WeeklyPrescription.sets are its
 // mechanical split across that muscle's exercises.
 export type MuscleGroupVolume = {

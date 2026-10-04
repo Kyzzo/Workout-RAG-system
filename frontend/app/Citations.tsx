@@ -1,4 +1,4 @@
-import type { SupportingCitation } from "./types";
+import type { RuleJustification, SupportingCitation } from "./types";
 
 // The two verification outcomes that count as evidence read differently to
 // a user: one source states the value directly, the other informed it
@@ -42,19 +42,9 @@ export function SourcesBadge({
   );
 }
 
-export function SourcesPanel({
-  heading,
-  citations,
-  note,
-}: {
-  heading: string;
-  citations: SupportingCitation[];
-  note: string | null;
-}) {
+function CitationItems({ citations }: { citations: SupportingCitation[] }) {
   return (
-    <div className="flex flex-col gap-2 mt-1 mb-2 border-l-2 border-green-600 dark:border-green-500 pl-3 py-1 text-xs">
-      <p className="font-medium text-zinc-700 dark:text-zinc-300">{heading}</p>
-      {note && <p className="text-amber-600">{note}</p>}
+    <>
       {citations.map((c, i) => (
         <div key={i} className="flex flex-col gap-1">
           <p>
@@ -66,6 +56,38 @@ export function SourcesPanel({
           </p>
         </div>
       ))}
+    </>
+  );
+}
+
+export function SourcesPanel({
+  heading,
+  citations,
+  note,
+  rule,
+}: {
+  heading: string;
+  citations: SupportingCitation[];
+  note: string | null;
+  // A mechanical rule that shaped this value (e.g. the even split of a
+  // muscle's weekly sets across sessions), with its own verified sources.
+  rule?: { heading: string; justification: RuleJustification } | null;
+}) {
+  return (
+    <div className="flex flex-col gap-2 mt-1 mb-2 border-l-2 border-green-600 dark:border-green-500 pl-3 py-1 text-xs">
+      <p className="font-medium text-zinc-700 dark:text-zinc-300">{heading}</p>
+      {note && <p className="text-amber-600">{note}</p>}
+      <CitationItems citations={citations} />
+      {rule && (
+        <div className="flex flex-col gap-2 mt-2 pt-2 border-t">
+          <p className="font-medium text-zinc-700 dark:text-zinc-300">{rule.heading}</p>
+          <p className="text-zinc-500">{rule.justification.claim}</p>
+          {rule.justification.grounding_note && (
+            <p className="text-amber-600">{rule.justification.grounding_note}</p>
+          )}
+          <CitationItems citations={rule.justification.supporting_citations} />
+        </div>
+      )}
     </div>
   );
 }

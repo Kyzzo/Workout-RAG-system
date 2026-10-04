@@ -134,6 +134,20 @@ uv run python -m scripts.ingest_literature "<path-to-pdf>" <category> [source_id
 - `source_id` is optional (defaults to the PDF path) — worth naming something readable, since it's what shows up as the source in retrieval results
 - Check ingestion run status/logs at the Inngest dev server's dashboard: http://localhost:8288
 
+### Refreshing rule citations
+
+The app's mechanical rules (e.g. spreading a muscle's weekly sets evenly
+across sessions) are cited by checking a fixed claim against the corpus
+with the verification judge, then cached. After ingesting new papers,
+re-run that check so the rules can cite them:
+
+```powershell
+uv run python -m scripts.refresh_rule_justifications
+```
+
+Run it against production too (with `DATABASE_URL` pointing at the
+production database) so the live site picks up the new citations.
+
 ### Wiping a collection
 
 If the ingested payload shape changes (e.g. adding a subcategory field),

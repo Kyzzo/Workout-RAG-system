@@ -162,6 +162,15 @@ class SupportingCitationOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RuleJustificationOut(BaseModel):
+    rule_key: str
+    claim: str
+    grounding_note: str | None = None
+    supporting_citations: list[SupportingCitationOut] = []
+
+    model_config = {"from_attributes": True}
+
+
 class GenerateWeeklyVolumeRequest(BaseModel):
     muscle_group: MuscleGroup
 

@@ -1,11 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { runBlockGeneration } from "./blockGeneration";
 import ProgressionGuide from "./ProgressionGuide";
 import { SourcesBadge, SourcesPanel } from "./Citations";
 import { AddDayForm, AddExerciseForm, AddMesocycleForm } from "./StructureForms";
-import { VOLUME_LABELS, type DayTemplate, type ExerciseSlot, type Mesocycle, type Program, type WeeklyPrescription } from "./types";
+import {
+  VOLUME_LABELS,
+  type DayTemplate,
+  type ExerciseSlot,
+  type Mesocycle,
+  type Program,
+  type RuleJustification,
+  type WeeklyPrescription,
+} from "./types";
 import { useApi } from "./useApi";
 
 type FrequencyResult = {
@@ -108,6 +116,23 @@ export default function ProgramTree({
   // in flight finishes and is saved).
   const [blockProgress, setBlockProgress] = useState<string | null>(null);
   const cancelBlock = useRef(false);
+  // The verified sources for the even-split rule behind every split sets
+  // value - the same for every program, fetched once.
+  const [splitRule, setSplitRule] = useState<RuleJustification | null>(null);
+  useEffect(() => {
+    let stale = false;
+    (async () => {
+      try {
+        const rule = await api<RuleJustification>("/rules/even_session_split");
+        if (!stale) setSplitRule(rule);
+      } catch {
+        // Optional context; the sets' own sources still show without it.
+      }
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [api]);
 
   async function runAction(key: string, action: () => Promise<string | null>) {
     setBusyKey(key);
@@ -557,7 +582,18 @@ export default function ProgramTree({
                                 </button>
                               </span>
                             </div>
-                            {open && <SourcesPanel heading={open.heading} citations={open.citations} note={open.note} />}
+                            {open && (
+                              <SourcesPanel
+                                heading={open.heading}
+                                citations={open.citations}
+                                note={open.note}
+                                rule={
+                                  open.field === "sets" && splitRule && wp.sets_grounding_note?.startsWith("Share of")
+                                    ? { heading: "Why the sets are spread evenly across sessions", justification: splitRule }
+                                    : null
+                                }
+                              />
+                            )}
                           </li>
                         );
                       })}

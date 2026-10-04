@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..auth import get_current_user
 from ..database import get_db
+from ..citations import get_or_create_citation
 from ..ownership import get_owned_exercise_slot, get_owned_prescription
 from ..rag.exercise_selection import select_additional_exercises
 
@@ -97,23 +98,6 @@ def _direction_honored(adjustment: Adjustment, old, new) -> bool:
     if a is None or b is None or a[0] != b[0]:
         return True  # e.g. %1RM -> RPE: changed, but no honest way to call it higher or lower
     return b[1] > a[1] if adjustment.kind == "increase" else b[1] < a[1]
-
-
-def _get_or_create_citation(db: Session, chunk: dict) -> models.Citation:
-    citation = (
-        db.query(models.Citation)
-        .filter(models.Citation.qdrant_point_id == chunk["id"])
-        .first()
-    )
-    if citation is None:
-        citation = models.Citation(
-            title=chunk["source"],
-            snippet=chunk["text"],
-            qdrant_point_id=chunk["id"],
-        )
-        db.add(citation)
-        db.flush()  # populate citation.id before it's used as a FK below
-    return citation
 
 
 def _sibling_volume_summary(prescription: models.WeeklyPrescription, db: Session) -> str | None:
@@ -254,7 +238,7 @@ def _generate_and_persist(
     ).delete()
 
     for chunk, status in verified:
-        citation = _get_or_create_citation(db, chunk)
+        citation = get_or_create_citation(db, chunk)
         db.add(models.PrescriptionCitation(
             prescription_id=prescription.id,
             citation_id=citation.id,
@@ -515,7 +499,7 @@ def generate_frequency_endpoint(
     db.flush()  # populate frequency_record.id before it's used as a FK below
 
     for chunk, status in verified:
-        citation = _get_or_create_citation(db, chunk)
+        citation = get_or_create_citation(db, chunk)
         db.add(models.FrequencyCitation(
             frequency_id=frequency_record.id,
             citation_id=citation.id,
@@ -681,7 +665,7 @@ def generate_progression_endpoint(
     db.flush()  # populate scheme_record.id before it's used as a FK below
 
     for chunk, status in verified:
-        citation = _get_or_create_citation(db, chunk)
+        citation = get_or_create_citation(db, chunk)
         db.add(models.ProgressionSchemeCitation(
             scheme_id=scheme_record.id,
             citation_id=citation.id,
@@ -714,46 +698,64 @@ _MAX_EXERCISES_PER_MUSCLE_PER_DAY = 3
 _MAX_EXERCISES_PER_DAY = 10
 
 
+def _first_week_sets(slot: models.ExerciseSlot) -> int:
+    weeks = sorted(slot.weekly_prescriptions, key=lambda wp: wp.week_number)
+    return weeks[0].sets if weeks else 0
+
+
+def _session_targets(mesocycle: models.Mesocycle, muscle_group: str, weekly_sets: int):
+    """How a muscle's weekly sets divide across the sessions that train it:
+    [(day, main_exercises, secondary_credit, sets_for_main_exercises)].
+
+    Even per SESSION first, then within each session across its exercises,
+    so no day carries more of the week than another. Secondary work counts
+    at half a set - on the day it happens (a row on Upper 1 gives Upper 1's
+    lats half credit); secondary work on days without a main exercise for
+    the muscle comes off the weekly total. A remainder set rotates by muscle
+    (not always to the first day) so leftovers don't pile onto one day.
+    Why even: per-session volume has diminishing returns, so spreading a
+    week's sets keeps every session in the productive range - this is the
+    cited "even_session_split" rule (see rule_justifications.py)."""
+    days = sorted(
+        (d for d in mesocycle.day_templates if any(s.muscle_group == muscle_group for s in d.exercise_slots)),
+        key=lambda d: d.order,
+    )
+    if not days:
+        return []
+    day_ids = {d.id for d in days}
+
+    def credit(slots):
+        return 0.5 * sum(_first_week_sets(s) for s in slots if muscle_group in s.secondary_muscle_groups)
+
+    outside = credit(s for d in mesocycle.day_templates if d.id not in day_ids for s in d.exercise_slots)
+    per_session_total = max(0, round(weekly_sets - outside))
+    base, extra = divmod(per_session_total, len(days))
+    start = sum(map(ord, muscle_group)) % len(days)  # rotate which day takes a remainder set
+    plan = []
+    for i, day in enumerate(days):
+        total = base + (1 if (i - start) % len(days) < extra else 0)
+        day_credit = credit(day.exercise_slots)
+        main = sorted((s for s in day.exercise_slots if s.muscle_group == muscle_group), key=lambda s: s.order)
+        plan.append((day, main, day_credit, max(0, round(total - day_credit))))
+    return plan
+
+
 def _add_exercises_to_fit_volume(
     db: Session, mesocycle: models.Mesocycle, muscle_group: str, weekly_sets: int, goal: str,
 ) -> list[str]:
-    """Hypertrophy: if the muscle's weekly sets can't fit across its current
-    exercises at the per-exercise cap, add exercises for it (AI-picked to
-    differ from what each day already has) so its sets are spread out
-    instead of piled onto one exercise. Returns the names added."""
+    """Hypertrophy: where a session's share of the muscle's weekly sets can't
+    fit across that session's exercises at the per-exercise cap, add
+    exercises for it there (AI-picked to differ from what the day already
+    has), so its sets are spread out instead of piled onto one exercise.
+    Each session is handled on its own: a full day doesn't push the extra
+    work onto another. Returns the names added."""
     cap = max_sets_per_exercise(goal)
-    slots = [slot for day in mesocycle.day_templates for slot in day.exercise_slots]
-    primary = [slot for slot in slots if slot.muscle_group == muscle_group]
-    if not primary:
-        return []
-    credit = 0.5 * sum(
-        (sorted(s.weekly_prescriptions, key=lambda wp: wp.week_number)[0].sets if s.weekly_prescriptions else 0)
-        for s in slots if muscle_group in s.secondary_muscle_groups
-    )
-    needed = -(-max(0, round(weekly_sets - credit)) // cap)  # ceil
-    extra = needed - len(primary)
-    if extra <= 0:
-        return []
-
-    # Spread the extra exercises across the days that already train the
-    # muscle, fewest-exercises-for-it first, within the per-day limits.
-    days = [day for day in mesocycle.day_templates if any(s.muscle_group == muscle_group for s in day.exercise_slots)]
-    plan = {day.id: 0 for day in days}
-    for _ in range(extra):
-        open_days = [
-            day for day in days
-            if sum(s.muscle_group == muscle_group for s in day.exercise_slots) + plan[day.id] < _MAX_EXERCISES_PER_MUSCLE_PER_DAY
-            and len(day.exercise_slots) + plan[day.id] < _MAX_EXERCISES_PER_DAY
-        ]
-        if not open_days:
-            break
-        target = min(open_days, key=lambda d: sum(s.muscle_group == muscle_group for s in d.exercise_slots) + plan[d.id])
-        plan[target.id] += 1
-
     added = []
-    for day in days:
-        count = plan[day.id]
-        if count == 0:
+    for day, main, _credit, target in _session_targets(mesocycle, muscle_group, weekly_sets):
+        needed = -(-target // cap) - len(main)  # ceil(target / cap) exercises minus what's there
+        room = min(_MAX_EXERCISES_PER_MUSCLE_PER_DAY - len(main), _MAX_EXERCISES_PER_DAY - len(day.exercise_slots))
+        count = min(needed, room)
+        if count <= 0:
             continue
         try:
             picks = select_additional_exercises(
@@ -803,42 +805,35 @@ def _attempt_weekly_volume_generation(muscle_group: str, goal: str, preference: 
 
 
 def _split_weekly_sets(mesocycle: models.Mesocycle, muscle_group: str, weekly_sets: int, goal: str) -> int:
-    """Splits a muscle's weekly sets across the exercises whose MAIN muscle it
-    is, writing every week of the block. Returns the weekly sets the plan
-    actually delivers (secondary work at half a set)."""
-    slots = [slot for day in mesocycle.day_templates for slot in day.exercise_slots]
-    primary = [slot for slot in slots if slot.muscle_group == muscle_group]
-
-    def first_week_sets(slot):
-        weeks = sorted(slot.weekly_prescriptions, key=lambda wp: wp.week_number)
-        return weeks[0].sets if weeks else 0
-
-    # Sets that exercises training this muscle as a SECONDARY already
-    # deliver, at half weight - rows already give the lats some work.
-    credit = 0.5 * sum(first_week_sets(slot) for slot in slots if muscle_group in slot.secondary_muscle_groups)
-    if not primary:
-        return round(credit)  # e.g. front delts covered only by pressing
+    """Splits a muscle's weekly sets evenly across its sessions, then across
+    each session's main exercises, writing every week of the block. Returns
+    the weekly sets the plan actually delivers (secondary work at half)."""
+    all_slots = [slot for day in mesocycle.day_templates for slot in day.exercise_slots]
+    total_credit = 0.5 * sum(_first_week_sets(s) for s in all_slots if muscle_group in s.secondary_muscle_groups)
+    plan = _session_targets(mesocycle, muscle_group, weekly_sets)
+    if not plan:
+        return round(total_credit)  # e.g. front delts covered only by pressing
 
     cap = max_sets_per_exercise(goal)
-    remaining = max(0, round(weekly_sets - credit))
-    base, extra = divmod(remaining, len(primary))
-    shares = [
-        min(cap, max(_MIN_SETS_PER_EXERCISE, base + (1 if i < extra else 0)))
-        for i in range(len(primary))
-    ]
+    sessions = len(plan)
     note = (
-        f"Share of {muscle_group}'s {weekly_sets} weekly sets (the weekly total is research-cited; "
-        f"it's split across {len(primary)} exercise{'s' if len(primary) != 1 else ''}, "
-        f"at most {cap} sets each)."
+        f"Share of {muscle_group}'s {weekly_sets} weekly sets, spread evenly across its {sessions} "
+        f"session{'s' if sessions != 1 else ''} and then across each session's exercises (at most {cap} sets "
+        f"each). The weekly total is research-cited."
     )
-    for slot, sets in zip(primary, shares):
-        for wp in slot.weekly_prescriptions:
-            wp.sets = sets
-            wp.sets_grounding_note = note
-            # Per-exercise sets citations would vouch for a share the source
-            # never stated; the muscle-level record carries the citations.
-            wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != "sets"]
-    return round(sum(shares) + credit)
+    delivered = total_credit
+    for _day, main, _credit, target in plan:
+        base, extra = divmod(target, len(main))
+        for i, slot in enumerate(main):
+            sets = min(cap, max(_MIN_SETS_PER_EXERCISE, base + (1 if i < extra else 0)))
+            delivered += sets
+            for wp in slot.weekly_prescriptions:
+                wp.sets = sets
+                wp.sets_grounding_note = note
+                # Per-exercise sets citations would vouch for a share the source
+                # never stated; the muscle-level record carries the citations.
+                wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != "sets"]
+    return round(delivered)
 
 
 @mesocycle_router.post("/{mesocycle_id}/generate-weekly-volume", response_model=schemas.GenerateWeeklyVolumeResponse)
@@ -886,7 +881,7 @@ def generate_weekly_volume_endpoint(
     db.add(record)
     db.flush()
     for chunk, status in verified:
-        citation = _get_or_create_citation(db, chunk)
+        citation = get_or_create_citation(db, chunk)
         db.add(models.VolumeCitation(volume_id=record.id, citation_id=citation.id, verification_status=status))
 
     added = []

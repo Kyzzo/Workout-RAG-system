@@ -300,3 +300,86 @@ def test_failed_exercise_picking_still_splits_volume(mock_generate, _verify, db_
 
     assert result.exercises_added == []
     assert _sets(bench) == [3, 3]
+
+
+# --- even across sessions (no front-loading) -----------------------------------
+
+def _second_day(db_session, mesocycle, name="Day 2"):
+    day = models.DayTemplate(mesocycle_id=mesocycle.id, name=name, order=len(mesocycle.day_templates) + 1)
+    db_session.add(day)
+    db_session.flush()
+    db_session.refresh(mesocycle)
+    return day
+
+
+def test_weekly_sets_split_evenly_per_session(db_session):
+    _, mesocycle, day1 = _block(db_session)
+    day2 = _second_day(db_session, mesocycle)
+    a = _exercise(db_session, day1, "Bench Press", "chest")
+    b = _exercise(db_session, day1, "Incline Press", "chest")
+    c = _exercise(db_session, day2, "Dumbbell Press", "chest")
+    d = _exercise(db_session, day2, "Cable Fly", "chest")
+    db_session.refresh(mesocycle)
+
+    _split_weekly_sets(mesocycle, "chest", 10, "hypertrophy")
+
+    # 5 per session, not 3+3 on day 1 and 2+2 on day 2
+    assert [_sets(x)[0] for x in (a, b)] == [3, 2] and [_sets(x)[0] for x in (c, d)] == [3, 2]
+
+
+def test_remainder_set_rotates_by_muscle_not_always_day_one(db_session):
+    from app.routers.generation import _session_targets
+
+    _, mesocycle, day1 = _block(db_session)
+    day2 = _second_day(db_session, mesocycle)
+    for day in (day1, day2):
+        _exercise(db_session, day, f"{day.name} press", "chest")
+        _exercise(db_session, day, f"{day.name} pulldown", "lats")
+    db_session.refresh(mesocycle)
+
+    chest = [t for *_, t in _session_targets(mesocycle, "chest", 5)]
+    lats = [t for *_, t in _session_targets(mesocycle, "lats", 5)]
+
+    assert sorted(chest) == [2, 3] and sorted(lats) == [2, 3]
+    assert chest != lats  # different muscles put their extra set on different days
+
+
+def test_secondary_credit_counts_on_its_own_day(db_session):
+    _, mesocycle, day1 = _block(db_session)
+    day2 = _second_day(db_session, mesocycle)
+    _exercise(db_session, day1, "Barbell Row", "upper back", ["lats"], sets=4)  # 2 lat sets of credit, day 1 only
+    p1 = _exercise(db_session, day1, "Pulldown", "lats")
+    p2 = _exercise(db_session, day2, "Pull-Up", "lats")
+    db_session.refresh(mesocycle)
+
+    _split_weekly_sets(mesocycle, "lats", 6, "hypertrophy")
+
+    # 3 per session: day 1 already has 2 from the row, so its pulldown gets the 2-set floor
+    assert (_sets(p1)[0], _sets(p2)[0]) == (2, 3)
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_weekly_volume")
+def test_a_full_day_doesnt_push_its_share_onto_another(mock_generate, _verify, db_session):
+    user, mesocycle, day1 = _block(db_session)
+    day2 = _second_day(db_session, mesocycle)
+    _exercise(db_session, day1, "Bench Press", "chest")
+    for i in range(9):  # day 1 is at the 10-exercise limit
+        _exercise(db_session, day1, f"Filler {i}", "abs")
+    _exercise(db_session, day2, "Dumbbell Press", "chest")
+    db_session.refresh(mesocycle)
+    mock_generate.return_value = (SimpleNamespace(weekly_sets=12, chunk_ids=[], grounding="general_knowledge"), [])
+    fake, calls = _added(None)
+
+    with patch("app.routers.generation.select_additional_exercises", side_effect=fake):
+        generate_weekly_volume_endpoint(
+            mesocycle_id=mesocycle.id, request=schemas.GenerateWeeklyVolumeRequest(muscle_group="chest"),
+            db=db_session, current_user=user,
+        )
+
+    # 6 per session: day 2 gets its second chest exercise; day 1 stays capped
+    # at 3 (shortfall) rather than day 2 taking on day 1's sets
+    assert calls == [("Day 2", "chest", 1)]
+    db_session.expire_all()
+    day2_sets = [_sets(s)[0] for s in db_session.get(models.DayTemplate, day2.id).exercise_slots if s.muscle_group == "chest"]
+    assert day2_sets == [3, 3]
