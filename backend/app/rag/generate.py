@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -111,6 +112,58 @@ def _retrieve_chunks(query: str, category: str | None) -> list[dict]:
     return QdrantStorage(collection="literature").search(
         query_vector, top_k=5, query_filter=category_filter
     )
+
+
+# General questions span the whole corpus, so they cast a wider net than a
+# single field's top 5: one paper can otherwise fill every slot (a question
+# mentioning a "range" pulled three excerpts of a rep-range paper and none
+# of the volume meta-analyses), and reference-list chunks crowd out
+# findings.
+_GENERAL_TOP_K = 15
+_GENERAL_CANDIDATES = 40
+_MAX_CHUNKS_PER_PAPER = 3
+# A question clearly about one dosage category searches it first.
+_CATEGORY_KEYWORDS = {
+    "volume": re.compile(r"\b(sets?|volume)\b", re.I),
+    "intensity": re.compile(r"\b(rir|rpe|failure|intensity|load|reps?|1rm|heavy|light)\b", re.I),
+    "frequency": re.compile(r"\b(frequency|how often|times (a|per) week|sessions? (a|per) week)\b", re.I),
+    "progression": re.compile(r"\b(progress\w*|periodi[sz]\w*|deload\w*)\b", re.I),
+}
+# Journal-style entries ("2023;12(2):29-36") and DOIs: three or more in one
+# chunk means it's a bibliography, which lists papers rather than findings.
+_CITATION_ENTRY = re.compile(r"\b(?:19|20)\d{2}\s*;\s*\d+|\bdoi\b", re.I)
+
+
+def _is_reference_list(text: str) -> bool:
+    return len(_CITATION_ENTRY.findall(text)) >= 3
+
+
+def _retrieve_general_chunks(topic: str) -> list[dict]:
+    query_vector = embed_texts([topic])[0]
+    storage = QdrantStorage(collection="literature")
+    matched = [cat for cat, pattern in _CATEGORY_KEYWORDS.items() if pattern.search(topic)]
+    ranked = []
+    for category in matched:
+        ranked += storage.search(
+            query_vector, top_k=_GENERAL_TOP_K,
+            query_filter=Filter(must=[FieldCondition(key="category", match=MatchValue(value=category))]),
+        )
+    ranked.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+    ranked += storage.search(query_vector, top_k=_GENERAL_CANDIDATES)  # the rest of the corpus after
+
+    chosen, seen_text, per_paper = [], set(), {}
+    for chunk in ranked:
+        key = " ".join(chunk["text"].split())
+        if key in seen_text or _is_reference_list(chunk["text"]):
+            continue
+        if per_paper.get(chunk["source"], 0) >= _MAX_CHUNKS_PER_PAPER:
+            continue
+        seen_text.add(key)
+        per_paper[chunk["source"]] = per_paper.get(chunk["source"], 0) + 1
+        chosen.append(chunk)
+        if len(chosen) == _GENERAL_TOP_K:
+            break
+    return chosen
 
 
 def _generate_field(
@@ -372,7 +425,9 @@ def build_progression_query(muscle_group: str, goal: str) -> str:
 # (Aube 2022) with a hypertrophy threshold in fractional sets (Pelland via
 # Remmert 2025) into a range neither study states.
 _STATEMENT_RULES = (
-    "Write your answer as a list of statements. Each statement is ONE "
+    "Write your answer as a list of at most five statements - the "
+    "findings that matter most for the question, not everything the "
+    "excerpts contain. Each statement is ONE "
     "factual claim in one or two sentences, and its `sources` lists the "
     "IDs of the excerpts that state or report that exact claim. Every "
     "statement is checked against its sources and removed if they don't "
@@ -388,9 +443,12 @@ _STATEMENT_RULES = (
     "maximum, even hedged with 'may be' or 'suggests'; and 'similar outcomes "
     "across A-B' never makes part of that range optimal. Use each source's "
     "exact figures. "
-    "Never combine figures from different excerpts, outcomes or units into "
-    "a new range or number - report each source's figure separately, with "
-    "its own context. A statement about what proportion of a dataset used "
+    "Within a statement, never combine figures from different excerpts, "
+    "outcomes or units into a new range or number - report each source's "
+    "figure separately, with its own context. Only write statements that "
+    "bear on the question asked; a finding about a different outcome (e.g. "
+    "strength when asked about hypertrophy) only if it's directly useful, "
+    "and labeled as that outcome. A statement about what proportion of a dataset used "
     "some method describes the STUDIES INCLUDED, not whether the method "
     "works. Do not invent IDs. Set grounding to 'fully_grounded' if the "
     "cited excerpts fully account for the answer, 'blended' if you combined "
@@ -398,10 +456,31 @@ _STATEMENT_RULES = (
     "meaningfully supports an answer (then return no statements)."
 )
 
+_SUMMARY_RULES = (
+    " Then write `summary`: the direct, practical answer to the question in "
+    "two or three short, plain sentences, the way a knowledgeable coach "
+    "would sum up the research for a lifter - e.g. a rough range the "
+    "evidence generally supports, and what happens above or below it. No "
+    "statistics or study jargon (no 'PUOS', 'SDES', confidence intervals); "
+    "explain a term like 'fractional sets' in a few words if you use it. It is shown "
+    "first, with the statements after it as the evidence. Its `sources` "
+    "lists every excerpt it draws on. Unlike a statement, the summary may "
+    "synthesize across excerpts, and it is checked against all of its "
+    "sources together, so it must be a fair consensus of them: approximate "
+    "or rounded figures and hedges ('roughly', 'most studies', 'for most "
+    "lifters') are good; a range must be one the cited findings together "
+    "actually cover; keep units (fractional vs direct sets), outcome and "
+    "population; never call a sub-range optimal, or turn 'no detectable "
+    "difference' into a ceiling or a proven benefit; and mention a real "
+    "disagreement between sources rather than hide it. Set summary to null "
+    "if the excerpts don't support a practical answer."
+)
+
 _QA_SYSTEM_PROMPT = (
     "You answer research questions using only the provided context. Each "
     "context excerpt is labeled with a bracketed ID like [abc-123]. "
     + _STATEMENT_RULES
+    + _SUMMARY_RULES
 )
 
 _DISCUSSION_SYSTEM_PROMPT = (
@@ -419,7 +498,16 @@ _DISCUSSION_SYSTEM_PROMPT = (
 )
 
 
-def _statement_schema(source_ids: list[str]) -> type[pydantic.BaseModel]:
+# The model that writes chat answers, as (model, reasoning effort). Tested
+# on volume and failure questions: gpt-4o-mini wrote loose statements that
+# the judge mostly removed (up to 4 of 5) and overstated findings; gpt-5 at
+# minimal effort kept qualifiers, wrote plain summaries with rough ranges,
+# and lost almost nothing to the judge (~45s per answer including judging;
+# full effort took ~100s for no visible gain, gpt-5-mini kept study jargon).
+STATEMENT_ANSWER_MODEL = ("gpt-5", "minimal")
+
+
+def _statement_schema(source_ids: list[str], with_summary: bool = False) -> type[pydantic.BaseModel]:
     # Sources constrained to an enum of this call's actual excerpt IDs, the
     # same structural no-fabrication rule as field-level generation.
     source_type = Literal[tuple(source_ids)] if source_ids else str
@@ -428,21 +516,31 @@ def _statement_schema(source_ids: list[str]) -> type[pydantic.BaseModel]:
         text=(str, pydantic.Field(description="One factual claim, one or two sentences.")),
         sources=(list[source_type], ...),
     )
-    return pydantic.create_model(
-        "StatementAnswer",
-        statements=(list[statement], ...),
-        grounding=(GroundingLevel, ...),
-    )
+    fields = {"statements": (list[statement], ...)}
+    if with_summary:
+        # After the statements, so the model sums up findings it has
+        # already laid out rather than writing the conclusion first.
+        summary = pydantic.create_model(
+            "Summary",
+            text=(str, pydantic.Field(description="The practical answer, one to three sentences.")),
+            sources=(list[source_type], ...),
+        )
+        fields["summary"] = (summary | None, ...)
+    return pydantic.create_model("StatementAnswer", **fields, grounding=(GroundingLevel, ...))
 
 
-def _answer_in_statements(system_prompt: str, user_content: str, source_ids: list[str]) -> pydantic.BaseModel:
+def _answer_in_statements(
+    system_prompt: str, user_content: str, source_ids: list[str], with_summary: bool = False,
+) -> pydantic.BaseModel:
+    model, effort = STATEMENT_ANSWER_MODEL
     completion = client.chat.completions.parse(
-        model="gpt-4o-mini",
+        model=model,
+        **({"reasoning_effort": effort} if effort else {}),
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
-        response_format=_statement_schema(source_ids),
+        response_format=_statement_schema(source_ids, with_summary),
     )
     message = completion.choices[0].message
     if message.refusal:
@@ -452,11 +550,12 @@ def _answer_in_statements(system_prompt: str, user_content: str, source_ids: lis
 
 def answer_general_question(topic: str) -> tuple[pydantic.BaseModel, list[dict]]:
     # General Q&A (chat mode 3): not tied to one dosage category, so
-    # category=None searches the whole corpus. Returns statements to verify.
-    chunks = _retrieve_chunks(topic, None)
-    context_block = "\n\n".join(f"[{c['id']}] {c['text']}" for c in chunks)
+    # it searches the whole corpus. Returns a summary and statements to verify.
+    chunks = _retrieve_general_chunks(topic)
+    context_block = "\n\n".join(f"[{c['id']}] ({c['source']}) {c['text']}" for c in chunks)
     parsed = _answer_in_statements(
         _QA_SYSTEM_PROMPT, f"Context:\n{context_block}\n\nQuestion: {topic}", [c["id"] for c in chunks],
+        with_summary=True,
     )
     return parsed, chunks
 

@@ -260,3 +260,53 @@ def test_general_question_general_knowledge_skips_retry(mock_route, mock_answer,
     mock_answer.assert_called_once()
     mock_verify.assert_not_called()
     assert result.grounding_note == "This is a general estimate based on established training principles, not a specific study."
+
+
+def _with_summary(parsed, text, sources):
+    parsed.summary = SimpleNamespace(text=text, sources=list(sources))
+    return parsed
+
+
+@patch("app.routers.chat.verify_summary", return_value=True)
+@patch("app.routers.chat.verify_citation", return_value="primary_support")
+@patch("app.routers.chat.answer_general_question")
+@patch("app.routers.chat.route_chat_message")
+def test_verified_summary_leads_the_answer(mock_route, mock_answer, _verify, mock_summary, db_session, owner_and_prescription):
+    # The practical answer may synthesize across sources, so it's judged
+    # against all of them together, then shown first with the evidence after.
+    user, _ = owner_and_prescription
+    mock_route.return_value = _route("answer_general_question", topic="how many sets?")
+    mock_answer.return_value = (
+        _with_summary(
+            _answer(("Growth rose with weekly sets.", ["a"]), ("12-24 sets gave similar growth.", ["b"])),
+            "Roughly 10-20 weekly sets per muscle suits most lifters.", ["a", "b"],
+        ),
+        _chunks("a", "b"),
+    )
+
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="how many sets?"), db=db_session, current_user=user)
+
+    assert result.answer == (
+        "Roughly 10-20 weekly sets per muscle suits most lifters. [1][2]\n\n"
+        "Growth rose with weekly sets. [1] 12-24 sets gave similar growth. [2]"
+    )
+    assert mock_summary.call_args.args[2] == ["excerpt for a", "excerpt for b"]  # judged against every source at once
+    assert result.grounding_note is None
+
+
+@patch("app.routers.chat.verify_summary", return_value=False)
+@patch("app.routers.chat.verify_citation", return_value="primary_support")
+@patch("app.routers.chat.answer_general_question")
+@patch("app.routers.chat.route_chat_message")
+def test_rejected_summary_is_dropped_and_counted(mock_route, mock_answer, _verify, _summary, db_session, owner_and_prescription):
+    user, _ = owner_and_prescription
+    mock_route.return_value = _route("answer_general_question", topic="t")
+    mock_answer.return_value = (
+        _with_summary(_answer(("Cited claim.", ["a"])), "18-31 sets is optimal.", ["a"]),
+        _chunks("a"),
+    )
+
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="t"), db=db_session, current_user=user)
+
+    assert result.answer == "Cited claim. [1]"
+    assert "1 statement was removed" in result.grounding_note

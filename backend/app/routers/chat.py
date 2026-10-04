@@ -20,7 +20,7 @@ from ..rag.generate import (
     generate_volume_sets,
     max_sets_per_exercise,
 )
-from ..rag.verification import STATEMENT_JUDGE, verify_citation
+from ..rag.verification import STATEMENT_JUDGE, verify_citation, verify_summary
 from .generation import (
     _GENERAL_KNOWLEDGE_NOTE,
     _SUPPORTED_STATUSES,
@@ -196,7 +196,10 @@ def _verify_statements(question: str, parsed, sources: dict[str, dict]):
     its research sources supports it AS WRITTEN (the judge rejects changed
     units, outcomes, populations or overstated findings). A statement citing
     only the prescription itself is app data, not a research claim, and is
-    kept as is. Returns (kept: [(text, [supporting source dicts])], removed)."""
+    kept as is. A general answer's summary is judged against all of its
+    sources together, since it may synthesize across them. Returns
+    (kept: [(text, [supporting source dicts])], removed, summary: (text,
+    [source dicts]) or None)."""
     # Every (statement, source) pair is judged in parallel: the strict judge
     # is slow per call, so an answer costs about one call of latency.
     checks = []
@@ -213,14 +216,27 @@ def _verify_statements(question: str, parsed, sources: dict[str, dict]):
             use_mechanical_check=False, judge=STATEMENT_JUDGE,
         )
 
+    summary = getattr(parsed, "summary", None)
+    summary_sources = (
+        [sources[src] for src in dict.fromkeys(summary.sources) if src in sources] if summary else []
+    )
+
     pairs = [(text, source) for text, _, found in checks for source in found]
-    statuses = []
-    if pairs:
-        with ThreadPoolExecutor(max_workers=min(len(pairs), 16)) as pool:
+    statuses, summary_ok = [], False
+    if pairs or summary_sources:
+        with ThreadPoolExecutor(max_workers=min(len(pairs) + 1, 16)) as pool:
+            summary_check = (
+                pool.submit(verify_summary, question, summary.text, [s["text"] for s in summary_sources])
+                if summary_sources else None
+            )
             statuses = list(pool.map(judge, pairs))
+            summary_ok = summary_check.result() if summary_check else False
     status_iter = iter(statuses)
 
     kept, removed = [], 0
+    kept_summary = (summary.text, summary_sources) if summary_ok else None
+    if summary and not summary_ok:
+        removed += 1
     for text, app_data, found in checks:
         if app_data:
             kept.append((text, []))
@@ -230,12 +246,16 @@ def _verify_statements(question: str, parsed, sources: dict[str, dict]):
             kept.append((text, supporting))
         else:
             removed += 1
-    return kept, removed
+    return kept, removed, kept_summary
 
 
-def _compose(kept, field_of=lambda source: None):
+def _compose(kept, field_of=lambda source: None, summary=None):
     """Answer text with numbered references after each statement, and the
-    matching numbered citation list (one entry per distinct source)."""
+    matching numbered citation list (one entry per distinct source). A
+    verified summary leads as its own paragraph, the statements after it
+    as the evidence."""
+    if summary:
+        kept = [summary] + list(kept)
     numbers: dict[str, int] = {}
     citations = []
     parts = []
@@ -251,6 +271,8 @@ def _compose(kept, field_of=lambda source: None):
             refs.append(numbers[key])
         suffix = " " + "".join(f"[{n}]" for n in sorted(set(refs))) if refs else ""
         parts.append(text.strip() + suffix)
+    if summary:
+        return "\n\n".join(p for p in (parts[0], " ".join(parts[1:])) if p), citations
     return " ".join(parts), citations
 
 
@@ -291,7 +313,7 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
     }
     question = decision.question or raw_message
     parsed = answer_prescription_discussion(question, _summary(prescription), list(sources.values()))
-    kept, removed = _verify_statements(question, parsed, sources)
+    kept, removed, _ = _verify_statements(question, parsed, sources)
     answer, citations = _compose(kept, field_of=lambda source: source["field"])
 
     notes = [
@@ -315,8 +337,8 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
 
 def _attempt_general_question(topic: str):
     parsed, chunks = answer_general_question(topic)
-    kept, removed = _verify_statements(topic, parsed, {c["id"]: c for c in chunks})
-    return parsed, kept, removed
+    kept, removed, summary = _verify_statements(topic, parsed, {c["id"]: c for c in chunks})
+    return parsed, kept, removed, summary
 
 
 def _handle_general_question(decision, raw_message: str) -> schemas.ChatResponse:
@@ -324,12 +346,12 @@ def _handle_general_question(decision, raw_message: str) -> schemas.ChatResponse
     # other generation path: retried once if nothing verified and the model
     # didn't already admit general_knowledge.
     topic = decision.topic or raw_message
-    parsed, kept, removed = _attempt_general_question(topic)
-    if not kept and parsed.grounding != "general_knowledge":
-        parsed, kept, removed = _attempt_general_question(topic)
+    parsed, kept, removed, summary = _attempt_general_question(topic)
+    if not kept and not summary and parsed.grounding != "general_knowledge":
+        parsed, kept, removed, summary = _attempt_general_question(topic)
 
-    answer, citations = _compose(kept)
-    if kept:
+    answer, citations = _compose(kept, summary=summary)
+    if kept or summary:
         grounding_note = _removed_note(removed)
     elif parsed.grounding == "general_knowledge":
         grounding_note = _GENERAL_KNOWLEDGE_NOTE

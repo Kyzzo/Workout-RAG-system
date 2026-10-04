@@ -157,6 +157,59 @@ def judge_citation(query: str, value: int | str, chunk_text: str, judge: Judge =
     return message.parsed
 
 
+class SummaryVerdict(pydantic.BaseModel):
+    outcome: Literal["supported", "contradicted"]
+    reasoning: str
+
+
+_SUMMARY_JUDGE_SYSTEM_PROMPT = """You are verifying a short summary answer that \
+synthesizes several research excerpts into practical advice. You will be given \
+the question, the summary, and every excerpt it cites. Judge the excerpts \
+TOGETHER: the summary doesn't need any one excerpt to state it, but it must be \
+a fair consensus of what they show.
+
+- supported: everything the summary claims is covered by the excerpts taken \
+together. Approximate or rounded figures and hedges ('roughly', 'most \
+studies', 'for most lifters') are fine when the findings cover them - e.g. \
+excerpts showing growth rising with weekly sets with diminishing returns, \
+plus similar growth across a range of weekly sets, support a hedged rough \
+range with 'smaller gains above it'.
+- contradicted: the summary claims something no combination of the excerpts \
+supports. That includes a range or number the findings don't cover; calling \
+a sub-range optimal or best when the excerpts found similar outcomes across \
+it; treating 'no detectable superiority beyond X' as a ceiling, a maximum or \
+proof of no further benefit; mixing units (e.g. 'fractional' sets presented \
+as direct sets, per-session as weekly) or outcomes (a strength finding \
+presented as hypertrophy); presenting a finding from one population as \
+general without saying so; hiding a real disagreement between the excerpts; \
+or sounding more certain than the evidence (e.g. 'proven', 'always').
+
+Give brief reasoning for your classification."""
+
+
+def verify_summary(question: str, summary: str, excerpts: list[str], judge: Judge = STATEMENT_JUDGE) -> bool:
+    """Whether a cross-source summary is a fair consensus of its cited
+    excerpts. Any failure to get a verdict counts as not verified."""
+    if not excerpts:
+        return False
+    options = {"reasoning_effort": judge.reasoning_effort} if judge.reasoning_effort else {}
+    numbered = "\n\n".join(f"Excerpt {i}:\n{text}" for i, text in enumerate(excerpts, start=1))
+    try:
+        completion = client.chat.completions.parse(
+            model=judge.model,
+            **options,
+            messages=[
+                {"role": "system", "content": _SUMMARY_JUDGE_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Question: {question}\nSummary: {summary}\n\n{numbered}"},
+            ],
+            response_format=SummaryVerdict,
+        )
+        verdict = completion.choices[0].message.parsed
+        return verdict is not None and verdict.outcome == "supported"
+    except Exception:
+        return False
+
+
 def verify_citation(
     query: str,
     value: int | str,

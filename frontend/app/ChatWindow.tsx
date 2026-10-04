@@ -258,9 +258,28 @@ function ChatTurnResult({ response }: { response: ChatResponse }) {
 
   return (
     <div className="self-start bg-white dark:bg-zinc-800 border rounded px-3 py-2 max-w-[90%] text-sm">
-      <p>{response.answer}</p>
+      <AnswerText answer={response.answer ?? ""} />
+      {response.grounding_note && (
+        <p className="text-amber-600 text-xs mt-1">{response.grounding_note}</p>
+      )}
       <CitationList citations={response.citations} />
     </div>
+  );
+}
+
+// A general answer leads with its practical summary; the individual
+// findings behind it follow after a blank line and start folded away.
+function AnswerText({ answer }: { answer: string }) {
+  const split = answer.indexOf("\n\n");
+  if (split === -1) return <p>{answer}</p>;
+  return (
+    <>
+      <p>{answer.slice(0, split)}</p>
+      <details className="mt-2">
+        <summary className="cursor-pointer text-xs text-zinc-500">Show the evidence</summary>
+        <p className="mt-1">{answer.slice(split + 2)}</p>
+      </details>
+    </>
   );
 }
 

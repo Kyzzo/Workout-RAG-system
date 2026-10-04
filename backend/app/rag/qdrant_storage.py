@@ -57,6 +57,9 @@ class QdrantStorage:
             payload = getattr(r, "payload", None) or {}
             text = payload.get("text", "")
             if text:
-                chunks.append({"id": str(r.id), "text": text, "source": payload.get("source", "")})
+                chunks.append({
+                    "id": str(r.id), "text": text, "source": payload.get("source", ""),
+                    "category": payload.get("category"), "score": getattr(r, "score", 0.0),
+                })
 
         return chunks
