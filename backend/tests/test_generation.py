@@ -160,7 +160,7 @@ def test_regenerating_replaces_stale_citations(mock_generate, mock_verify, db_se
 
 # --- intensity/load: proves the shared orchestration generalizes to a
 # second category correctly (a different field name, a non-int type, and
-# use_mechanical_check=False actually being respected) rather than
+# its own verification calls) rather than
 # re-testing retry/messaging branches already covered above for volume,
 # since that logic is identical shared code for both categories.
 
@@ -289,23 +289,21 @@ def test_generate_intensity_never_receives_sibling_context(mock_generate, mock_v
     assert kwargs["sibling_context"] is None
 
 
-@patch("app.routers.generation.verify_citation")
-@patch("app.routers.generation.generate_intensity_load")
-def test_intensity_never_uses_mechanical_check(mock_generate, mock_verify, db_session, owner_and_prescription):
-    user, prescription = owner_and_prescription
-    mock_generate.return_value = (
-        _fake_intensity_result("70% 1RM", ["chunk-1"], "fully_grounded"),
-        _fake_chunks("chunk-1"),
+@patch("app.rag.verification.judge_citation")
+def test_a_covering_range_never_approves_a_citation_without_the_judge(mock_judge):
+    # Regression: 18 weekly quad sets for hypertrophy was approved from Aube
+    # 2022's '12-24 sets' range by a range shortcut, though the judge
+    # rejected it (Aube's 18 is a strength finding). Every citation is judged.
+    from app.rag.verification import verify_citation
+    mock_judge.return_value = SimpleNamespace(outcome="contradicted", reasoning="strength finding")
+
+    status = verify_citation(
+        "weekly quad sets for hypertrophy", 18,
+        "12-24 weekly sets produced similar muscle mass; ~18 weekly sets may optimize squat 1RM",
     )
-    mock_verify.return_value = "primary_support"
 
-    generate_intensity(prescription_id=prescription.id, db=db_session, current_user=user)
-
-    # verify_citation must have been called with use_mechanical_check=False
-    # for every call - this is what actually proves the parameterization
-    # flows through correctly, not just that the endpoint happens to work.
-    for call in mock_verify.call_args_list:
-        assert call.kwargs.get("use_mechanical_check") is False
+    assert status == "contradicted"
+    mock_judge.assert_called_once()
 
 
 @patch("app.routers.generation.verify_citation")

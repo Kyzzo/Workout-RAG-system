@@ -1,5 +1,6 @@
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from ..rag.generate import (
     Adjustment,
@@ -152,8 +153,22 @@ def _sibling_volume_summary(prescription: models.WeeklyPrescription, db: Session
     return "\n".join(lines) if lines else None
 
 
+def _verify_chunks(query: str, value, chunk_ids: list[str], chunks_by_id: dict[str, dict]):
+    """Judges every cited chunk for this value, in parallel (a value cites
+    several chunks and each judge call takes seconds). Returns
+    (verified: [(chunk, status)], any_supported). Chunk ids are schema-
+    constrained to this call's retrieved set, so they're always present."""
+    chunks = [chunks_by_id[chunk_id] for chunk_id in dict.fromkeys(chunk_ids)]
+    if not chunks:
+        return [], False
+    with ThreadPoolExecutor(max_workers=min(len(chunks), 10)) as pool:
+        statuses = list(pool.map(lambda chunk: verify_citation(query, value, chunk["text"]), chunks))
+    verified = list(zip(chunks, statuses))
+    return verified, any(status in _SUPPORTED_STATUSES for status in statuses)
+
+
 def _attempt_generation(
-    generate_fn, query_fn, field_name: str, muscle_group: str, goal: str, use_mechanical_check: bool,
+    generate_fn, query_fn, field_name: str, muscle_group: str, goal: str,
     sibling_context: str | None = None, adjustment: Adjustment | None = None,
 ):
     result, chunks = generate_fn(muscle_group, goal, sibling_context=sibling_context, adjustment=adjustment)
@@ -161,15 +176,7 @@ def _attempt_generation(
     chunks_by_id = {c["id"]: c for c in chunks}
     value = getattr(result, field_name)
 
-    verified = []
-    any_supported = False
-    for chunk_id in result.chunk_ids:
-        chunk = chunks_by_id[chunk_id]  # schema-constrained to this set, always present
-        status = verify_citation(query, value, chunk["text"], result.grounding, use_mechanical_check=use_mechanical_check)
-        if status in _SUPPORTED_STATUSES:
-            any_supported = True
-        verified.append((chunk, status))
-    return result, verified, any_supported
+    return (result, *_verify_chunks(query, value, result.chunk_ids, chunks_by_id))
 
 
 def _generate_and_persist(
@@ -178,7 +185,6 @@ def _generate_and_persist(
     generate_fn,
     query_fn,
     field_name: str,
-    use_mechanical_check: bool,
     adjustment: Adjustment | None = None,
 ) -> models.WeeklyPrescription:
     muscle_group = prescription.exercise_slot.muscle_group
@@ -188,7 +194,7 @@ def _generate_and_persist(
     sibling_context = _sibling_volume_summary(prescription, db) if field_name == "sets" else None
 
     result, verified, any_supported = _attempt_generation(
-        generate_fn, query_fn, field_name, muscle_group, goal, use_mechanical_check, sibling_context, adjustment
+        generate_fn, query_fn, field_name, muscle_group, goal, sibling_context, adjustment
     )
 
     # A single bounded retry (never a loop) is worth attempting when the
@@ -200,7 +206,7 @@ def _generate_and_persist(
     # that (citation_verification.txt section 7).
     if not any_supported and result.grounding != "general_knowledge":
         result, verified, any_supported = _attempt_generation(
-            generate_fn, query_fn, field_name, muscle_group, goal, use_mechanical_check, sibling_context, adjustment
+            generate_fn, query_fn, field_name, muscle_group, goal, sibling_context, adjustment
         )
 
     current_value = getattr(prescription, field_name)
@@ -258,9 +264,7 @@ def generate_volume(
     current_user: models.User = Depends(get_current_user),
 ):
     prescription = get_owned_prescription(prescription_id, db, current_user)
-    return _generate_and_persist(
-        prescription, db, generate_volume_sets, build_volume_query, "sets", use_mechanical_check=True
-    )
+    return _generate_and_persist(prescription, db, generate_volume_sets, build_volume_query, "sets")
 
 
 @router.post("/{prescription_id}/generate-intensity", response_model=schemas.WeeklyPrescriptionOut)
@@ -270,28 +274,21 @@ def generate_intensity(
     current_user: models.User = Depends(get_current_user),
 ):
     prescription = get_owned_prescription(prescription_id, db, current_user)
-    # use_mechanical_check=False for load: it's a string ("70% 1RM" or an
-    # RPE value), and range-containment has no reliable way to compare
-    # across those two unit systems - load always escalates to the judge
-    # (citation_verification.txt section 3).
-    return _generate_and_persist(
-        prescription, db, generate_intensity_load, build_intensity_query, "load", use_mechanical_check=False
-    )
+    return _generate_and_persist(prescription, db, generate_intensity_load, build_intensity_query, "load")
 
 
 def field_pipeline(field: str, exercise_name: str, preference: str = "moderate"):
-    """(generate_fn, query_fn, use_mechanical_check) for one prescription field.
+    """(generate_fn, query_fn) for one prescription field.
     Reps and RIR are asked per EXERCISE (a squat and a lateral raise get
     different answers), so the exercise name is bound in here."""
     if field == "sets":
-        return generate_volume_sets, build_volume_query, True
+        return generate_volume_sets, build_volume_query
     if field == "load":
-        return generate_intensity_load, build_intensity_query, False
+        return generate_intensity_load, build_intensity_query
     if field == "reps":
         return (
             lambda m, g, sibling_context=None, adjustment=None: generate_reps(m, g, exercise_name, adjustment=adjustment),
             lambda m, g: build_reps_query(m, g, exercise_name),
-            False,  # free-text ranges: always judged, never range-matched
         )
     if field == "rir":
         return (
@@ -299,7 +296,6 @@ def field_pipeline(field: str, exercise_name: str, preference: str = "moderate")
                 m, g, exercise_name, adjustment=adjustment, preference=preference,
             ),
             lambda m, g: build_rir_query(m, g, exercise_name),
-            False,
         )
     raise ValueError(f"Unknown field {field}")
 
@@ -351,8 +347,8 @@ def generate_exercise(
     program = slot.day_template.mesocycle.program
     fields = exercise_fields(program.goal)
     for field in fields:
-        generate_fn, query_fn, mechanical = field_pipeline(field, slot.exercise_name, program.volume_preference)
-        _generate_and_persist(base, db, generate_fn, query_fn, field, use_mechanical_check=mechanical)
+        generate_fn, query_fn = field_pipeline(field, slot.exercise_name, program.volume_preference)
+        _generate_and_persist(base, db, generate_fn, query_fn, field)
 
     copy_fields_to_other_weeks(base, rest, fields)
 
@@ -366,15 +362,7 @@ def _attempt_frequency_generation(muscle_group: str, goal: str):
     query = build_frequency_query(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
 
-    verified = []
-    any_supported = False
-    for chunk_id in result.chunk_ids:
-        chunk = chunks_by_id[chunk_id]
-        status = verify_citation(query, result.frequency, chunk["text"], result.grounding, use_mechanical_check=True)
-        if status in _SUPPORTED_STATUSES:
-            any_supported = True
-        verified.append((chunk, status))
-    return result, verified, any_supported
+    return (result, *_verify_chunks(query, result.frequency, result.chunk_ids, chunks_by_id))
 
 
 def _delete_existing(db: Session, model, mesocycle_id: int, muscle_group: str) -> None:
@@ -537,19 +525,7 @@ def _attempt_progression_generation(muscle_group: str, goal: str):
     query = build_progression_query(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
 
-    verified = []
-    any_supported = False
-    for chunk_id in result.chunk_ids:
-        chunk = chunks_by_id[chunk_id]
-        # use_mechanical_check=False: scheme is a categorical value
-        # ("linear"/"undulating"), not a numeric range - point-in-range
-        # containment has nothing to check it against, so this always
-        # escalates to the judge, same reasoning as load.
-        status = verify_citation(query, result.scheme, chunk["text"], result.grounding, use_mechanical_check=False)
-        if status in _SUPPORTED_STATUSES:
-            any_supported = True
-        verified.append((chunk, status))
-    return result, verified, any_supported
+    return (result, *_verify_chunks(query, result.scheme, result.chunk_ids, chunks_by_id))
 
 
 _LOAD_PERCENT_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*%")
@@ -791,17 +767,7 @@ def _attempt_weekly_volume_generation(muscle_group: str, goal: str, preference: 
     query = build_volume_query(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
 
-    verified = []
-    any_supported = False
-    for chunk_id in result.chunk_ids:
-        chunk = chunks_by_id[chunk_id]
-        # The mechanical range check fits here exactly: the excerpt states a
-        # weekly range ("10-20 sets per week") and the value is weekly too.
-        status = verify_citation(query, result.weekly_sets, chunk["text"], result.grounding, use_mechanical_check=True)
-        if status in _SUPPORTED_STATUSES:
-            any_supported = True
-        verified.append((chunk, status))
-    return result, verified, any_supported
+    return (result, *_verify_chunks(query, result.weekly_sets, result.chunk_ids, chunks_by_id))
 
 
 def _split_weekly_sets(mesocycle: models.Mesocycle, muscle_group: str, weekly_sets: int, goal: str) -> int:

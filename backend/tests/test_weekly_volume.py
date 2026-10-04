@@ -192,7 +192,9 @@ def test_program_volume_preference_reaches_weekly_volume_generation(mock_generat
 @pytest.mark.parametrize("preference, expected", [
     ("minimal", "LOWEST weekly set count"),
     ("high", "HIGH end"),
-    ("moderate", None),
+    # moderate is guided too: unguided, it aimed for the 'no detectable
+    # superiority' point (~31 sets) as a target
+    ("moderate", "effective AND efficient"),
 ])
 def test_preference_becomes_generation_guidance(preference, expected):
     from app.rag import generate
@@ -203,10 +205,7 @@ def test_preference_becomes_generation_guidance(preference, expected):
         generate.generate_weekly_volume("chest", "hypertrophy", preference)
 
     prompt = parse.call_args.kwargs["messages"][-1]["content"]
-    if expected:
-        assert "User preference:" in prompt and expected in prompt
-    else:
-        assert "User preference:" not in prompt  # moderate = default behavior, no nudge
+    assert "User preference:" in prompt and expected in prompt
 
 
 

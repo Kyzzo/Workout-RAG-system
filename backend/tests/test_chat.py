@@ -197,7 +197,7 @@ def test_general_answer_is_built_only_from_verified_statements(mock_route, mock_
         "No detectable superiority beyond ~31 fractional sets per week for hypertrophy.": "primary_support",
         "12, 18 and 24 weekly quad sets produced similar growth in trained lifters.": "primary_support",
     }
-    mock_verify.side_effect = lambda q, text, chunk, grounding, **kwargs: supported.get(text, "contradicted")
+    mock_verify.side_effect = lambda q, text, chunk, **kwargs: supported.get(text, "contradicted")
 
     result = send_chat_message(
         request=schemas.ChatMessageRequest(message="optimal weekly sets?"), db=db_session, current_user=user,

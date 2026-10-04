@@ -34,8 +34,8 @@ def _send(db_session, user, prescription):
 def _patch_field(field, generate_mock):
     # _ADJUST_FIELDS captured the real generate functions at import time,
     # so the mock has to go into the dict itself.
-    query_fn, mechanical = (build_volume_query, True) if field == "sets" else (build_intensity_query, False)
-    return patch.dict("app.routers.chat._ADJUST_FIELDS", {field: (generate_mock, query_fn, mechanical)})
+    query_fn = build_volume_query if field == "sets" else build_intensity_query
+    return patch.dict("app.routers.chat._ADJUST_FIELDS", {field: (generate_mock, query_fn)})
 
 
 @patch("app.routers.generation.verify_citation", return_value="contradicted")

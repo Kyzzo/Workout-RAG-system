@@ -1,4 +1,3 @@
-import re
 from typing import Literal, NamedTuple
 
 import pydantic
@@ -11,47 +10,6 @@ load_dotenv()
 # fields), so rate-limit errors are expected under load - retried with
 # backoff rather than surfacing as 'unresolved' citations.
 client = OpenAI(max_retries=6)
-
-# Accept-only, per citation_verification.txt section 3: this check may only
-# ever confirm a citation, never reject one. Anything not a single,
-# unambiguous, confidently-extracted range containing the value falls
-# through (returns False) to judge escalation, not "contradicted" -
-# multiple candidate ranges in one chunk means the extractor can't tell
-# which one actually applies, so it declines rather than guesses.
-_RANGE_PATTERN = re.compile(r"(\d+)\s*(?:-|–|—|to)\s*(\d+)")
-_SETS_WINDOW = 30  # chars to look for "set"/"sets" around a candidate range
-
-
-def _find_sets_ranges(text: str) -> list[tuple[int, int]]:
-    ranges = []
-    for m in _RANGE_PATTERN.finditer(text):
-        low, high = int(m.group(1)), int(m.group(2))
-        if low > high:
-            continue  # e.g. citation page ranges like "578-82" aren't ascending, discard
-
-        # A bare "(10-13)" is a common citation-reference-list pattern
-        # (papers #10 through #13), not a dosing range - even though the
-        # word "set" often appears nearby in the surrounding sentence
-        # ("...RT set should be quantified... (10-13)."). If the match is
-        # immediately wrapped in parentheses with nothing else inside,
-        # require "set" to be INSIDE those same parens, not just nearby.
-        if m.start() > 0 and text[m.start() - 1] == "(" and m.end() < len(text) and text[m.end()] == ")":
-            continue
-
-        after = text[m.end():m.end() + _SETS_WINDOW].lower()
-        before = text[max(0, m.start() - _SETS_WINDOW):m.start()].lower()
-        if "set" in after or "set" in before:
-            ranges.append((low, high))
-    return ranges
-
-
-def check_point_in_range(value: int, chunk_text: str) -> bool:
-    ranges = _find_sets_ranges(chunk_text)
-    if len(ranges) != 1:
-        return False
-    low, high = ranges[0]
-    return low <= value <= high
-
 
 class JudgeVerdict(pydantic.BaseModel):
     outcome: Literal["primary_support", "contextual_support", "contradicted"]
@@ -68,11 +26,14 @@ as exactly one of:
 accounts for the generated answer - it states the same value/range, or makes \
 the same categorical recommendation.
 - contextual_support: the excerpt does not itself state or recommend the \
-answer, but it discusses related factors (population, training experience, \
-fatigue/recovery considerations, methodology, or similar) that could \
+answer, but it reports FINDINGS on related factors (population, training \
+experience, fatigue/recovery, how volume is counted, or similar) that could \
 reasonably explain how the answer was informed or adjusted using this \
 excerpt alongside other sources - a legitimate contributing influence, not \
-the literal source of the claim.
+the literal source of the claim. Introductions, background, study aims, \
+methods descriptions, titles and abstracts' author lists that report no \
+results of their own are not support of any kind - classify them as \
+contradicted, however closely their topic matches.
 - contradicted: the excerpt bears no real relationship to the answer at \
 all - a different exercise, a different population, an unrelated claim, or \
 a different recommendation than the one given (e.g. the excerpt recommends \
@@ -113,6 +74,22 @@ number or short value (e.g. '12', '8-12', '1-2 RIR') with no stated unit or \
 outcome of its own hasn't changed a qualifier - judge it on whether the \
 excerpt supports that value for the question asked.
 
+A bare generated value is a point chosen from what the research supports, \
+not a claim that it is the single best value - dosing research usually \
+reports ranges, tiers or dose-response findings rather than one optimum. \
+Classify it as primary_support when the excerpt reports, for the question's \
+outcome, a range or tier the value falls inside as an effective dose (e.g. \
+18 inside an excerpt's '11-18 weekly sets' tier, or 12 inside '12-20 sets', \
+or inside '12-24 sets produced similar growth'). A 'no detectable \
+superiority beyond X' point marks where the data stopped showing \
+differences, not a recommended dose: a value equal to or near X is NOT \
+supported by that finding - classify it contradicted unless the excerpt \
+also reports X inside a range it presents as effective. A value that only \
+sits below such a point, or near a single figure the excerpt doesn't present \
+as an effective range, is at most contextual_support. A figure for a different outcome (a strength result for \
+a hypertrophy question) or a different unit (sets per session for a weekly \
+value) never supports it.
+
 Give brief reasoning for your classification."""
 
 
@@ -131,7 +108,10 @@ class Judge(NamedTuple):
 # miss was a hedged prose overstatement, which a bare value can't contain.
 # gpt-4.1 scored the same but this account's 30k tokens/min limit on it
 # throttles a block's checks; gpt-5's limit is 500k.
-GENERATION_JUDGE = Judge("gpt-5", reasoning_effort="minimal")
+# Low, not minimal, effort: on weekly volume, minimal gave inconsistent
+# verdicts (the same value in the same reported tier accepted once and
+# rejected once) and read a 'no detectable superiority' point as an optimum.
+GENERATION_JUDGE = Judge("gpt-5", reasoning_effort="low")
 STATEMENT_JUDGE = Judge("gpt-5")
 
 
@@ -210,31 +190,13 @@ def verify_summary(question: str, summary: str, excerpts: list[str], judge: Judg
         return False
 
 
-def verify_citation(
-    query: str,
-    value: int | str,
-    chunk_text: str,
-    grounding: str,
-    use_mechanical_check: bool = True,
-    judge: Judge = GENERATION_JUDGE,
-) -> str:
-    # Mechanical fast-path-accept only fires on a full self-report - per
-    # citation_verification.txt section 4 trigger (b), a "blended" or
-    # "general_knowledge" self-report escalates to the judge even if the
-    # raw numbers would otherwise pass, since the model's own admission
-    # casts doubt on whether this citation is really the primary source.
-    #
-    # use_mechanical_check=False for load specifically: it's stored as a
-    # string ("70% 1RM" or an RPE value), and range-containment has no
-    # reliable way to compare across those two unit systems - rather than
-    # guess, load always escalates straight to the judge
-    # (citation_verification.txt section 3).
-    if (
-        use_mechanical_check
-        and grounding == "fully_grounded"
-        and check_point_in_range(value, chunk_text)
-    ):
-        return "primary_support"
+def verify_citation(query: str, value: int | str, chunk_text: str, judge: Judge = GENERATION_JUDGE) -> str:
+    # Every citation goes to the judge. An accept-only range check used to
+    # approve a value without it whenever the excerpt contained a sets range
+    # covering the value - which skips every qualifier check: it approved 18
+    # weekly quad sets for hypertrophy from Aube 2022's '12-24 sets similar'
+    # while the judge rejected the citation, since Aube's 18 is a strength
+    # (squat 1RM) finding. Removed Oct 4, 2026.
     try:
         return judge_citation(query, value, chunk_text, judge=judge).outcome
     except Exception:

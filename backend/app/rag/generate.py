@@ -22,9 +22,19 @@ _GENERATION_SYSTEM_PROMPT = (
     "estimate from what's given rather than using outside knowledge. "
     "Give the requested value as a single, concise value (e.g. '70% 1RM', "
     "'RPE 8', '8-10') - not a sentence or paragraph explaining it. "
-    "Each context chunk is labeled with a bracketed ID like [abc-123]. "
-    "In chunk_ids, list the IDs of the chunks that actually informed "
-    "your answer - do not invent an ID that isn't shown above. Set "
+    "Each context chunk is labeled with a bracketed ID like [abc-123] "
+    "and its paper. Base the value on findings for the outcome the "
+    "question asks about: a strength finding never sets a hypertrophy "
+    "value, or the reverse. Weigh the evidence: when meta-analyses or "
+    "reviews are present, base the value on their pooled findings and "
+    "treat single studies as supporting detail, not the deciding source. "
+    "Keep each finding's meaning - 'no detectable superiority beyond X' "
+    "or 'similar results across A-B' don't make X or any point in A-B an "
+    "optimum to aim for. In chunk_ids, list EVERY chunk whose findings "
+    "support your value (usually several, from different papers) and no "
+    "chunk that doesn't - each one is checked, and a chunk that doesn't "
+    "support the value as written is rejected. Do not invent an ID that "
+    "isn't shown above. Set "
     "grounding to 'fully_grounded' if the cited chunks fully account "
     "for your answer, 'blended' if you combined them with general "
     "knowledge, or 'general_knowledge' if no provided chunk "
@@ -184,6 +194,14 @@ def _retrieve_general_chunks(topic: str) -> list[dict]:
     return _select_diverse(ranked, GENERAL_TOP_K)
 
 
+# The model that picks generated values, as (model, reasoning effort).
+# Compared on weekly volume (4 muscles x 2 goals): gpt-4o-mini picked a 'no
+# detectable superiority' point (31 sets) as a target and anchored on single
+# studies; gpt-5 at minimal effort based values on the meta-analyses, cited
+# 2-3 papers each and had every value verified, ~15s per value with judging.
+GENERATION_MODEL = ("gpt-5", "minimal")
+
+
 def _generate_field(
     field_name: str,
     field_type: type,
@@ -196,7 +214,7 @@ def _generate_field(
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     chunks = _retrieve_chunks(query, category)
 
-    context_block = "\n\n".join(f"[{c['id']}] {c['text']}" for c in chunks)
+    context_block = "\n\n".join(f"[{c['id']}] ({c['source']}) {c['text']}" for c in chunks)
     locked_type = adjustment.locked_type() if adjustment else None
     response_schema = _build_response_schema(
         field_name, locked_type or field_type, field_description, [c["id"] for c in chunks]
@@ -218,8 +236,10 @@ def _generate_field(
     if guidance:
         user_content += f"\n\nUser preference: {guidance}"
 
+    model, effort = GENERATION_MODEL
     completion = client.chat.completions.parse(
-        model="gpt-4o-mini",
+        model=model,
+        **({"reasoning_effort": effort} if effort else {}),
         messages=[
             {"role": "system", "content": _GENERATION_SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
@@ -258,7 +278,13 @@ _VOLUME_GUIDANCE = {
     "minimal": "a minimal-effective-dose approach (fewer, harder sets). Choose the "
     "LOWEST weekly set count the provided research still reports as effective, "
     "not the optimum.",
-    "moderate": None,
+    # Moderate needs saying too: left unguided, the model aimed for the
+    # 'no detectable superiority' point (~31 weekly sets) as if it were
+    # the target.
+    "moderate": "a moderate approach. Choose a weekly set count inside the range "
+    "the provided research reports as effective AND efficient - not the highest "
+    "volume where any benefit was still detected, and never a 'no detectable "
+    "superiority' point itself.",
     "high": "a high-volume approach. Choose toward the HIGH end of the weekly set "
     "range the provided research supports, where it still reports added benefit.",
 }
@@ -272,8 +298,7 @@ def generate_weekly_volume(
     muscle_group: str, goal: str, preference: str = "moderate",
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     # The claim the volume research actually makes - weekly sets for the
-    # muscle - so verification compares like with like (the mechanical
-    # range check reads ranges like "10-20 sets" straight from the excerpt).
+    # muscle - so verification compares like with like.
     return _generate_field(
         "weekly_sets", int, "volume", build_volume_query(muscle_group, goal),
         field_description="Total sets per WEEK for this muscle, across all of its "
@@ -369,9 +394,15 @@ def generate_frequency(muscle_group: str, goal: str) -> tuple[pydantic.BaseModel
 #excercises within same muscle group
 #other consideration potentially is excercises that hit multiple muscle groups (count fractional sets?)
 def build_volume_query(muscle_group: str, goal: str) -> str:
+    # 'Supports as effective', not 'optimal': dosing research reports
+    # effective ranges, tiers and diminishing returns, not one best number,
+    # and the judge reads this question to decide what a value claims (incl.
+    # the unit: this app counts fractional sets, as the meta-analyses do).
     return (
-        f"What is the optimal weekly training volume (number of sets) "
-        f"for {muscle_group} to support a training goal of {goal}?"
+        f"How many sets per week for {muscle_group} does the research support "
+        f"as an effective training volume for a goal of {goal}? Sets are "
+        f"counted fractionally: a set where {muscle_group} is a secondary "
+        f"muscle counts as half a set."
     )
 
 

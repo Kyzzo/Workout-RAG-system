@@ -36,11 +36,11 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # adjust_prescription reuses Phase 4/5's own generation/verification
 # pipeline unchanged (phase6_chat_routing_concepts.txt section 4) - this
 # just maps the router's target_field choice onto the same (generate_fn,
-# query_fn, use_mechanical_check) triples the direct REST endpoints in
+# query_fn) pairs the direct REST endpoints in
 # generation.py already use.
 _ADJUST_FIELDS = {
-    "sets": (generate_volume_sets, build_volume_query, True),
-    "load": (generate_intensity_load, build_intensity_query, False),
+    "sets": (generate_volume_sets, build_volume_query),
+    "load": (generate_intensity_load, build_intensity_query),
     # Reps and RIR are asked per exercise; the exercise name is bound in
     # _handle_adjust (see generation.field_pipeline).
     "reps": None,
@@ -133,11 +133,11 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
             ),
         )
     if _ADJUST_FIELDS[decision.target_field] is None:
-        generate_fn, query_fn, use_mechanical_check = field_pipeline(
+        generate_fn, query_fn = field_pipeline(
             decision.target_field, prescription.exercise_slot.exercise_name
         )
     else:
-        generate_fn, query_fn, use_mechanical_check = _ADJUST_FIELDS[decision.target_field]
+        generate_fn, query_fn = _ADJUST_FIELDS[decision.target_field]
     adjustment = _build_adjustment(decision, prescription, raw_message)
 
     # Already at the per-exercise cap: more sets for this exercise isn't an
@@ -157,8 +157,7 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
 
     try:
         updated = _generate_and_persist(
-            prescription, db, generate_fn, query_fn, decision.target_field, use_mechanical_check,
-            adjustment=adjustment,
+            prescription, db, generate_fn, query_fn, decision.target_field, adjustment=adjustment,
         )
         if goal != "strength":
             # Hypertrophy shows one prescription per exercise, the same every
@@ -211,10 +210,7 @@ def _verify_statements(question: str, parsed, sources: dict[str, dict]):
 
     def judge(pair):
         text, source = pair
-        return verify_citation(
-            question, text, source["text"], parsed.grounding,
-            use_mechanical_check=False, judge=STATEMENT_JUDGE,
-        )
+        return verify_citation(question, text, source["text"], judge=STATEMENT_JUDGE)
 
     summary = getattr(parsed, "summary", None)
     summary_sources = (
