@@ -168,8 +168,8 @@ def test_exact_value_that_isnt_a_number_is_rejected(mock_route, db_session, owne
 
 @patch("app.routers.chat.route_chat_message")
 def test_increase_at_the_per_exercise_cap_is_refused_without_generating(mock_route, db_session, owner_and_prescription):
-    user, prescription = owner_and_prescription  # hypertrophy: cap is 4
-    prescription.sets = 4
+    user, prescription = owner_and_prescription  # hypertrophy: cap is 3
+    prescription.sets = 3
     mock_route.return_value = _route(prescription, "sets", "increase")
     generate = MagicMock()
 
@@ -177,8 +177,8 @@ def test_increase_at_the_per_exercise_cap_is_refused_without_generating(mock_rou
         result = _send(db_session, user, prescription)
 
     generate.assert_not_called()
-    assert result.prescription.sets == 4
-    assert "most one exercise gets per session (4)" in result.answer
+    assert result.prescription.sets == 3
+    assert "most one exercise gets per session (3)" in result.answer
 
 
 @patch("app.routers.generation.verify_citation", return_value="contradicted")

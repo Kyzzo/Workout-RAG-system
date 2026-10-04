@@ -209,3 +209,51 @@ def _select_group(days: list[PlannedDay], goal: str, split_description: str) -> 
         feedback = "\n\nYour previous selection had problems - fix them: " + "; ".join(problems)
 
     raise ExerciseSelectionError("Exercise selection didn't cover every target muscle group: " + "; ".join(problems))
+
+
+_ADD_PROMPT = (
+    "You add exercises to an existing resistance-training day so one muscle's "
+    "sets can be spread across several exercises instead of piled onto one. "
+    "Each new exercise must MAINLY train the requested muscle, use common gym "
+    "equipment, and differ from the exercises the day already has - a different "
+    "angle, implement or movement pattern (e.g. incline press or flyes next to a "
+    "flat bench press; pullovers or a pulldown variation next to pull-ups). In "
+    "secondary_muscle_groups list up to 3 other muscles it meaningfully trains, "
+    "or none for isolation work. Use common names."
+)
+
+
+def select_additional_exercises(
+    day_name: str, muscle_group: str, existing: list[str], count: int, goal: str,
+) -> list[tuple[str, list[str], bool]]:
+    """`count` more exercises for `muscle_group` on one day, as
+    (exercise_name, secondaries, is_compound). Same constraints as the main
+    selection: secondaries from the fixed muscle list, cleaned of the primary."""
+    pick = pydantic.create_model(
+        "AddedExercise",
+        exercise_name=(str, ...),
+        is_compound=(bool, ...),
+        secondary_muscle_groups=(list[Literal[MUSCLE_GROUPS]], ...),
+    )
+    schema = pydantic.create_model("AddedExercises", exercises=(list[pick], ...))
+    completion = client.chat.completions.parse(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": _ADD_PROMPT},
+            {"role": "user", "content": (
+                f"Goal: {goal}. Day: {day_name}. It already has: {', '.join(existing)}.\n"
+                f"Add exactly {count} exercise(s) that mainly train {muscle_group}."
+            )},
+        ],
+        response_format=schema,
+    )
+    message = completion.choices[0].message
+    if message.refusal:
+        raise ExerciseSelectionError(f"Model refused to add exercises: {message.refusal}")
+    existing_lower = {name.strip().lower() for name in existing}
+    picks = [
+        (p.exercise_name.strip(), _clean_secondaries(muscle_group, p.secondary_muscle_groups), p.is_compound)
+        for p in message.parsed.exercises
+        if p.exercise_name.strip().lower() not in existing_lower  # never duplicate what's there
+    ]
+    return picks[:count]

@@ -57,8 +57,8 @@ def test_one_exercise_never_gets_the_whole_week(db_session):
 
     delivered = _split_weekly_sets(mesocycle, "chest", 12, "hypertrophy")
 
-    assert _sets(bench) == [4, 4]  # capped, every week
-    assert delivered == 4  # the shortfall is reported, not hidden
+    assert _sets(bench) == [3, 3]  # capped at 3 for hypertrophy, every week
+    assert delivered == 3  # the shortfall is reported, not hidden
 
 
 def test_strength_cap_is_five(db_session):
@@ -76,11 +76,11 @@ def test_split_is_even_and_secondary_work_counts_half(db_session):
     pulldown = _exercise(db_session, day, "Lat Pulldown", "lats")
     pullup = _exercise(db_session, day, "Pull-Up", "lats")
 
-    delivered = _split_weekly_sets(mesocycle, "lats", 9, "hypertrophy")
+    delivered = _split_weekly_sets(mesocycle, "lats", 7, "hypertrophy")
 
-    # 9 - 2 (half of the row's 4) = 7 -> 4 + 3, first exercise gets the extra
-    assert (_sets(pulldown), _sets(pullup)) == ([4, 4], [3, 3])
-    assert delivered == 9
+    # 7 - 2 (half of the row's 4) = 5 -> 3 + 2, first exercise gets the extra
+    assert (_sets(pulldown), _sets(pullup)) == ([3, 3], [2, 2])
+    assert delivered == 7
 
 
 def test_every_exercise_gets_at_least_two_sets(db_session):
@@ -126,7 +126,7 @@ def test_single_value_generation_is_capped_by_the_schema():
         from app.rag.generate import generate_volume_sets
 
         generate_volume_sets("chest", "hypertrophy")
-        assert get_args(field.call_args.args[1]) == (1, 2, 3, 4)
+        assert get_args(field.call_args.args[1]) == (1, 2, 3)
         generate_volume_sets("chest", "strength")
         assert get_args(field.call_args.args[1]) == (1, 2, 3, 4, 5)
 
@@ -140,7 +140,7 @@ def _chunks(*ids):
 @patch("app.routers.generation.verify_citation", return_value="primary_support")
 @patch("app.routers.generation.generate_weekly_volume")
 def test_endpoint_cites_the_weekly_total_and_replaces_previous(mock_generate, _verify, db_session):
-    user, mesocycle, day = _block(db_session)
+    user, mesocycle, day = _block(db_session, goal="strength")  # strength: no exercises added
     bench = _exercise(db_session, day, "Bench Press", "chest")
     fly = _exercise(db_session, day, "Cable Fly", "chest")
     mock_generate.return_value = (
@@ -153,9 +153,10 @@ def test_endpoint_cites_the_weekly_total_and_replaces_previous(mock_generate, _v
 
     assert result.volume.weekly_sets == 12
     assert [c.citation.title for c in result.volume.supporting_citations] == ["paper-v-1"]
-    assert result.delivered_weekly_sets == 8  # 2 exercises x 4, short of 12
+    assert result.delivered_weekly_sets == 10  # 2 exercises x 5 (strength cap), short of 12
+    assert result.exercises_added == []
     assert db_session.query(models.MuscleGroupVolume).filter_by(mesocycle_id=mesocycle.id).count() == 1
-    assert (_sets(bench), _sets(fly)) == ([4, 4], [4, 4])
+    assert (_sets(bench), _sets(fly)) == ([5, 5], [5, 5])
 
 
 def test_endpoint_ownership_enforced(db_session, other_user):
@@ -206,3 +207,96 @@ def test_preference_becomes_generation_guidance(preference, expected):
         assert "User preference:" in prompt and expected in prompt
     else:
         assert "User preference:" not in prompt  # moderate = default behavior, no nudge
+
+
+
+# --- spreading a muscle's sets across more exercises (hypertrophy) -------------
+
+def _added(names_by_call):
+    """Fake select_additional_exercises: returns the next queued names."""
+    calls = []
+
+    def fake(day_name, muscle_group, existing, count, goal):
+        calls.append((day_name, muscle_group, count))
+        return [(f"{muscle_group} variation {len(calls)}.{i}", [], False) for i in range(count)]
+    return fake, calls
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_weekly_volume")
+def test_hypertrophy_adds_exercises_instead_of_piling_sets_on_one(mock_generate, _verify, db_session):
+    # 4 chest sets for one session: 2 bench + 2 of a second chest exercise,
+    # not 4 sets of bench.
+    user, mesocycle, day = _block(db_session)
+    _exercise(db_session, day, "Bench Press", "chest", sets=0)
+    _exercise(db_session, day, "Lateral Raise", "side delts", sets=0)
+    mock_generate.return_value = (SimpleNamespace(weekly_sets=4, chunk_ids=[], grounding="general_knowledge"), [])
+    fake, calls = _added(None)
+
+    with patch("app.routers.generation.select_additional_exercises", side_effect=fake):
+        result = generate_weekly_volume_endpoint(
+            mesocycle_id=mesocycle.id, request=schemas.GenerateWeeklyVolumeRequest(muscle_group="chest"),
+            db=db_session, current_user=user,
+        )
+
+    assert calls == [("Day", "chest", 1)]
+    assert result.exercises_added == ["chest variation 1.0"]
+    db_session.expire_all()
+    slots = sorted(db_session.get(models.DayTemplate, day.id).exercise_slots, key=lambda s: s.order)
+    # the new chest exercise sits right after the existing one, before delts
+    assert [s.exercise_name for s in slots] == ["Bench Press", "chest variation 1.0", "Lateral Raise"]
+    assert [_sets(s)[0] for s in slots[:2]] == [2, 2]
+    assert len(slots[1].weekly_prescriptions) == 2  # placeholder rows for every week of the block
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_weekly_volume")
+def test_no_exercises_added_when_volume_already_fits(mock_generate, _verify, db_session):
+    # e.g. the minimal preference: a low weekly target fits one exercise
+    user, mesocycle, day = _block(db_session)
+    _exercise(db_session, day, "Bench Press", "chest")
+    mock_generate.return_value = (SimpleNamespace(weekly_sets=3, chunk_ids=[], grounding="general_knowledge"), [])
+
+    with patch("app.routers.generation.select_additional_exercises") as add:
+        result = generate_weekly_volume_endpoint(
+            mesocycle_id=mesocycle.id, request=schemas.GenerateWeeklyVolumeRequest(muscle_group="chest"),
+            db=db_session, current_user=user,
+        )
+
+    add.assert_not_called()
+    assert result.exercises_added == []
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_weekly_volume")
+def test_added_exercises_stop_at_three_per_muscle_per_day(mock_generate, _verify, db_session):
+    user, mesocycle, day = _block(db_session)
+    _exercise(db_session, day, "Bench Press", "chest")
+    mock_generate.return_value = (SimpleNamespace(weekly_sets=20, chunk_ids=[], grounding="general_knowledge"), [])
+    fake, calls = _added(None)
+
+    with patch("app.routers.generation.select_additional_exercises", side_effect=fake):
+        result = generate_weekly_volume_endpoint(
+            mesocycle_id=mesocycle.id, request=schemas.GenerateWeeklyVolumeRequest(muscle_group="chest"),
+            db=db_session, current_user=user,
+        )
+
+    assert len(result.exercises_added) == 2  # 1 existing + 2 added = 3 chest exercises max
+    assert result.delivered_weekly_sets == 9  # 3 x 3, the rest shows as a shortfall
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_weekly_volume")
+def test_failed_exercise_picking_still_splits_volume(mock_generate, _verify, db_session):
+    user, mesocycle, day = _block(db_session)
+    bench = _exercise(db_session, day, "Bench Press", "chest")
+    mock_generate.return_value = (SimpleNamespace(weekly_sets=6, chunk_ids=[], grounding="general_knowledge"), [])
+
+    with patch("app.routers.generation.select_additional_exercises", side_effect=RuntimeError("model down")):
+        result = generate_weekly_volume_endpoint(
+            mesocycle_id=mesocycle.id, request=schemas.GenerateWeeklyVolumeRequest(muscle_group="chest"),
+            db=db_session, current_user=user,
+        )
+
+    assert result.exercises_added == []
+    assert _sets(bench) == [3, 3]

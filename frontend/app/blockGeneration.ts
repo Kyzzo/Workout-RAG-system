@@ -109,9 +109,15 @@ async function runSteps(
     )();
   }
 
+  // Re-read the block: weekly volume can add exercises (hypertrophy spreads
+  // a muscle's sets across more exercises), and those need reps and effort too.
+  const refreshed = await api<Program>(`/programs/${programId}`);
+  const currentSlots = (refreshed.mesocycles.find((m) => m.id === mesocycleId)?.day_templates ?? [])
+    .flatMap((d) => d.exercise_slots);
+
   done = 0;
-  hooks.onProgress(`Reps & effort 0/${slots.length}`);
-  await runParallel(slots.map((slot) => counted("Reps & effort", slots.length, () =>
+  hooks.onProgress(`Reps & effort 0/${currentSlots.length}`);
+  await runParallel(currentSlots.map((slot) => counted("Reps & effort", currentSlots.length, () =>
     step(`Reps & effort (${slot.exercise_name})`, `/exercise-slots/${slot.id}/generate`),
   )));
 

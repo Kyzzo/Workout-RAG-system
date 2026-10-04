@@ -171,14 +171,22 @@ export default function ProgramTree({
 
   function generateVolume(mesocycle: Mesocycle, muscleGroup: string) {
     return runAction(`volume-${mesocycle.id}-${muscleGroup}`, async () => {
-      const result = await api<{ volume: { weekly_sets: number }; delivered_weekly_sets: number }>(
-        `/mesocycles/${mesocycle.id}/generate-weekly-volume`,
-        { method: "POST", body: { muscle_group: muscleGroup } },
-      );
+      const result = await api<{
+        volume: { weekly_sets: number };
+        delivered_weekly_sets: number;
+        exercises_added: string[];
+      }>(`/mesocycles/${mesocycle.id}/generate-weekly-volume`, {
+        method: "POST",
+        body: { muscle_group: muscleGroup },
+      });
       const { weekly_sets } = result.volume;
+      const added = result.exercises_added;
       return (
         `${muscleGroup}: research suggests ${weekly_sets} sets/week; split across its exercises the plan gives ` +
         `${result.delivered_weekly_sets}.` +
+        (added.length > 0
+          ? ` Added ${added.join(", ")} so the sets are spread across exercises - use "generate reps & effort" on ${added.length === 1 ? "it" : "them"}.`
+          : "") +
         (result.delivered_weekly_sets < weekly_sets ? " Add an exercise or a day to get closer." : "")
       );
     });
@@ -190,7 +198,8 @@ export default function ProgramTree({
       `Generate every number in "${mesocycle.name}"?\n\n` +
         "1. Research frequency for each muscle group, shown next to how often you actually train it (no days are added).\n" +
         "2. Weekly volume for each muscle group (cited), split across its exercises - at most " +
-        `${strength ? 5 : 4} sets per exercise.\n` +
+        `${strength ? 5 : 3} sets per exercise` +
+        (strength ? ".\n" : "; exercises are added where a muscle needs more than that.\n") +
         `3. Reps, effort (RIR)${strength ? " and load (%1RM)" : ""} for every exercise, applied to all weeks.\n` +
         (strength ? "4. Progression for each muscle group.\n" : "") +
         "\nExisting generated values in this block are replaced. This can take a few minutes.",

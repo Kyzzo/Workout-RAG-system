@@ -182,6 +182,9 @@ class GenerateWeeklyVolumeResponse(BaseModel):
     # What the block's exercises add up to after the per-exercise cap
     # (secondary work at half) - can fall short of the research target.
     delivered_weekly_sets: int
+    # Hypertrophy: exercises added so the muscle's sets could be spread
+    # across exercises within the per-exercise cap.
+    exercises_added: list[str] = []
 
 
 class GenerateFrequencyRequest(BaseModel):

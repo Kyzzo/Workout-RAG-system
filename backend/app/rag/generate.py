@@ -166,8 +166,11 @@ def _generate_field(
 # claim: the literature reports WEEKLY volume per muscle, which then has to
 # be spread across exercises and sessions - without a cap, a 2-day split
 # with one chest exercise would put the whole weekly target (12 sets of
-# bench) into a single session. Strength allows 5 for 5x5-style main lifts.
-_MAX_SETS_PER_EXERCISE = {"hypertrophy": 4, "strength": 5}
+# bench) into a single session. Hypertrophy spreads a muscle's sets across
+# several exercises (systematic exercise variation - see Kassiano et al.
+# 2022) rather than piling them on one; strength allows 5 for 5x5-style
+# main lifts.
+_MAX_SETS_PER_EXERCISE = {"hypertrophy": 3, "strength": 5}
 
 
 def max_sets_per_exercise(goal: str) -> int:

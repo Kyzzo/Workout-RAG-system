@@ -28,6 +28,7 @@ from .. import models, schemas
 from ..auth import get_current_user
 from ..database import get_db
 from ..ownership import get_owned_exercise_slot, get_owned_prescription
+from ..rag.exercise_selection import select_additional_exercises
 
 router = APIRouter(prefix="/weekly-prescriptions", tags=["generation"])
 mesocycle_router = APIRouter(prefix="/mesocycles", tags=["generation"])
@@ -707,6 +708,80 @@ def generate_progression_endpoint(
 
 
 _MIN_SETS_PER_EXERCISE = 2  # convention: below this an exercise is barely worth its slot
+# Limits on exercises added to fit a muscle's volume under the per-exercise
+# cap, so sessions can't balloon; anything still unmet shows as a shortfall.
+_MAX_EXERCISES_PER_MUSCLE_PER_DAY = 3
+_MAX_EXERCISES_PER_DAY = 10
+
+
+def _add_exercises_to_fit_volume(
+    db: Session, mesocycle: models.Mesocycle, muscle_group: str, weekly_sets: int, goal: str,
+) -> list[str]:
+    """Hypertrophy: if the muscle's weekly sets can't fit across its current
+    exercises at the per-exercise cap, add exercises for it (AI-picked to
+    differ from what each day already has) so its sets are spread out
+    instead of piled onto one exercise. Returns the names added."""
+    cap = max_sets_per_exercise(goal)
+    slots = [slot for day in mesocycle.day_templates for slot in day.exercise_slots]
+    primary = [slot for slot in slots if slot.muscle_group == muscle_group]
+    if not primary:
+        return []
+    credit = 0.5 * sum(
+        (sorted(s.weekly_prescriptions, key=lambda wp: wp.week_number)[0].sets if s.weekly_prescriptions else 0)
+        for s in slots if muscle_group in s.secondary_muscle_groups
+    )
+    needed = -(-max(0, round(weekly_sets - credit)) // cap)  # ceil
+    extra = needed - len(primary)
+    if extra <= 0:
+        return []
+
+    # Spread the extra exercises across the days that already train the
+    # muscle, fewest-exercises-for-it first, within the per-day limits.
+    days = [day for day in mesocycle.day_templates if any(s.muscle_group == muscle_group for s in day.exercise_slots)]
+    plan = {day.id: 0 for day in days}
+    for _ in range(extra):
+        open_days = [
+            day for day in days
+            if sum(s.muscle_group == muscle_group for s in day.exercise_slots) + plan[day.id] < _MAX_EXERCISES_PER_MUSCLE_PER_DAY
+            and len(day.exercise_slots) + plan[day.id] < _MAX_EXERCISES_PER_DAY
+        ]
+        if not open_days:
+            break
+        target = min(open_days, key=lambda d: sum(s.muscle_group == muscle_group for s in d.exercise_slots) + plan[d.id])
+        plan[target.id] += 1
+
+    added = []
+    for day in days:
+        count = plan[day.id]
+        if count == 0:
+            continue
+        try:
+            picks = select_additional_exercises(
+                day.name, muscle_group, [s.exercise_name for s in day.exercise_slots], count, goal,
+            )
+        except Exception:
+            # Adding exercises is an improvement, not a requirement: without
+            # them the volume still splits (capped) and any gap is reported.
+            logger.warning("Could not add %s exercises to %s", muscle_group, day.name, exc_info=True)
+            continue
+        ordered = sorted(day.exercise_slots, key=lambda s: s.order)
+        insert_at = max(i for i, s in enumerate(ordered) if s.muscle_group == muscle_group) + 1
+        for name, secondaries, _compound in picks:
+            slot = models.ExerciseSlot(
+                exercise_name=name, muscle_group=muscle_group, secondary_muscle_groups=secondaries, order=0,
+            )
+            slot.weekly_prescriptions = [
+                models.WeeklyPrescription(week_number=w, sets=0, reps="", load="")
+                for w in range(mesocycle.start_week, mesocycle.end_week + 1)
+            ]
+            ordered.insert(insert_at, slot)
+            insert_at += 1
+            day.exercise_slots.append(slot)
+            added.append(name)
+        for i, slot in enumerate(ordered, start=1):  # new exercises sit right after the muscle's existing one
+            slot.order = i
+    db.flush()
+    return added
 
 
 def _attempt_weekly_volume_generation(muscle_group: str, goal: str, preference: str):
@@ -814,6 +889,9 @@ def generate_weekly_volume_endpoint(
         citation = _get_or_create_citation(db, chunk)
         db.add(models.VolumeCitation(volume_id=record.id, citation_id=citation.id, verification_status=status))
 
+    added = []
+    if goal != "strength":
+        added = _add_exercises_to_fit_volume(db, mesocycle, muscle_group, record.weekly_sets, goal)
     delivered = _split_weekly_sets(mesocycle, muscle_group, record.weekly_sets, goal)
 
     db.commit()
@@ -821,4 +899,5 @@ def generate_weekly_volume_endpoint(
     return schemas.GenerateWeeklyVolumeResponse(
         volume=schemas.MuscleGroupVolumeOut.model_validate(record),
         delivered_weekly_sets=delivered,
+        exercises_added=added,
     )
