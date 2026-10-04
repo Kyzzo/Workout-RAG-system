@@ -41,7 +41,7 @@ def generate_program(
     except ExerciseSelectionError as err:
         raise HTTPException(status_code=502, detail=str(err))
 
-    program = models.Program(user_id=current_user.id, goal=request.goal)
+    program = models.Program(user_id=current_user.id, goal=request.goal, volume_preference=request.volume_preference)
     db.add(program)
     db.flush()
     mesocycle = models.Mesocycle(
@@ -80,7 +80,7 @@ def create_program(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    db_program = models.Program(goal=program.goal, user_id=current_user.id)
+    db_program = models.Program(goal=program.goal, volume_preference=program.volume_preference, user_id=current_user.id)
     db.add(db_program)
     db.commit()
     db.refresh(db_program)

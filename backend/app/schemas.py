@@ -19,14 +19,19 @@ def _normalize_muscle_group(value: str) -> str:
 MuscleGroup = Annotated[str, AfterValidator(_normalize_muscle_group)]
 
 
+VolumePreference = Literal["minimal", "moderate", "high"]
+
+
 class ProgramCreate(BaseModel):
     goal: str
+    volume_preference: VolumePreference = "moderate"
 
 
 class ProgramGenerateRequest(BaseModel):
     goal: Literal["hypertrophy", "strength"]
     split: str
     days_per_week: int
+    volume_preference: VolumePreference = "moderate"
     weeks: int = Field(default=6, ge=2, le=12)
 
     @model_validator(mode="after")
@@ -50,6 +55,7 @@ class SplitOut(BaseModel):
 class ProgramSummaryOut(BaseModel):
     id: int
     goal: str
+    volume_preference: str = "moderate"
 
     model_config = {"from_attributes": True}
 
@@ -81,6 +87,7 @@ class ProgramOut(BaseModel):
     id: int
     user_id: int
     goal: str
+    volume_preference: str = "moderate"
     mesocycles: list["MesocycleOut"]
 
     model_config = {"from_attributes": True}

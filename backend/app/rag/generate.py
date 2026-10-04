@@ -121,6 +121,7 @@ def _generate_field(
     field_description: str | None = None,
     sibling_context: str | None = None,
     adjustment: Adjustment | None = None,
+    guidance: str | None = None,
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     chunks = _retrieve_chunks(query, category)
 
@@ -143,6 +144,8 @@ def _generate_field(
         )
     if adjustment:
         user_content += f"\n\nAdjustment: {adjustment.instruction()}"
+    if guidance:
+        user_content += f"\n\nUser preference: {guidance}"
 
     completion = client.chat.completions.parse(
         model="gpt-4o-mini",
@@ -171,7 +174,29 @@ def max_sets_per_exercise(goal: str) -> int:
     return _MAX_SETS_PER_EXERCISE.get(goal, 4)
 
 
-def generate_weekly_volume(muscle_group: str, goal: str) -> tuple[pydantic.BaseModel, list[dict]]:
+VolumePreference = Literal["minimal", "moderate", "high"]
+
+# Where to land inside the range the research supports. Not a different
+# claim: every option must still be a value the cited excerpts support, and
+# verification checks it the same way - a preference picks a point in the
+# supported range, it doesn't widen the range.
+_VOLUME_GUIDANCE = {
+    "minimal": "a minimal-effective-dose approach (fewer, harder sets). Choose the "
+    "LOWEST weekly set count the provided research still reports as effective, "
+    "not the optimum.",
+    "moderate": None,
+    "high": "a high-volume approach. Choose toward the HIGH end of the weekly set "
+    "range the provided research supports, where it still reports added benefit.",
+}
+_RIR_GUIDANCE = {
+    "minimal": "a low-volume approach that relies on effort: choose the closest-to-"
+    "failure option the provided research supports.",
+}
+
+
+def generate_weekly_volume(
+    muscle_group: str, goal: str, preference: str = "moderate",
+) -> tuple[pydantic.BaseModel, list[dict]]:
     # The claim the volume research actually makes - weekly sets for the
     # muscle - so verification compares like with like (the mechanical
     # range check reads ranges like "10-20 sets" straight from the excerpt).
@@ -179,6 +204,7 @@ def generate_weekly_volume(muscle_group: str, goal: str) -> tuple[pydantic.BaseM
         "weekly_sets", int, "volume", build_volume_query(muscle_group, goal),
         field_description="Total sets per WEEK for this muscle, across all of its "
         "exercises and sessions combined.",
+        guidance=_VOLUME_GUIDANCE.get(preference),
     )
 
 
@@ -240,12 +266,14 @@ def generate_reps(
 def generate_rir(
     muscle_group: str, goal: str, exercise_name: str,
     sibling_context: str | None = None, adjustment: Adjustment | None = None,
+    preference: str = "moderate",
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     return _generate_field(
         "rir", RirOption, "intensity", build_rir_query(muscle_group, goal, exercise_name),
         field_description="How many reps short of failure each set should end "
         "(reps in reserve); 0 RIR means taking the set to failure.",
         adjustment=adjustment,
+        guidance=_RIR_GUIDANCE.get(preference),
     )
 
 

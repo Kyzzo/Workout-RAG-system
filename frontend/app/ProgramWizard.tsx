@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { runBlockGeneration } from "./blockGeneration";
-import type { Program, ProgramSummary } from "./types";
+import { VOLUME_LABELS, type Program, type ProgramSummary, type VolumePreference } from "./types";
 import { useApi } from "./useApi";
 
 type SplitOption = { key: string; label: string; allowed_days: number[]; day_types: string[] };
@@ -28,6 +28,7 @@ export default function ProgramWizard({
   const [splitKey, setSplitKey] = useState("");
   const [days, setDays] = useState(0);
   const [weeks, setWeeks] = useState("6");
+  const [volume, setVolume] = useState<VolumePreference>("moderate");
   const [progress, setProgress] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +71,7 @@ export default function ProgramWizard({
       setProgress("Choosing exercises for each day");
       const program = await api<Program>("/programs/generate", {
         method: "POST",
-        body: { goal, split: splitKey, days_per_week: days, weeks: Number(weeks) },
+        body: { goal, split: splitKey, days_per_week: days, weeks: Number(weeks), volume_preference: volume },
       });
       onCreated({ id: program.id, goal: program.goal });
 
@@ -138,6 +139,19 @@ export default function ProgramWizard({
           required
         />
         <span className="text-zinc-500">weeks</span>
+        <select
+          value={volume}
+          onChange={(e) => setVolume(e.target.value as VolumePreference)}
+          className={selectClass}
+          disabled={running}
+          title="Where in the research-supported weekly volume range to land. Minimal pairs fewer sets with sets taken closer to failure."
+        >
+          {(Object.keys(VOLUME_LABELS) as VolumePreference[]).map((v) => (
+            <option key={v} value={v}>
+              {VOLUME_LABELS[v]}
+            </option>
+          ))}
+        </select>
       </div>
       {split && (
         <p className="text-xs text-zinc-500">

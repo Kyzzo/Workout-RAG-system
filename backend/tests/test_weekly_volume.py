@@ -168,3 +168,41 @@ def test_endpoint_ownership_enforced(db_session, other_user):
         )
 
     assert exc_info.value.status_code == 404
+
+
+# --- volume preference --------------------------------------------------------------
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_weekly_volume")
+def test_program_volume_preference_reaches_weekly_volume_generation(mock_generate, _verify, db_session):
+    user, mesocycle, day = _block(db_session)
+    mesocycle.program.volume_preference = "minimal"
+    _exercise(db_session, day, "Bench Press", "chest")
+    mock_generate.return_value = (SimpleNamespace(weekly_sets=6, chunk_ids=[], grounding="general_knowledge"), [])
+
+    generate_weekly_volume_endpoint(
+        mesocycle_id=mesocycle.id, request=schemas.GenerateWeeklyVolumeRequest(muscle_group="chest"),
+        db=db_session, current_user=user,
+    )
+
+    assert mock_generate.call_args.args == ("chest", "hypertrophy", "minimal")
+
+
+@pytest.mark.parametrize("preference, expected", [
+    ("minimal", "LOWEST weekly set count"),
+    ("high", "HIGH end"),
+    ("moderate", None),
+])
+def test_preference_becomes_generation_guidance(preference, expected):
+    from app.rag import generate
+
+    completion = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(refusal=None, parsed="parsed"))])
+    with patch.object(generate, "_retrieve_chunks", return_value=_chunks("v-1")), \
+            patch.object(generate.client.chat.completions, "parse", return_value=completion) as parse:
+        generate.generate_weekly_volume("chest", "hypertrophy", preference)
+
+    prompt = parse.call_args.kwargs["messages"][-1]["content"]
+    if expected:
+        assert "User preference:" in prompt and expected in prompt
+    else:
+        assert "User preference:" not in prompt  # moderate = default behavior, no nudge

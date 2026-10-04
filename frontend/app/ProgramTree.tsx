@@ -2,9 +2,10 @@
 
 import { useRef, useState } from "react";
 import { runBlockGeneration } from "./blockGeneration";
+import ProgressionGuide from "./ProgressionGuide";
 import { SourcesBadge, SourcesPanel } from "./Citations";
 import { AddDayForm, AddExerciseForm, AddMesocycleForm } from "./StructureForms";
-import type { DayTemplate, ExerciseSlot, Mesocycle, Program, WeeklyPrescription } from "./types";
+import { VOLUME_LABELS, type DayTemplate, type ExerciseSlot, type Mesocycle, type Program, type WeeklyPrescription } from "./types";
 import { useApi } from "./useApi";
 
 type FrequencyResult = {
@@ -226,8 +227,11 @@ export default function ProgramTree({
   return (
     <div className="flex flex-col gap-4 w-full text-sm">
       <p className="text-zinc-500">
-        Program #{program.id} - goal: {program.goal}
+        Program #{program.id} - goal: {program.goal} · {VOLUME_LABELS[program.volume_preference] ?? program.volume_preference}
       </p>
+      {/* Strength progression is built into the loads (cited linear scheme);
+          hypertrophy progression is a principle applied session to session. */}
+      {!strength && program.mesocycles.length > 0 && <ProgressionGuide />}
 
       {busy && !blockProgress && (
         <p className="text-indigo-600 dark:text-indigo-400 text-xs">Generating - this can take a little while...</p>

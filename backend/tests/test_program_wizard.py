@@ -193,11 +193,14 @@ def test_over_full_day_is_trimmed_not_rejected():
 @patch("app.routers.programs.select_exercises")
 def test_generate_program_builds_the_full_structure(mock_select, db_session, user):
     mock_select.side_effect = lambda days, goal, label: _picks_covering(days)
-    request = schemas.ProgramGenerateRequest(goal="strength", split="upper_lower", days_per_week=4, weeks=5)
+    request = schemas.ProgramGenerateRequest(
+        goal="strength", split="upper_lower", days_per_week=4, weeks=5, volume_preference="minimal",
+    )
 
     program = schemas.ProgramOut.model_validate(generate_program(request=request, db=db_session, current_user=user))
 
     assert program.user_id == user.id and program.goal == "strength"
+    assert program.volume_preference == "minimal"
     [block] = program.mesocycles
     assert (block.name, block.start_week, block.end_week) == ("Upper/Lower, 4 days/week", 1, 5)
     assert [(d.name, d.order, d.rest_days_before) for d in block.day_templates] == [

@@ -27,6 +27,9 @@ class Program(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     goal: Mapped[str] = mapped_column(String)
+    # Where in the research-supported weekly volume range to land:
+    # "minimal" (fewer, harder sets), "moderate" or "high".
+    volume_preference: Mapped[str] = mapped_column(String, default="moderate", server_default="moderate")
 
     user: Mapped["User"] = relationship(back_populates="programs") #one ForeignKey so auto-detected, no need to specify
     mesocycles: Mapped[list["Mesocycle"]] = relationship(back_populates="program", order_by="Mesocycle.start_week", cascade="all, delete-orphan")

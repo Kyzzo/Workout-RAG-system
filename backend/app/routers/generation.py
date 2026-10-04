@@ -294,7 +294,7 @@ def generate_intensity(
     )
 
 
-def field_pipeline(field: str, exercise_name: str):
+def field_pipeline(field: str, exercise_name: str, preference: str = "moderate"):
     """(generate_fn, query_fn, use_mechanical_check) for one prescription field.
     Reps and RIR are asked per EXERCISE (a squat and a lateral raise get
     different answers), so the exercise name is bound in here."""
@@ -310,7 +310,9 @@ def field_pipeline(field: str, exercise_name: str):
         )
     if field == "rir":
         return (
-            lambda m, g, sibling_context=None, adjustment=None: generate_rir(m, g, exercise_name, adjustment=adjustment),
+            lambda m, g, sibling_context=None, adjustment=None: generate_rir(
+                m, g, exercise_name, adjustment=adjustment, preference=preference,
+            ),
             lambda m, g: build_rir_query(m, g, exercise_name),
             False,
         )
@@ -341,9 +343,10 @@ def generate_exercise(
         raise HTTPException(status_code=400, detail="This exercise has no weeks to generate.")
     base, rest = weeks[0], weeks[1:]
 
-    fields = exercise_fields(slot.day_template.mesocycle.program.goal)
+    program = slot.day_template.mesocycle.program
+    fields = exercise_fields(program.goal)
     for field in fields:
-        generate_fn, query_fn, mechanical = field_pipeline(field, slot.exercise_name)
+        generate_fn, query_fn, mechanical = field_pipeline(field, slot.exercise_name, program.volume_preference)
         _generate_and_persist(base, db, generate_fn, query_fn, field, use_mechanical_check=mechanical)
 
     for wp in rest:
@@ -699,8 +702,8 @@ def generate_progression_endpoint(
 _MIN_SETS_PER_EXERCISE = 2  # convention: below this an exercise is barely worth its slot
 
 
-def _attempt_weekly_volume_generation(muscle_group: str, goal: str):
-    result, chunks = generate_weekly_volume(muscle_group, goal)
+def _attempt_weekly_volume_generation(muscle_group: str, goal: str, preference: str):
+    result, chunks = generate_weekly_volume(muscle_group, goal, preference)
     query = build_volume_query(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
 
@@ -780,9 +783,10 @@ def generate_weekly_volume_endpoint(
     muscle_group = request.muscle_group
     goal = mesocycle.program.goal
 
-    result, verified, any_supported = _attempt_weekly_volume_generation(muscle_group, goal)
+    preference = mesocycle.program.volume_preference
+    result, verified, any_supported = _attempt_weekly_volume_generation(muscle_group, goal, preference)
     if not any_supported and result.grounding != "general_knowledge":
-        result, verified, any_supported = _attempt_weekly_volume_generation(muscle_group, goal)
+        result, verified, any_supported = _attempt_weekly_volume_generation(muscle_group, goal, preference)
 
     _delete_existing(db, models.MuscleGroupVolume, mesocycle.id, muscle_group)
     record = models.MuscleGroupVolume(mesocycle_id=mesocycle.id, muscle_group=muscle_group, weekly_sets=result.weekly_sets)

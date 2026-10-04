@@ -88,9 +88,18 @@ export type ProgramSummary = {
   goal: string;
 };
 
+export type VolumePreference = "minimal" | "moderate" | "high";
+
+export const VOLUME_LABELS: Record<VolumePreference, string> = {
+  minimal: "minimal volume (fewer, harder sets)",
+  moderate: "moderate volume",
+  high: "high volume",
+};
+
 export type Program = {
   id: number;
   user_id: number;
   goal: string;
+  volume_preference: VolumePreference;
   mesocycles: Mesocycle[];
 };
