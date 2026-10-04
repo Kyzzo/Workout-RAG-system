@@ -1,5 +1,5 @@
 import re
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import pydantic
 from dotenv import load_dotenv
@@ -7,7 +7,10 @@ from openai import OpenAI
 
 load_dotenv()
 
-client = OpenAI()
+# Judge calls run in parallel (a chat answer's statements, a block's
+# fields), so rate-limit errors are expected under load - retried with
+# backoff rather than surfacing as 'unresolved' citations.
+client = OpenAI(max_retries=6)
 
 # Accept-only, per citation_verification.txt section 3: this check may only
 # ever confirm a citation, never reject one. Anything not a single,
@@ -86,13 +89,58 @@ author/title/journal/year/DOI pattern), classify it as contradicted even \
 if it takes up the whole excerpt and even if several entry titles look \
 highly relevant.
 
+The answer must also keep the excerpt's qualifiers. Classify as contradicted \
+if the answer states something the excerpt doesn't because it changed any of: \
+the unit of measure (e.g. 'fractional' sets presented as direct or total \
+sets; sets per session presented as sets per week, or the reverse); the \
+outcome (e.g. a strength finding presented as a hypertrophy finding); the \
+population, training status or muscle studied, when the answer generalizes \
+it as if it applied broadly; or the strength of the finding (e.g. 'no \
+detectable superiority beyond X', 'a trend toward' or 'similar results' \
+presented as an optimum, a proven benefit, or 'no benefit beyond X'). \
+'No detectable superiority beyond X' means the data couldn't show an \
+advantage past X - interpreting it as a limit, ceiling, maximum or point of \
+no further benefit changes the finding, even when hedged with 'may be', \
+'suggests' or 'indicating'. Likewise 'similar outcomes across A-B' means no \
+option in that range was shown better - calling part of it optimal or best \
+changes the finding. Also classify as contradicted if the answer merges a \
+figure from this excerpt with figures the excerpt doesn't contain into a new \
+range or number, or if a number or range in the answer differs from the one \
+the excerpt reports for that same outcome (e.g. the answer says 18-24 sets \
+where the excerpt says 12-24) - check every figure in the answer against the \
+excerpt before deciding. A bare \
+number or short value (e.g. '12', '8-12', '1-2 RIR') with no stated unit or \
+outcome of its own hasn't changed a qualifier - judge it on whether the \
+excerpt supports that value for the question asked.
+
 Give brief reasoning for your classification."""
 
 
-def judge_citation(query: str, value: int | str, chunk_text: str) -> JudgeVerdict:
+class Judge(NamedTuple):
+    model: str
+    reasoning_effort: str | None = None  # None = the model's default
+
+
+# Judges, chosen by comparing models on known misrepresentations (fractional
+# sets read as total sets, 'no detectable superiority beyond X' read as a
+# ceiling, 12-24 narrowed to 18-24): gpt-4o-mini accepted every one, gpt-5
+# caught all of them. Chat statements and rule claims are prose with
+# qualifiers to keep and are few per answer, so they get full reasoning
+# (slower per check, run in parallel). Generated values are bare numbers
+# checked in bulk, so they get minimal reasoning (~2s per check); its one
+# miss was a hedged prose overstatement, which a bare value can't contain.
+# gpt-4.1 scored the same but this account's 30k tokens/min limit on it
+# throttles a block's checks; gpt-5's limit is 500k.
+GENERATION_JUDGE = Judge("gpt-5", reasoning_effort="minimal")
+STATEMENT_JUDGE = Judge("gpt-5")
+
+
+def judge_citation(query: str, value: int | str, chunk_text: str, judge: Judge = GENERATION_JUDGE) -> JudgeVerdict:
+    # gpt-5 is a reasoning model, which rejects a temperature setting
+    options = {"reasoning_effort": judge.reasoning_effort} if judge.reasoning_effort else {}
     completion = client.chat.completions.parse(
-        model="gpt-4o-mini",
-        temperature=0,
+        model=judge.model,
+        **options,
         messages=[
             {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
             {
@@ -110,7 +158,12 @@ def judge_citation(query: str, value: int | str, chunk_text: str) -> JudgeVerdic
 
 
 def verify_citation(
-    query: str, value: int | str, chunk_text: str, grounding: str, use_mechanical_check: bool = True
+    query: str,
+    value: int | str,
+    chunk_text: str,
+    grounding: str,
+    use_mechanical_check: bool = True,
+    judge: Judge = GENERATION_JUDGE,
 ) -> str:
     # Mechanical fast-path-accept only fires on a full self-report - per
     # citation_verification.txt section 4 trigger (b), a "blended" or
@@ -130,6 +183,6 @@ def verify_citation(
     ):
         return "primary_support"
     try:
-        return judge_citation(query, value, chunk_text).outcome
+        return judge_citation(query, value, chunk_text, judge=judge).outcome
     except Exception:
         return "unresolved"

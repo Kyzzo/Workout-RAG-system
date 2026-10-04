@@ -42,7 +42,7 @@ _SYSTEM_PROMPT = (
     "meaningfully trains (e.g. a barbell row: lats, rear delts, biceps), or "
     "none for isolation work. Set is_compound for multi-joint movements. Use "
     "common names (e.g. 'Barbell Back Squat', 'Lat Pulldown'). When the same "
-    "day type repeats in a week (e.g. 'Push 1' and 'Push 2'), vary the "
+    "day type repeats in a week (e.g. 'Push A' and 'Push B'), vary the "
     "exercise choices between them rather than repeating the same list."
 )
 

@@ -447,7 +447,7 @@ export default function ProgramTree({
               </details>
             )}
 
-            {mesocycle.day_templates.map((day) => (
+            {mesocycle.day_templates.map((day, dayIndex) => (
               <div key={day.id} className="pl-3 border-l flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <button
@@ -457,7 +457,7 @@ export default function ProgramTree({
                     className="font-medium text-zinc-700 dark:text-zinc-300 text-left"
                   >
                     <span className="inline-block w-4">{openDays.has(day.id) ? "▾" : "▸"}</span>
-                    {day.name}
+                    Day {dayIndex + 1}: {day.name}
                     {day.rest_days_before !== null && (
                       <span className="text-zinc-500 font-normal text-xs ml-2">
                         ({day.rest_days_before} rest day{day.rest_days_before === 1 ? "" : "s"} before)

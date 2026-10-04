@@ -37,10 +37,10 @@ def _picks_covering(days):
 
 def test_plan_days_numbers_repeats_and_spaces_rest():
     days = plan_days(SPLITS["ppl"], 6)
-    assert [d.name for d in days] == ["Push 1", "Pull 1", "Legs 1", "Push 2", "Pull 2", "Legs 2"]
+    assert [d.name for d in days] == ["Push A", "Pull A", "Legs A", "Push B", "Pull B", "Legs B"]
 
     three = plan_days(SPLITS["full_body"], 3)
-    assert [d.name for d in three] == ["Full Body 1", "Full Body 2", "Full Body 3"]
+    assert [d.name for d in three] == ["Full Body A", "Full Body B", "Full Body C"]
     assert [d.rest_days_before for d in three] == [None, 1, 1]  # Mon/Wed/Fri
 
     two = plan_days(SPLITS["upper_lower"], 2)
@@ -92,14 +92,14 @@ def _parsed(days, picks_per_day):
 
 
 def _push_days():
-    return [d for d in plan_days(SPLITS["ppl"], 6) if d.day_type == "Push"]  # Push 1, Push 2: one call
+    return [d for d in plan_days(SPLITS["ppl"], 6) if d.day_type == "Push"]  # Push A, Push B: one call
 
 
 def test_selection_retries_once_when_a_muscle_group_is_missed():
     days = _push_days()
     good = _picks_covering(days)
     bad = [list(good[0]), good[1]]
-    bad[0] = [p for p in bad[0] if p[1] != "triceps"] + [("Extra Press", "chest", [])]  # Push 1 skips triceps
+    bad[0] = [p for p in bad[0] if p[1] != "triceps"] + [("Extra Press", "chest", [])]  # Push A skips triceps
     parse = MagicMock(side_effect=[_completion(_parsed(days, bad)), _completion(_parsed(days, good))])
 
     with patch("app.rag.exercise_selection.client.chat.completions.parse", parse):
@@ -108,13 +108,13 @@ def test_selection_retries_once_when_a_muscle_group_is_missed():
     # same exercises (order: required targets first, then optional ones)
     assert [sorted(day) for day in result] == [sorted(day) for day in good]
     retry_prompt = parse.call_args_list[1].kwargs["messages"][-1]["content"]
-    assert "Push 1 has no exercise for triceps" in retry_prompt
+    assert "Push A has no exercise for triceps" in retry_prompt
 
 
 def test_selection_gives_up_after_one_retry():
     days = [d for d in plan_days(SPLITS["ppl"], 6) if d.day_type == "Pull"]
     bad = _picks_covering(days)
-    bad[0] = [("Row", "upper back", ["lats", "rear delts"])] * 4  # Pull 1 never covers biceps
+    bad[0] = [("Row", "upper back", ["lats", "rear delts"])] * 4  # Pull A never covers biceps
     parse = MagicMock(return_value=_completion(_parsed(days, bad)))
 
     with patch("app.rag.exercise_selection.client.chat.completions.parse", parse):
@@ -125,7 +125,7 @@ def test_selection_gives_up_after_one_retry():
 
 
 def test_selection_makes_one_call_per_day_type_and_keeps_day_order():
-    days = plan_days(SPLITS["upper_lower"], 6)  # Upper 1, Lower 1, Upper 2, ...
+    days = plan_days(SPLITS["upper_lower"], 6)  # Upper A, Lower A, Upper B, ...
     calls = []
 
     def fake_group(group_days, goal, description):
@@ -135,7 +135,7 @@ def test_selection_makes_one_call_per_day_type_and_keeps_day_order():
     with patch("app.rag.exercise_selection._select_group", side_effect=fake_group):
         result = select_exercises(days, "hypertrophy", "Upper/Lower")
 
-    assert sorted(calls) == [["Lower 1", "Lower 2", "Lower 3"], ["Upper 1", "Upper 2", "Upper 3"]]
+    assert sorted(calls) == [["Lower A", "Lower B", "Lower C"], ["Upper A", "Upper B", "Upper C"]]
     assert [picks[0][0] for picks in result] == [f"{d.name} lift" for d in days]
 
 
@@ -204,7 +204,7 @@ def test_generate_program_builds_the_full_structure(mock_select, db_session, use
     [block] = program.mesocycles
     assert (block.name, block.start_week, block.end_week) == ("Upper/Lower, 4 days/week", 1, 5)
     assert [(d.name, d.order, d.rest_days_before) for d in block.day_templates] == [
-        ("Upper 1", 1, None), ("Lower 1", 2, 1), ("Upper 2", 3, 1), ("Lower 2", 4, 0),
+        ("Upper A", 1, None), ("Lower A", 2, 1), ("Upper B", 3, 1), ("Lower B", 4, 0),
     ]
     upper = block.day_templates[0]
     assert {s.muscle_group for s in upper.exercise_slots} == set(SPLITS["upper_lower"].day_types[0].muscle_groups)

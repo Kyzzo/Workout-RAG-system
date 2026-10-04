@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..citations import get_or_create_citation
 from .generate import _retrieve_chunks
-from .verification import judge_citation
+from .verification import STATEMENT_JUDGE, judge_citation
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,9 @@ def justify_rule(db: Session, key: str, refresh: bool = False) -> models.RuleJus
     verdicts = []
     for chunk in candidates.values():
         try:
-            status = judge_citation(rule.query, rule.claim, chunk["text"]).outcome
+            # A rule claim is prose with qualifiers, so it gets the strict judge;
+            # refreshes run offline, so its slower speed doesn't matter.
+            status = judge_citation(rule.query, rule.claim, chunk["text"], judge=STATEMENT_JUDGE).outcome
         except Exception:
             status = "unresolved"
         verdicts.append((chunk, status))

@@ -32,7 +32,7 @@ def test_rule_shows_only_judge_accepted_excerpts_and_is_cached(mock_retrieve, mo
     mock_retrieve.side_effect = lambda query, category: _chunks(f"{category}-1", "shared")
     verdicts = {"excerpt for volume-1": "primary_support", "excerpt for frequency-1": "contradicted",
                 "excerpt for shared": "contextual_support"}
-    mock_judge.side_effect = lambda q, claim, text: SimpleNamespace(outcome=verdicts[text], reasoning="")
+    mock_judge.side_effect = lambda q, claim, text, judge: SimpleNamespace(outcome=verdicts[text], reasoning="")
 
     first = justify_rule(db_session, "even_session_split")
     calls_after_first = mock_judge.call_count

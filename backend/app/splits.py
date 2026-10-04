@@ -83,12 +83,12 @@ class PlannedDay:
     name: str
     muscle_groups: tuple[str, ...]
     rest_days_before: int | None
-    day_type: str = ""  # e.g. "Upper" for "Upper 2"
+    day_type: str = ""  # e.g. "Upper" for "Upper B"
 
 
 def plan_days(split: Split, days_per_week: int) -> list[PlannedDay]:
     """The week's sessions in order: day types cycled to fill the count,
-    numbered when a type repeats ("Push 1", "Push 2"), with rest days spread
+    lettered when a type repeats ("Push A", "Push B"), with rest days spread
     as evenly as the week allows (3 days -> Mon/Wed/Fri)."""
     types = [split.day_types[i % len(split.day_types)] for i in range(days_per_week)]
     repeats = {t.name: types.count(t) for t in types}
@@ -102,6 +102,6 @@ def plan_days(split: Split, days_per_week: int) -> list[PlannedDay]:
     days = []
     for i, day_type in enumerate(types):
         seen[day_type.name] = seen.get(day_type.name, 0) + 1
-        name = f"{day_type.name} {seen[day_type.name]}" if repeats[day_type.name] > 1 else day_type.name
+        name = f"{day_type.name} {chr(ord('A') + seen[day_type.name] - 1)}" if repeats[day_type.name] > 1 else day_type.name
         days.append(PlannedDay(name, day_type.muscle_groups, None if i == 0 else gaps[i], day_type.name))
     return days

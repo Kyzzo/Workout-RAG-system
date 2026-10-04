@@ -97,7 +97,7 @@ def test_generate_exercise_ownership_enforced(db_session, owner_and_prescription
 def test_chat_passes_history_to_router(mock_route, mock_answer, db_session, owner_and_prescription):
     user, _ = owner_and_prescription
     mock_route.return_value = SimpleNamespace(tool="answer_general_question", topic="t", field_id=None)
-    mock_answer.return_value = (SimpleNamespace(answer="a", citations=[], grounding="general_knowledge"), [])
+    mock_answer.return_value = (SimpleNamespace(statements=[], grounding="general_knowledge"), [])
     history = [schemas.ChatTurn(role="user", content="does failure training help?"),
                schemas.ChatTurn(role="assistant", content="Close to failure matters more.")]
 

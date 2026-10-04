@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app import models, schemas
+from app.rag.verification import STATEMENT_JUDGE
 from app.routers.chat import send_chat_message
 
 
@@ -77,84 +78,98 @@ def test_adjust_prescription_ownership_enforced(mock_route, db_session, owner_an
     assert exc_info.value.status_code == 404
 
 
+def _chunks(*ids):
+    return [{"id": cid, "text": f"excerpt for {cid}", "source": f"paper-{cid}"} for cid in ids]
+
+
+def _answer(*statements, grounding="fully_grounded"):
+    # A statement-structured answer: each (text, [source ids]).
+    return SimpleNamespace(
+        statements=[SimpleNamespace(text=t, sources=list(src)) for t, src in statements],
+        grounding=grounding,
+    )
+
+
+def _cite_stored(db_session, prescription, field, title, snippet, status):
+    citation = models.Citation(title=title, snippet=snippet, qdrant_point_id=f"chunk-{title}")
+    db_session.add(citation)
+    db_session.flush()
+    db_session.add(models.PrescriptionCitation(
+        prescription_id=prescription.id, citation_id=citation.id, field=field, verification_status=status,
+    ))
+    db_session.flush()
+    return citation
+
+
 @patch("app.routers.chat.answer_prescription_discussion")
 @patch("app.routers.chat.route_chat_message")
 def test_structural_context_field_id_overrides_model(mock_route, mock_answer, db_session, owner_and_prescription):
-    # route_chat_message itself is responsible for pinning field_id when
-    # known_field_id was passed in (chat_routing.py) - this test confirms
-    # the endpoint actually PASSES the anchored field_id through, not that
-    # it re-derives the override itself (that's chat_routing's own job).
     user, prescription = owner_and_prescription
-    mock_route.return_value = _route("discuss_prescription", field_id=prescription.id)
-    mock_answer.return_value = "An answer."
+    mock_route.return_value = _route("discuss_prescription", field_id=prescription.id, question="why is this?")
+    mock_answer.return_value = _answer(("It's 8-10 reps.", ["prescription"]))
 
     request = schemas.ChatMessageRequest(message="why is this?", field_id=prescription.id)
     send_chat_message(request=request, db=db_session, current_user=user)
 
+    # The anchored field_id is what reaches the router (which then enforces
+    # it over anything the model reports - see chat_routing.py).
     mock_route.assert_called_once_with("why is this?", prescription.id, [])
 
 
+@patch("app.routers.chat.verify_citation", return_value="primary_support")
 @patch("app.routers.chat.answer_prescription_discussion")
 @patch("app.routers.chat.route_chat_message")
-def test_discuss_prescription_reads_stored_citations_only(mock_route, mock_answer, db_session, owner_and_prescription):
+def test_discuss_uses_only_stored_supported_citations(mock_route, mock_answer, _verify, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription
-    citation = models.Citation(title="Some Paper", snippet="an excerpt", qdrant_point_id="chunk-1")
-    db_session.add(citation)
-    db_session.flush()
-    db_session.add(models.PrescriptionCitation(
-        prescription_id=prescription.id, citation_id=citation.id, field="sets", verification_status="primary_support",
-    ))
-    # A contradicted row for the same prescription should never surface as
-    # if it were valid evidence (datamodel.txt's PrescriptionCitation
-    # display rule).
-    other_citation = models.Citation(title="Unrelated Paper", snippet="irrelevant", qdrant_point_id="chunk-2")
-    db_session.add(other_citation)
-    db_session.flush()
-    db_session.add(models.PrescriptionCitation(
-        prescription_id=prescription.id, citation_id=other_citation.id, field="sets", verification_status="contradicted",
-    ))
-    db_session.flush()
+    good = _cite_stored(db_session, prescription, "sets", "Some Paper", "an excerpt", "primary_support")
+    _cite_stored(db_session, prescription, "sets", "Unrelated Paper", "irrelevant", "contradicted")
+    mock_route.return_value = _route("discuss_prescription", field_id=prescription.id, question="why 3 sets?")
+    mock_answer.return_value = _answer(("The cited study supports this weekly volume.", [f"sets-{good.id}"]))
 
-    mock_route.return_value = _route("discuss_prescription", field_id=prescription.id, question="why is this 8-10 reps?")
-    mock_answer.return_value = "Because the cited study reports 8-10 reps for this goal."
-    request = schemas.ChatMessageRequest(message="why is this 8-10 reps?", field_id=prescription.id)
-    result = send_chat_message(request=request, db=db_session, current_user=user)
+    result = send_chat_message(
+        request=schemas.ChatMessageRequest(message="why 3 sets?", field_id=prescription.id),
+        db=db_session, current_user=user,
+    )
 
-    assert result.mode == "discuss_prescription"
-    assert result.answer == "Because the cited study reports 8-10 reps for this goal."
-    assert len(result.citations) == 1
-    assert result.citations[0].title == "Some Paper"
-    # Only the SUPPORTED citation's snippet is passed as grounding context -
-    # the contradicted one never reaches the answer either.
-    passed_question, _passed_summary, passed_snippets = mock_answer.call_args[0]
-    assert passed_question == "why is this 8-10 reps?"
-    # ...and is labeled with the value it backs.
-    assert passed_snippets == ["[supports the sets value] an excerpt"]
+    # Only the supported excerpt is offered to the answer, labeled with its value
+    excerpts = mock_answer.call_args.args[2]
+    assert [(e["text"], e["field"]) for e in excerpts] == [("an excerpt", "sets")]
+    assert result.answer == "The cited study supports this weekly volume. [1]"
+    assert [(c.title, c.field) for c in result.citations] == [("Some Paper", "sets")]
 
 
+@patch("app.routers.chat.verify_citation")
 @patch("app.routers.chat.answer_prescription_discussion")
 @patch("app.routers.chat.route_chat_message")
-def test_discuss_prescription_actually_answers_the_question(mock_route, mock_answer, db_session, owner_and_prescription):
-    # The real bug this test guards against: discuss_prescription used to
-    # ignore the user's question entirely and just echo back the raw stored
-    # prescription data, no matter what was actually asked.
+def test_discuss_statement_that_misrepresents_its_excerpt_is_removed(
+    mock_route, mock_answer, mock_verify, db_session, owner_and_prescription,
+):
+    # Rephrasing a verified excerpt can still misrepresent it, so discuss
+    # answers are checked statement by statement too.
     user, prescription = owner_and_prescription
-    mock_route.return_value = _route("discuss_prescription", field_id=prescription.id, question="would you recommend reducing it?")
-    mock_answer.return_value = "Given the cited range, reducing it slightly would still be well-supported."
+    cite = _cite_stored(db_session, prescription, "sets", "Paper", "similar growth at 12 and 24 sets", "primary_support")
+    mock_route.return_value = _route("discuss_prescription", field_id=prescription.id, question="why?")
+    mock_answer.return_value = _answer(
+        ("Your plan has 3 sets per session.", ["prescription"]),
+        ("24 sets is optimal for growth.", [f"sets-{cite.id}"]),
+    )
+    mock_verify.return_value = "contradicted"
 
-    request = schemas.ChatMessageRequest(message="would you recommend reducing it?", field_id=prescription.id)
-    result = send_chat_message(request=request, db=db_session, current_user=user)
+    result = send_chat_message(
+        request=schemas.ChatMessageRequest(message="why?", field_id=prescription.id), db=db_session, current_user=user,
+    )
 
-    assert result.answer == "Given the cited range, reducing it slightly would still be well-supported."
-    mock_answer.assert_called_once()
+    assert result.answer == "Your plan has 3 sets per session."  # app-data statement kept, overstatement dropped
+    assert result.citations == []
+    assert "1 statement was removed" in result.grounding_note
 
 
 @patch("app.routers.chat.route_chat_message")
 def test_discuss_prescription_ownership_enforced(mock_route, db_session, owner_and_prescription, other_user):
     _, prescription = owner_and_prescription
-    mock_route.return_value = _route("discuss_prescription", field_id=prescription.id)
+    mock_route.return_value = _route("discuss_prescription", field_id=prescription.id, question="why?")
 
-    request = schemas.ChatMessageRequest(message="why is this?")
+    request = schemas.ChatMessageRequest(message="why?", field_id=prescription.id)
     with pytest.raises(HTTPException) as exc_info:
         send_chat_message(request=request, db=db_session, current_user=other_user)
 
@@ -164,108 +179,72 @@ def test_discuss_prescription_ownership_enforced(mock_route, db_session, owner_a
 @patch("app.routers.chat.verify_citation")
 @patch("app.routers.chat.answer_general_question")
 @patch("app.routers.chat.route_chat_message")
-def test_general_question_returns_response_level_citations_without_persisting(
-    mock_route, mock_answer, mock_verify, db_session, owner_and_prescription
-):
-    user, prescription = owner_and_prescription
-    mock_route.return_value = _route("answer_general_question", topic="training to failure")
+def test_general_answer_is_built_only_from_verified_statements(mock_route, mock_answer, mock_verify, db_session, owner_and_prescription):
+    # The reported bug: an unverified sentence merged a strength trend in
+    # direct sets with a hypertrophy threshold in fractional sets into a
+    # range neither study states. Every statement is now judged on its own.
+    user, _ = owner_and_prescription
+    mock_route.return_value = _route("answer_general_question", topic="optimal weekly sets?")
     mock_answer.return_value = (
-        _fake_result(
-            answer="Training to failure isn't required for hypertrophy.",
-            citations=[_fake_citation("chunk-1", "Training to failure isn't required for hypertrophy.")],
-            grounding="fully_grounded",
+        _answer(
+            ("No detectable superiority beyond ~31 fractional sets per week for hypertrophy.", ["remmert"]),
+            ("12, 18 and 24 weekly quad sets produced similar growth in trained lifters.", ["aube"]),
+            ("So 18 to 31 sets per week is optimal for hypertrophy.", ["aube", "remmert"]),
         ),
-        _fake_chunks("chunk-1"),
+        _chunks("remmert", "aube"),
     )
-    mock_verify.return_value = "primary_support"
+    supported = {
+        "No detectable superiority beyond ~31 fractional sets per week for hypertrophy.": "primary_support",
+        "12, 18 and 24 weekly quad sets produced similar growth in trained lifters.": "primary_support",
+    }
+    mock_verify.side_effect = lambda q, text, chunk, grounding, **kwargs: supported.get(text, "contradicted")
 
-    request = schemas.ChatMessageRequest(message="what does research say about training to failure?")
-    result = send_chat_message(request=request, db=db_session, current_user=user)
+    result = send_chat_message(
+        request=schemas.ChatMessageRequest(message="optimal weekly sets?"), db=db_session, current_user=user,
+    )
 
-    assert result.mode == "answer_general_question"
-    assert result.answer == "Training to failure isn't required for hypertrophy."
-    assert result.grounding_note is None
-    assert len(result.citations) == 1
-    assert result.citations[0].title == "paper-chunk-1"
-    mock_answer.assert_called_once()  # no retry needed - it was supported on the first try
-    # Response-level Q&A never writes a PrescriptionCitation row - it isn't
-    # tied to any one WeeklyPrescription. Scoped to this fixture's own
-    # prescription rather than the whole table, since the real dev DB (this
-    # test still runs against it, just inside a rolled-back transaction -
-    # see conftest.py) can have unrelated committed rows from other sessions.
-    assert db_session.query(models.PrescriptionCitation).filter(
-        models.PrescriptionCitation.prescription_id == prescription.id
-    ).count() == 0
+    assert result.answer == (
+        "No detectable superiority beyond ~31 fractional sets per week for hypertrophy. [1] "
+        "12, 18 and 24 weekly quad sets produced similar growth in trained lifters. [2]"
+    )
+    assert [c.title for c in result.citations] == ["paper-remmert", "paper-aube"]
+    assert "1 statement was removed" in result.grounding_note
+    assert db_session.query(models.Citation).filter(models.Citation.title == "paper-remmert").count() == 0  # not persisted
+    # prose statements get the strict judge, not the fast one used for bare values
+    assert {call.kwargs["judge"] for call in mock_verify.call_args_list} == {STATEMENT_JUDGE}
 
 
-@patch("app.routers.chat.verify_citation")
+@patch("app.routers.chat.verify_citation", return_value="primary_support")
 @patch("app.routers.chat.answer_general_question")
 @patch("app.routers.chat.route_chat_message")
-def test_general_question_drops_a_citation_misattributed_to_a_claim_it_doesnt_support(
-    mock_route, mock_answer, mock_verify, db_session, owner_and_prescription
-):
-    # The real bug this whole mode-3-judge extension exists to catch: a
-    # chunk that's a genuine, retrieved, real citation - just cited for a
-    # claim it doesn't actually back (e.g. a dataset-composition stat used
-    # to imply an efficacy finding). The chunk should be dropped from what's
-    # shown as evidence even though the answer itself still renders.
+def test_uncited_statements_are_never_shown(mock_route, mock_answer, _verify, db_session, owner_and_prescription):
     user, _ = owner_and_prescription
-    mock_route.return_value = _route("answer_general_question", topic="training to failure")
+    mock_route.return_value = _route("answer_general_question", topic="t")
     mock_answer.return_value = (
-        _fake_result(
-            answer="Training to failure leads to greater gains. 78% of studies used it.",
-            citations=[
-                _fake_citation("chunk-good", "Training to failure leads to greater gains."),
-                _fake_citation("chunk-bad", "78% of studies used it."),
-            ],
-            grounding="fully_grounded",
-        ),
-        _fake_chunks("chunk-good", "chunk-bad"),
+        _answer(("Cited claim.", ["c1"]), ("Uncited general claim.", [])),
+        _chunks("c1"),
     )
-    # First attempt: one real support, one misattribution (contradicted) -
-    # any_supported is True overall (chunk-good passed), so no retry fires.
-    mock_verify.side_effect = ["primary_support", "contradicted"]
 
-    request = schemas.ChatMessageRequest(message="what does research say about training to failure?")
-    result = send_chat_message(request=request, db=db_session, current_user=user)
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="t"), db=db_session, current_user=user)
 
-    assert result.grounding_note is None  # overall answer still has real support
-    assert len(result.citations) == 1
-    assert result.citations[0].title == "paper-chunk-good"
-    mock_answer.assert_called_once()
+    assert result.answer == "Cited claim. [1]"
 
 
-@patch("app.routers.chat.verify_citation")
+@patch("app.routers.chat.verify_citation", return_value="contradicted")
 @patch("app.routers.chat.answer_general_question")
 @patch("app.routers.chat.route_chat_message")
-def test_general_question_retries_when_nothing_verifies(mock_route, mock_answer, mock_verify, db_session, owner_and_prescription):
+def test_general_question_retries_when_nothing_verifies(mock_route, mock_answer, _verify, db_session, owner_and_prescription):
     user, _ = owner_and_prescription
-    mock_route.return_value = _route("answer_general_question", topic="training to failure")
-    first_attempt = (
-        _fake_result(
-            answer="First attempt.",
-            citations=[_fake_citation("chunk-1", "First attempt.")],
-            grounding="fully_grounded",
-        ),
-        _fake_chunks("chunk-1"),
-    )
-    second_attempt = (
-        _fake_result(
-            answer="Second attempt.",
-            citations=[_fake_citation("chunk-2", "Second attempt.")],
-            grounding="fully_grounded",
-        ),
-        _fake_chunks("chunk-2"),
-    )
-    mock_answer.side_effect = [first_attempt, second_attempt]
-    mock_verify.side_effect = ["contradicted", "primary_support"]
+    mock_route.return_value = _route("answer_general_question", topic="t")
+    mock_answer.return_value = (_answer(("Claim.", ["c1"])), _chunks("c1"))
 
-    request = schemas.ChatMessageRequest(message="what does research say about training to failure?")
-    result = send_chat_message(request=request, db=db_session, current_user=user)
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="t"), db=db_session, current_user=user)
 
-    assert result.answer == "Second attempt."
-    assert result.grounding_note is None
-    assert mock_answer.call_count == 2
+    assert mock_answer.call_count == 2  # one bounded retry
+    # nothing verified -> no unverified prose fallback, said plainly
+    assert result.answer.startswith("The research in this app's corpus doesn't support")
+    assert result.citations == []
+    assert result.grounding_note == "This value could not be substantiated by the current research corpus."
 
 
 @patch("app.routers.chat.verify_citation")
@@ -273,16 +252,11 @@ def test_general_question_retries_when_nothing_verifies(mock_route, mock_answer,
 @patch("app.routers.chat.route_chat_message")
 def test_general_question_general_knowledge_skips_retry(mock_route, mock_answer, mock_verify, db_session, owner_and_prescription):
     user, _ = owner_and_prescription
-    mock_route.return_value = _route("answer_general_question", topic="training to failure")
-    mock_answer.return_value = (
-        _fake_result(answer="An honest estimate.", citations=[], grounding="general_knowledge"),
-        [],
-    )
+    mock_route.return_value = _route("answer_general_question", topic="t")
+    mock_answer.return_value = (_answer(grounding="general_knowledge"), _chunks("c1"))
 
-    request = schemas.ChatMessageRequest(message="what does research say about training to failure?")
-    result = send_chat_message(request=request, db=db_session, current_user=user)
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="t"), db=db_session, current_user=user)
 
-    assert result.grounding_note == "This is a general estimate based on established training principles, not a specific study."
-    assert result.citations == []
     mock_answer.assert_called_once()
     mock_verify.assert_not_called()
+    assert result.grounding_note == "This is a general estimate based on established training principles, not a specific study."

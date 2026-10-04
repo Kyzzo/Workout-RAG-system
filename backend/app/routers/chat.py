@@ -1,4 +1,5 @@
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -10,6 +11,7 @@ from ..ownership import get_owned_prescription
 from ..rag.chat_routing import route_chat_message
 from ..rag.generate import (
     Adjustment,
+    PRESCRIPTION_SOURCE,
     answer_general_question,
     answer_prescription_discussion,
     build_intensity_query,
@@ -18,7 +20,7 @@ from ..rag.generate import (
     generate_volume_sets,
     max_sets_per_exercise,
 )
-from ..rag.verification import verify_citation
+from ..rag.verification import STATEMENT_JUDGE, verify_citation
 from .generation import (
     _GENERAL_KNOWLEDGE_NOTE,
     _SUPPORTED_STATUSES,
@@ -188,6 +190,79 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
     )
 
 
+def _verify_statements(question: str, parsed, sources: dict[str, dict]):
+    """Checks every statement against each source it cites with the same
+    judge as everything else, keeping a statement only if at least one of
+    its research sources supports it AS WRITTEN (the judge rejects changed
+    units, outcomes, populations or overstated findings). A statement citing
+    only the prescription itself is app data, not a research claim, and is
+    kept as is. Returns (kept: [(text, [supporting source dicts])], removed)."""
+    # Every (statement, source) pair is judged in parallel: the strict judge
+    # is slow per call, so an answer costs about one call of latency.
+    checks = []
+    for statement in parsed.statements:
+        cited = list(dict.fromkeys(statement.sources))
+        app_data = bool(cited) and all(src == PRESCRIPTION_SOURCE for src in cited)
+        found = [] if app_data else [sources[src] for src in cited if src in sources]
+        checks.append((statement.text, app_data, found))
+
+    def judge(pair):
+        text, source = pair
+        return verify_citation(
+            question, text, source["text"], parsed.grounding,
+            use_mechanical_check=False, judge=STATEMENT_JUDGE,
+        )
+
+    pairs = [(text, source) for text, _, found in checks for source in found]
+    statuses = []
+    if pairs:
+        with ThreadPoolExecutor(max_workers=min(len(pairs), 16)) as pool:
+            statuses = list(pool.map(judge, pairs))
+    status_iter = iter(statuses)
+
+    kept, removed = [], 0
+    for text, app_data, found in checks:
+        if app_data:
+            kept.append((text, []))
+            continue
+        supporting = [source for source in found if next(status_iter) in _SUPPORTED_STATUSES]
+        if supporting:
+            kept.append((text, supporting))
+        else:
+            removed += 1
+    return kept, removed
+
+
+def _compose(kept, field_of=lambda source: None):
+    """Answer text with numbered references after each statement, and the
+    matching numbered citation list (one entry per distinct source)."""
+    numbers: dict[str, int] = {}
+    citations = []
+    parts = []
+    for text, supporting in kept:
+        refs = []
+        for source in supporting:
+            key = " ".join(source["text"].split())  # same excerpt under two ids -> one entry
+            if key not in numbers:
+                numbers[key] = len(numbers) + 1
+                citations.append(schemas.ChatCitationOut(
+                    title=source["source"], snippet=source["text"], field=field_of(source),
+                ))
+            refs.append(numbers[key])
+        suffix = " " + "".join(f"[{n}]" for n in sorted(set(refs))) if refs else ""
+        parts.append(text.strip() + suffix)
+    return " ".join(parts), citations
+
+
+def _removed_note(removed: int) -> str | None:
+    if not removed:
+        return None
+    return (
+        f"{removed} statement{'s were' if removed != 1 else ' was'} removed because the cited "
+        f"source{'s' if removed != 1 else ''} didn't support {'them' if removed != 1 else 'it'} as written."
+    )
+
+
 def _handle_discuss(decision, db: Session, current_user: models.User, raw_message: str) -> schemas.ChatResponse:
     if decision.field_id is None:
         raise HTTPException(
@@ -197,29 +272,28 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
 
     prescription = get_owned_prescription(decision.field_id, db, current_user)
 
-    # No new retrieval or citation-verification call here - reads whatever
-    # the last generation call already checked and stored, per
-    # phase6_chat_routing_concepts.txt section 4 ("zero marginal LLM cost
-    # for the citation-checking part"). Only primary/contextual support
-    # rows are surfaced, matching datamodel.txt's PrescriptionCitation
-    # display rule - a contradicted/unresolved row was never valid evidence
-    # to begin with, so discussing it wouldn't be either. A separate LLM
-    # call still runs to actually answer the question asked (see
-    # answer_prescription_discussion) - "checking" cost is zero, not the
-    # whole response; returning the raw stored data with no regard for
-    # what was actually asked was a real bug, not a deliberate simplification.
+    # No new retrieval: the excerpts are the prescription's stored citations
+    # that already passed verification for their values (only primary/
+    # contextual support rows - contradicted/unresolved were never valid
+    # evidence). But the ANSWER rephrases them, and rephrasing can
+    # misrepresent, so each statement is still checked against the excerpt
+    # it cites before being shown.
     citation_rows = (
         prescription.sets_citations + prescription.reps_citations
         + prescription.load_citations + prescription.rir_citations
     )
-    prescription_summary = _summary(prescription)
-    # Each excerpt is labeled with the value it backs, so the answer can't
-    # present a sets citation as the reason for the load (or vice versa).
-    answer = answer_prescription_discussion(
-        decision.question or raw_message,
-        prescription_summary,
-        [f"[supports the {row.field} value] {row.citation.snippet}" for row in citation_rows],
-    )
+    sources = {
+        f"{row.field}-{row.citation.id}": {
+            "id": f"{row.field}-{row.citation.id}", "text": row.citation.snippet,
+            "source": row.citation.title, "field": row.field,
+        }
+        for row in citation_rows
+    }
+    question = decision.question or raw_message
+    parsed = answer_prescription_discussion(question, _summary(prescription), list(sources.values()))
+    kept, removed = _verify_statements(question, parsed, sources)
+    answer, citations = _compose(kept, field_of=lambda source: source["field"])
+
     notes = [
         f"{label}: {note}"
         for label, note in (
@@ -228,71 +302,44 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
         )
         if note
     ]
+    if _removed_note(removed):
+        notes.append(_removed_note(removed))
     return schemas.ChatResponse(
         mode="discuss_prescription",
         prescription=schemas.WeeklyPrescriptionOut.model_validate(prescription),
-        answer=answer,
-        citations=[
-            schemas.ChatCitationOut(title=row.citation.title, snippet=row.citation.snippet, field=row.field)
-            for row in citation_rows
-        ],
+        answer=answer or "The sources on file for this prescription don't answer that question.",
+        citations=citations,
         grounding_note=" ".join(notes) or None,
     )
 
 
 def _attempt_general_question(topic: str):
-    result, chunks = answer_general_question(topic)
-    chunks_by_id = {c["id"]: c for c in chunks}
-
-    verified = []  # (chunk, status)
-    any_supported = False
-    for citation in result.citations:
-        chunk = chunks_by_id[citation.chunk_id]  # schema-constrained, always present
-        # Judged against the SPECIFIC claim this chunk was cited for, not
-        # the whole answer - the whole-answer version of this check is
-        # exactly what let a real, retrieved citation back a claim it
-        # didn't actually support (a dataset-composition stat used to
-        # imply an efficacy finding). use_mechanical_check=False always:
-        # this is free text, range-containment has nothing to check it
-        # against, same reasoning as load/progression scheme.
-        status = verify_citation(topic, citation.supports, chunk["text"], result.grounding, use_mechanical_check=False)
-        if status in _SUPPORTED_STATUSES:
-            any_supported = True
-        verified.append((chunk, status))
-    return result, verified, any_supported
+    parsed, chunks = answer_general_question(topic)
+    kept, removed = _verify_statements(topic, parsed, {c["id"]: c for c in chunks})
+    return parsed, kept, removed
 
 
 def _handle_general_question(decision, raw_message: str) -> schemas.ChatResponse:
-    # Not persisted to any table - conversational, same as the Product
-    # interaction model's mode 3 description in PROJECT_CONTEXT.md. Same
-    # bounded-retry policy as every other generation path
-    # (citation_verification.txt section 7): retried once if nothing
-    # verified and the model didn't already admit general_knowledge,
-    # never retried for an honest "nothing here supports this" self-report.
+    # Not persisted - conversational. Same bounded-retry policy as every
+    # other generation path: retried once if nothing verified and the model
+    # didn't already admit general_knowledge.
     topic = decision.topic or raw_message
-    result, verified, any_supported = _attempt_general_question(topic)
-    if not any_supported and result.grounding != "general_knowledge":
-        result, verified, any_supported = _attempt_general_question(topic)
+    parsed, kept, removed = _attempt_general_question(topic)
+    if not kept and parsed.grounding != "general_knowledge":
+        parsed, kept, removed = _attempt_general_question(topic)
 
-    if any_supported:
-        grounding_note = None
-    elif result.grounding == "general_knowledge":
+    answer, citations = _compose(kept)
+    if kept:
+        grounding_note = _removed_note(removed)
+    elif parsed.grounding == "general_knowledge":
         grounding_note = _GENERAL_KNOWLEDGE_NOTE
     else:
         grounding_note = _UNSUBSTANTIATED_NOTE
-
-    # Only citations that actually survived judge verification are shown -
-    # a contradicted/unresolved chunk was never valid evidence for the
-    # specific claim it was attached to, same display rule as every other
-    # citation surface in this app.
-    citations = [
-        schemas.ChatCitationOut(title=chunk["source"], snippet=chunk["text"])
-        for chunk, status in verified
-        if status in _SUPPORTED_STATUSES
-    ]
     return schemas.ChatResponse(
         mode="answer_general_question",
-        answer=result.answer,
+        # Never fall back to unverified prose: no verified statement means
+        # no answer, said plainly.
+        answer=answer or "The research in this app's corpus doesn't support a confident answer to that question.",
         citations=citations,
         grounding_note=grounding_note,
     )

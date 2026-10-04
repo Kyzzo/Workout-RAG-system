@@ -206,7 +206,11 @@ def generate_weekly_volume(
     return _generate_field(
         "weekly_sets", int, "volume", build_volume_query(muscle_group, goal),
         field_description="Total sets per WEEK for this muscle, across all of its "
-        "exercises and sessions combined.",
+        "exercises and sessions combined. This app counts sets FRACTIONALLY: a set "
+        "where the muscle is the main target counts as 1, a set where it's a "
+        "secondary muscle counts as 0.5. If a source reports direct sets only, or "
+        "fractional sets, keep that distinction in mind rather than treating them "
+        "as the same number.",
         guidance=_VOLUME_GUIDANCE.get(preference),
     )
 
@@ -359,113 +363,118 @@ def build_progression_query(muscle_group: str, goal: str) -> str:
     )
 
 
+# Rules shared by every free-text answer (chat Q&A and discussing a
+# prescription). The answer is a list of single-claim statements, each
+# naming its own sources, because every statement is verified separately
+# and only statements with an accepted source are shown. That replaced an
+# answer-plus-citations shape, where the prose AROUND the cited claims was
+# never checked: a real answer merged a strength trend in direct sets
+# (Aube 2022) with a hypertrophy threshold in fractional sets (Pelland via
+# Remmert 2025) into a range neither study states.
+_STATEMENT_RULES = (
+    "Write your answer as a list of statements. Each statement is ONE "
+    "factual claim in one or two sentences, and its `sources` lists the "
+    "IDs of the excerpts that state or report that exact claim. Every "
+    "statement is checked against its sources and removed if they don't "
+    "support it as written, so: do not write uncited statements, "
+    "transitions or general knowledge as statements. Preserve each "
+    "source's qualifiers exactly: the unit (e.g. 'fractional' sets vs "
+    "direct sets, sets per week vs per session), the outcome (strength vs "
+    "hypertrophy), the population and muscles studied, and the strength of "
+    "the finding ('no detectable superiority beyond X', 'a trend toward'). "
+    "Never upgrade a finding to 'optimal', 'best' or 'no benefit beyond'; "
+    "'no detectable superiority beyond X' means the data couldn't show an "
+    "advantage past X - state it that way, never as a limit, ceiling or "
+    "maximum, even hedged with 'may be' or 'suggests'; and 'similar outcomes "
+    "across A-B' never makes part of that range optimal. Use each source's "
+    "exact figures. "
+    "Never combine figures from different excerpts, outcomes or units into "
+    "a new range or number - report each source's figure separately, with "
+    "its own context. A statement about what proportion of a dataset used "
+    "some method describes the STUDIES INCLUDED, not whether the method "
+    "works. Do not invent IDs. Set grounding to 'fully_grounded' if the "
+    "cited excerpts fully account for the answer, 'blended' if you combined "
+    "them with general knowledge, or 'general_knowledge' if no excerpt "
+    "meaningfully supports an answer (then return no statements)."
+)
+
 _QA_SYSTEM_PROMPT = (
-    "You answer research questions using only the provided context. "
-    "If the context doesn't fully answer the question, make your best "
-    "estimate from what's given rather than using outside knowledge. "
-    "Each context chunk is labeled with a bracketed ID like [abc-123]. "
-    "Your answer can combine multiple chunks, but every entry in "
-    "citations must name the SPECIFIC claim or sentence from your answer "
-    "that chunk actually supports - not a summary of the whole answer, "
-    "and not a paraphrase of the whole excerpt. Only cite a chunk for a "
-    "claim it actually states or reports. In particular: a chunk stating "
-    "what proportion of a dataset used some method (e.g. 'X% of studies "
-    "trained to failure') describes the STUDIES INCLUDED in that "
-    "research, not whether that method produces better results - only "
-    "cite it for a claim about the dataset's composition itself, never "
-    "for a claim about a method's effectiveness. Do not invent a chunk "
-    "ID that isn't shown above. Set grounding to 'fully_grounded' if the "
-    "cited chunks fully account for your answer, 'blended' if you "
-    "combined them with general knowledge, or 'general_knowledge' if no "
-    "provided chunk meaningfully supports your answer (in which case "
-    "citations should be empty)."
+    "You answer research questions using only the provided context. Each "
+    "context excerpt is labeled with a bracketed ID like [abc-123]. "
+    + _STATEMENT_RULES
+)
+
+_DISCUSSION_SYSTEM_PROMPT = (
+    "You are answering a user's question about one specific, already-"
+    "generated training prescription, using only its current values and the "
+    "provided supporting excerpts - don't invent research, and don't second-"
+    "guess or recompute what the value should be (that's a separate 'adjust' "
+    "action). A statement that only describes the prescription's current "
+    "values may cite the source ID 'prescription'. Each excerpt is labeled "
+    "with the value it supports; never present an excerpt about one value "
+    "(e.g. sets) as the reason for another (e.g. effort). If the excerpts "
+    "don't answer the question, say so with no research statements rather "
+    "than guessing. "
+    + _STATEMENT_RULES
 )
 
 
-def _build_qa_response_schema(chunk_ids: list[str]) -> type[pydantic.BaseModel]:
-    # Deliberately NOT built on top of _build_response_schema's flat
-    # chunk_ids: list[...] shape - a free-text answer can synthesize
-    # several distinct claims from several chunks, and a flat list gives
-    # verification nothing to check per chunk except the whole answer,
-    # which is exactly how a real citation ended up backing a claim it
-    # didn't make (a dataset-composition stat used to imply an efficacy
-    # finding). Each citation names the specific claim it's FOR, so
-    # per-chunk judge verification has something atomic to check, the
-    # same granularity field-level generation already has.
-    chunk_id_type = Literal[tuple(chunk_ids)] if chunk_ids else str
-    cited_claim = pydantic.create_model(
-        "CitedClaim",
-        chunk_id=(chunk_id_type, ...),
-        supports=(
-            str,
-            pydantic.Field(
-                description="The specific claim or sentence from the answer "
-                "this chunk is cited to support - not the whole answer."
-            ),
-        ),
+def _statement_schema(source_ids: list[str]) -> type[pydantic.BaseModel]:
+    # Sources constrained to an enum of this call's actual excerpt IDs, the
+    # same structural no-fabrication rule as field-level generation.
+    source_type = Literal[tuple(source_ids)] if source_ids else str
+    statement = pydantic.create_model(
+        "Statement",
+        text=(str, pydantic.Field(description="One factual claim, one or two sentences.")),
+        sources=(list[source_type], ...),
     )
     return pydantic.create_model(
-        "QAAnswer",
-        answer=(str, ...),
-        citations=(list[cited_claim], ...),
+        "StatementAnswer",
+        statements=(list[statement], ...),
         grounding=(GroundingLevel, ...),
     )
 
 
-def answer_general_question(topic: str) -> tuple[pydantic.BaseModel, list[dict]]:
-    # General Q&A (Phase 6 chat mode 3, phase6_chat_routing_concepts.txt
-    # section 4): not tied to a specific WeeklyPrescription-level field, so
-    # category=None searches across the whole corpus rather than one of the
-    # four dosage categories, and the answer is free text, not a typed value
-    # meant to be persisted anywhere.
-    chunks = _retrieve_chunks(topic, None)
-    context_block = "\n\n".join(f"[{c['id']}] {c['text']}" for c in chunks)
-    response_schema = _build_qa_response_schema([c["id"] for c in chunks])
-
+def _answer_in_statements(system_prompt: str, user_content: str, source_ids: list[str]) -> pydantic.BaseModel:
     completion = client.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": _QA_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {topic}"},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
         ],
-        response_format=response_schema,
+        response_format=_statement_schema(source_ids),
     )
-
     message = completion.choices[0].message
     if message.refusal:
         raise ValueError(f"Model refused to generate: {message.refusal}")
-    return message.parsed, chunks
+    return message.parsed
 
 
-_DISCUSSION_SYSTEM_PROMPT = (
-    "You are answering a user's question about one specific, already-"
-    "generated training prescription. Use only the prescription's current "
-    "value and the provided supporting citation excerpts - don't invent new "
-    "research, and don't second-guess or recompute what the value should "
-    "be (that's a separate 'adjust' action, not this one). If the citations "
-    "don't clearly answer the question, say so honestly rather than "
-    "guessing. Give a concise, direct answer, not a restatement of the raw "
-    "prescription data."
-)
-
-
-def answer_prescription_discussion(question: str, prescription_summary: str, citation_snippets: list[str]) -> str:
-    # No new retrieval or citation-verification here - this only rephrases
-    # ALREADY-verified, ALREADY-stored citation text into a direct answer to
-    # the user's actual question (phase6_chat_routing_concepts.txt section
-    # 4's "zero marginal cost for the citation-CHECKING part" - checking,
-    # not the whole response, which still needs an LLM call to actually
-    # engage with what was asked instead of just echoing stored data back).
-    citations_block = "\n\n".join(citation_snippets) if citation_snippets else "(no verified supporting citations on file)"
-    completion = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": _DISCUSSION_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Current prescription: {prescription_summary}\n\n"
-                f"Supporting citations:\n{citations_block}\n\nQuestion: {question}",
-            },
-        ],
+def answer_general_question(topic: str) -> tuple[pydantic.BaseModel, list[dict]]:
+    # General Q&A (chat mode 3): not tied to one dosage category, so
+    # category=None searches the whole corpus. Returns statements to verify.
+    chunks = _retrieve_chunks(topic, None)
+    context_block = "\n\n".join(f"[{c['id']}] {c['text']}" for c in chunks)
+    parsed = _answer_in_statements(
+        _QA_SYSTEM_PROMPT, f"Context:\n{context_block}\n\nQuestion: {topic}", [c["id"] for c in chunks],
     )
-    return completion.choices[0].message.content
+    return parsed, chunks
+
+
+PRESCRIPTION_SOURCE = "prescription"
+
+
+def answer_prescription_discussion(
+    question: str, prescription_summary: str, excerpts: list[dict],
+) -> pydantic.BaseModel:
+    """`excerpts`: [{"id", "text", "field"}] - the prescription's stored,
+    already-verified supporting citations. Returns statements to verify; no
+    new retrieval, but each statement is still checked against the excerpt
+    it cites, since rephrasing a source can misrepresent it."""
+    context = "\n\n".join(f"[{e['id']}] (supports the {e['field']} value) {e['text']}" for e in excerpts)
+    return _answer_in_statements(
+        _DISCUSSION_SYSTEM_PROMPT,
+        f"[{PRESCRIPTION_SOURCE}] Current prescription: {prescription_summary}\n\n"
+        f"Supporting excerpts:\n{context or '(none on file)'}\n\nQuestion: {question}",
+        [PRESCRIPTION_SOURCE] + [e["id"] for e in excerpts],
+    )
