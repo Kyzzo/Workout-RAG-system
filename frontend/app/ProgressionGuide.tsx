@@ -6,7 +6,7 @@
 // program, this box isn't tied to a cited source.
 export default function ProgressionGuide() {
   return (
-    <details open className="w-full border rounded p-3 text-xs bg-zinc-50 dark:bg-zinc-900">
+    <details className="w-full border rounded p-3 text-xs bg-zinc-50 dark:bg-zinc-900">
       <summary className="font-medium text-sm cursor-pointer">How to progress</summary>
       <ol className="list-decimal list-inside flex flex-col gap-1 mt-2 text-zinc-700 dark:text-zinc-300">
         <li>
@@ -35,7 +35,7 @@ export default function ProgressionGuide() {
       </ol>
       <p className="mt-2 text-zinc-500">
         General guidance based on common hypertrophy principles (double progression) - not tied to a specific study,
-        unlike the sets, reps and effort above it.
+        unlike the sets, reps and effort prescriptions.
       </p>
     </details>
   );

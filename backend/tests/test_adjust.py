@@ -238,3 +238,46 @@ def test_rir_moving_the_wrong_way_is_kept(mock_route, mock_rir, _verify, db_sess
 
     assert result.prescription.rir == "1-2 RIR"
     assert result.answer.startswith("Kept at 1-2 RIR")
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_reps")
+@patch("app.routers.chat.route_chat_message")
+def test_hypertrophy_adjustment_applies_to_every_week(mock_route, mock_reps, _verify, db_session, owner_and_prescription):
+    # Hypertrophy shows one prescription per exercise, so a change made
+    # from it must land on all of that exercise's weeks.
+    user, prescription = owner_and_prescription
+    for week in (2, 3):
+        db_session.add(models.WeeklyPrescription(
+            exercise_slot_id=prescription.exercise_slot_id, week_number=week, sets=3, reps="8-10", load="",
+        ))
+    db_session.flush()
+    mock_route.return_value = _route(prescription, "reps", "set_value", "10-12")
+    mock_reps.return_value = (SimpleNamespace(reps="10-12", chunk_ids=["rep-1"], grounding="fully_grounded"), _chunks("rep-1"))
+
+    _send(db_session, user, prescription)
+
+    db_session.expire_all()
+    weeks = db_session.get(models.ExerciseSlot, prescription.exercise_slot_id).weekly_prescriptions
+    assert [wp.reps for wp in weeks] == ["10-12"] * 3
+    assert all([c.citation.title for c in wp.reps_citations] == ["paper-rep-1"] for wp in weeks)
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_reps")
+@patch("app.routers.chat.route_chat_message")
+def test_strength_adjustment_stays_on_its_week(mock_route, mock_reps, _verify, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"
+    db_session.add(models.WeeklyPrescription(
+        exercise_slot_id=prescription.exercise_slot_id, week_number=2, sets=3, reps="3-5", load="",
+    ))
+    db_session.flush()
+    mock_route.return_value = _route(prescription, "reps", "set_value", "5-6")
+    mock_reps.return_value = (SimpleNamespace(reps="5-6", chunk_ids=[], grounding="general_knowledge"), [])
+
+    _send(db_session, user, prescription)
+
+    db_session.expire_all()
+    weeks = db_session.get(models.ExerciseSlot, prescription.exercise_slot_id).weekly_prescriptions
+    assert [wp.reps for wp in weeks] == ["5-6", "3-5"]  # strength weeks progress independently

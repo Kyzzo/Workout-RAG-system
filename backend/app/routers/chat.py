@@ -25,6 +25,7 @@ from .generation import (
     _UNSUBSTANTIATED_NOTE,
     AdjustmentNotHonored,
     _generate_and_persist,
+    copy_fields_to_other_weeks,
     field_pipeline,
 )
 
@@ -157,6 +158,14 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
             prescription, db, generate_fn, query_fn, decision.target_field, use_mechanical_check,
             adjustment=adjustment,
         )
+        if goal != "strength":
+            # Hypertrophy shows one prescription per exercise, the same every
+            # week (progression is session-to-session, not scheduled), so an
+            # adjustment applies to the whole exercise, not one week of it.
+            others = [wp for wp in updated.exercise_slot.weekly_prescriptions if wp.id != updated.id]
+            copy_fields_to_other_weeks(updated, others, (decision.target_field,))
+            db.commit()
+            db.refresh(updated)
     except AdjustmentNotHonored as kept:
         # Raised before _generate_and_persist touches the prescription or
         # its citations, so there's nothing to undo.

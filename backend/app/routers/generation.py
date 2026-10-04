@@ -319,6 +319,26 @@ def field_pipeline(field: str, exercise_name: str, preference: str = "moderate")
     raise ValueError(f"Unknown field {field}")
 
 
+def copy_fields_to_other_weeks(
+    base: models.WeeklyPrescription, others: list[models.WeeklyPrescription], fields: tuple[str, ...],
+) -> None:
+    """Copies the given fields' values, notes and citations from one week to
+    the exercise's other weeks. Same claims, so the same citations - copied
+    with their verdicts (including retained contradicted/unresolved rows,
+    for QA parity); fields not listed keep their own citations."""
+    for wp in others:
+        for field in fields:
+            setattr(wp, field, getattr(base, field))
+            setattr(wp, f"{field}_grounding_note", getattr(base, f"{field}_grounding_note"))
+        wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field not in fields] + [
+            models.PrescriptionCitation(
+                citation_id=pc.citation_id, field=pc.field, verification_status=pc.verification_status,
+            )
+            for pc in base.prescription_citations
+            if pc.field in fields
+        ]
+
+
 def exercise_fields(goal: str) -> tuple[str, ...]:
     # Hypertrophy prescribes effort (RIR) with no load; strength prescribes
     # both a %1RM load and an RIR.
@@ -349,20 +369,7 @@ def generate_exercise(
         generate_fn, query_fn, mechanical = field_pipeline(field, slot.exercise_name, program.volume_preference)
         _generate_and_persist(base, db, generate_fn, query_fn, field, use_mechanical_check=mechanical)
 
-    for wp in rest:
-        for field in fields:
-            setattr(wp, field, getattr(base, field))
-            setattr(wp, f"{field}_grounding_note", getattr(base, f"{field}_grounding_note"))
-        # Same claims, so the same citations - copied with their verdicts
-        # (including retained contradicted/unresolved rows, for QA parity).
-        # This week's sets citations are a separate claim and stay as they are.
-        wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field not in fields] + [
-            models.PrescriptionCitation(
-                citation_id=pc.citation_id, field=pc.field, verification_status=pc.verification_status,
-            )
-            for pc in base.prescription_citations
-            if pc.field in fields
-        ]
+    copy_fields_to_other_weeks(base, rest, fields)
 
     db.commit()
     db.refresh(slot)

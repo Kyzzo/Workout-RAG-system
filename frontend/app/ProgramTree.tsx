@@ -55,6 +55,20 @@ function deliveredSets(mesocycle: Mesocycle, group: string) {
   return Math.round(total);
 }
 
+// Hypertrophy prescriptions are the same every week (progression happens
+// session to session, see ProgressionGuide), so they're shown once per
+// exercise. Strength lists each week because its loads progress - and so
+// does hypertrophy if its weeks ever differ (e.g. older data), so a single
+// line never hides a difference.
+function rowsToShow(slot: ExerciseSlot, strength: boolean) {
+  const weeks = slot.weekly_prescriptions;
+  const first = weeks[0];
+  const same = (wp: WeeklyPrescription) =>
+    wp.sets === first.sets && wp.reps === first.reps && wp.load === first.load && wp.rir === first.rir;
+  if (!strength && first && weeks.every(same)) return [{ wp: first, everyWeek: true }];
+  return weeks.map((wp) => ({ wp, everyWeek: false }));
+}
+
 function muscleGroupsIn(mesocycle: Mesocycle) {
   const groups = new Set<string>();
   for (const day of mesocycle.day_templates) {
@@ -431,8 +445,8 @@ export default function ProgramTree({
                       </span>
                     </div>
                     <ul className="flex flex-col gap-1 mt-1">
-                      {slot.weekly_prescriptions.map((wp) => {
-                        const label = `${slot.exercise_name}, week ${wp.week_number}`;
+                      {rowsToShow(slot, strength).map(({ wp, everyWeek }) => {
+                        const label = everyWeek ? slot.exercise_name : `${slot.exercise_name}, week ${wp.week_number}`;
                         const isAnchored = anchoredFieldId === wp.id;
                         // Split sets carry no per-exercise citations; their
                         // evidence is the muscle's cited weekly volume.
@@ -484,7 +498,7 @@ export default function ProgramTree({
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <span>
-                                week {wp.week_number}:{" "}
+                                {everyWeek ? "every week" : `week ${wp.week_number}`}:{" "}
                                 {isPlaceholder(wp) ? (
                                   <span className="text-zinc-400">not generated yet</span>
                                 ) : (
@@ -503,14 +517,18 @@ export default function ProgramTree({
                                 )}
                               </span>
                               <span className="flex gap-3">
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => generatePrescription(wp, "volume")}
-                                  className={actionClass}
-                                >
-                                  {busyKey === `volume-${wp.id}` ? "generating..." : "gen sets"}
-                                </button>
+                                {/* Regenerating one week's sets only makes sense
+                                    when weeks are listed separately. */}
+                                {!everyWeek && (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => generatePrescription(wp, "volume")}
+                                    className={actionClass}
+                                  >
+                                    {busyKey === `volume-${wp.id}` ? "generating..." : "gen sets"}
+                                  </button>
+                                )}
                                 {strength && (
                                   <button
                                     type="button"
