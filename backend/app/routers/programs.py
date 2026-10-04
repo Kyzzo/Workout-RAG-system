@@ -61,10 +61,11 @@ def generate_program(
         )
         db.add(day_template)
         db.flush()
-        for slot_order, (exercise_name, muscle_group, secondaries) in enumerate(picks, start=1):
+        for slot_order, (exercise_name, muscle_group, secondaries, is_compound) in enumerate(picks, start=1):
             slot = models.ExerciseSlot(
                 day_template_id=day_template.id, exercise_name=exercise_name,
-                muscle_group=muscle_group, secondary_muscle_groups=secondaries, order=slot_order,
+                muscle_group=muscle_group, secondary_muscle_groups=secondaries, is_compound=is_compound,
+                order=slot_order,
             )
             slot.weekly_prescriptions = [
                 models.WeeklyPrescription(week_number=week, sets=0, reps="", load="")

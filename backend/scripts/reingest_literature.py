@@ -55,6 +55,7 @@ def main():
     storage.upsert(ids, vectors, payloads)
     after = storage.client.count(storage.collection, count_filter=source_filter, exact=True).count
     print(f"{args.source_id}: replaced {before} chunks with {after}")
+    print("Next: scripts.clear_shared_answers and scripts.refresh_rule_justifications (local and production).")
 
 
 if __name__ == "__main__":

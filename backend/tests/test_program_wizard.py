@@ -23,12 +23,13 @@ def user(db_session):
 
 
 def _picks_covering(days):
-    # A valid selection: one exercise per target muscle group (min 4 per day).
+    # A valid selection: one exercise per target muscle group (min 4 per day),
+    # as (name, primary, secondaries, is_compound).
     result = []
     for day in days:
-        picks = [(f"{day.name} {group} lift", group, []) for group in day.muscle_groups]
+        picks = [(f"{day.name} {group} lift", group, [], False) for group in day.muscle_groups]
         while len(picks) < 4:
-            picks.append((f"{day.name} extra {len(picks)}", day.muscle_groups[0], []))
+            picks.append((f"{day.name} extra {len(picks)}", day.muscle_groups[0], [], False))
         result.append(picks)
     return result
 
@@ -85,7 +86,7 @@ def _parsed(days, picks_per_day):
             fields[group.replace(" ", "_")] = exercise(match[0], match[2]) if match else None
         fields["extras"] = [
             SimpleNamespace(exercise_name=n, is_compound=False, muscle_group=g, secondary_muscle_groups=sec)
-            for n, g, sec in remaining
+            for n, g, sec, *_ in remaining
         ]
         day_responses[f"day_{i + 1}"] = SimpleNamespace(**fields)
     return SimpleNamespace(**day_responses)
@@ -99,7 +100,7 @@ def test_selection_retries_once_when_a_muscle_group_is_missed():
     days = _push_days()
     good = _picks_covering(days)
     bad = [list(good[0]), good[1]]
-    bad[0] = [p for p in bad[0] if p[1] != "triceps"] + [("Extra Press", "chest", [])]  # Push A skips triceps
+    bad[0] = [p for p in bad[0] if p[1] != "triceps"] + [("Extra Press", "chest", [], False)]  # Push A skips triceps
     parse = MagicMock(side_effect=[_completion(_parsed(days, bad)), _completion(_parsed(days, good))])
 
     with patch("app.rag.exercise_selection.client.chat.completions.parse", parse):
@@ -260,7 +261,7 @@ def test_front_delts_and_lower_back_may_be_covered_as_secondaries_but_lats_may_n
     # lats are NOT secondary-coverable: a Pull day whose only lat work is a
     # row's secondary is missing its vertical pull.
     no_lats = [list(day) for day in picks]
-    no_lats[1] = [p for p in no_lats[1] if p[1] != "lats"] + [("Barbell Row", "upper back", ["lats"])]
+    no_lats[1] = [p for p in no_lats[1] if p[1] != "lats"] + [("Barbell Row", "upper back", ["lats"], False)]
     assert _problems(days, _parsed(days, no_lats)) == ["Pull has no exercise for lats"]
 
 
@@ -268,21 +269,21 @@ def test_selection_cleans_secondaries():
     days = [d for d in plan_days(SPLITS["ppl"], 6) if d.day_type == "Pull"]
     picks = _picks_covering(days)
     row = [i for i, p in enumerate(picks[0]) if p[1] == "upper back"][0]
-    picks[0][row] = ("Barbell Row", "upper back", ["upper back", "lats", "lats", "rear delts", "biceps", "lower back"])
+    picks[0][row] = ("Barbell Row", "upper back", ["upper back", "lats", "lats", "rear delts", "biceps", "lower back"], True)
     parse = MagicMock(return_value=_completion(_parsed(days, picks)))
 
     with patch("app.rag.exercise_selection.client.chat.completions.parse", parse):
         result = _select_group(days, "hypertrophy", "Push/Pull/Legs, 6 days per week")
 
     # primary dropped from its own secondaries, duplicates removed, capped at 3
-    assert result[0][row] == ("Barbell Row", "upper back", ["lats", "rear delts", "biceps"])
+    assert result[0][row] == ("Barbell Row", "upper back", ["lats", "rear delts", "biceps"], False)
 
 
 @patch("app.routers.programs.select_exercises")
 def test_generate_program_stores_secondaries(mock_select, db_session, user):
     def picks(days, goal, label):
         result = _picks_covering(days)
-        result[0][0] = ("Barbell Bench Press", result[0][0][1], ["front delts", "triceps"])
+        result[0][0] = ("Barbell Bench Press", result[0][0][1], ["front delts", "triceps"], True)
         return result
     mock_select.side_effect = picks
     request = schemas.ProgramGenerateRequest(goal="hypertrophy", split="ppl", days_per_week=3)
@@ -291,6 +292,9 @@ def test_generate_program_stores_secondaries(mock_select, db_session, user):
 
     first = program.mesocycles[0].day_templates[0].exercise_slots[0]
     assert (first.exercise_name, first.secondary_muscle_groups) == ("Barbell Bench Press", ["front delts", "triceps"])
+    # the movement type is stored too: it picks the exercise's shared reps/RIR/load answer
+    slot = db_session.get(models.ExerciseSlot, first.id)
+    assert slot.is_compound is True
 
 
 def test_compounds_are_ordered_before_isolation():

@@ -198,6 +198,8 @@ def _retrieve_general_chunks(topic: str) -> list[dict]:
 
 
 # The model that picks generated values, as (model, reasoning effort).
+# Changing it (or any generation prompt or question)? Bump
+# shared_answers.ANSWER_VERSION so stored answers are regenerated.
 # Compared on weekly volume (4 muscles x 2 goals): gpt-4o-mini picked a 'no
 # detectable superiority' point (31 sets) as a target and anchored on single
 # studies; gpt-5 at minimal effort based values on the meta-analyses, cited
@@ -320,7 +322,7 @@ _RIR_GUIDANCE = {
 
 
 def generate_weekly_volume(
-    muscle_group: str, goal: str, preference: str = "moderate",
+    muscle_group: str | None, goal: str, preference: str = "moderate",
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     # The claim the volume research actually makes - weekly sets for the
     # muscle - so verification compares like with like.
@@ -368,14 +370,20 @@ def generate_intensity_load(
     # weekly budget" problem, so this is left unwired rather than passed
     # through for a benefit that hasn't been demonstrated to exist.
     return _generate_field(
-        "load",
-        str,
-        "intensity",
-        build_intensity_query(muscle_group, goal),
-        field_description="Training load as a percentage of 1RM, e.g. '75% 1RM' - "
-        "never a rep range, rep count, RPE or RIR (effort is prescribed separately).",
-        adjustment=adjustment,
+        "load", str, "intensity", build_intensity_query(muscle_group, goal),
+        field_description=_LOAD_DESCRIPTION, adjustment=adjustment,
     )
+
+
+_LOAD_DESCRIPTION = (
+    "Training load as a percentage of 1RM, e.g. '75% 1RM' - never a rep range, rep count, "
+    "RPE or RIR (effort is prescribed separately)."
+)
+_REPS_DESCRIPTION = "A rep range per set, e.g. '6-10' or '8-12' - numbers only, no load or effort."
+_RIR_DESCRIPTION = (
+    "How many reps short of failure each set should end (reps in reserve); 0 RIR means "
+    "taking the set to failure."
+)
 
 
 # A fixed menu rather than free text, so every RIR value is one of a few
@@ -391,9 +399,7 @@ def generate_reps(
     # "intensity" - rep range and load are two sides of the same variable.
     return _generate_field(
         "reps", str, "intensity", build_reps_query(muscle_group, goal, exercise_name),
-        field_description="A rep range per set, e.g. '6-10' or '8-12' - numbers only, "
-        "no load or effort.",
-        adjustment=adjustment,
+        field_description=_REPS_DESCRIPTION, adjustment=adjustment,
     )
 
 
@@ -404,14 +410,66 @@ def generate_rir(
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     return _generate_field(
         "rir", RirOption, "intensity", build_rir_query(muscle_group, goal, exercise_name),
-        field_description="How many reps short of failure each set should end "
-        "(reps in reserve); 0 RIR means taking the set to failure.",
-        adjustment=adjustment,
+        field_description=_RIR_DESCRIPTION, adjustment=adjustment,
         guidance=_RIR_GUIDANCE.get(preference),
     )
 
 
-def generate_frequency(muscle_group: str, goal: str) -> tuple[pydantic.BaseModel, list[dict]]:
+# Reps, RIR and load for a whole movement type rather than one named
+# exercise: the research behind them (the repetition continuum, the
+# proximity-to-failure meta-analyses) isn't exercise-specific, and asking
+# per exercise mostly returned the same answer at far higher cost. The one
+# distinction the research does draw is load - lighter loads need sets
+# closer to failure - which compound vs. isolation stands in for. Used by
+# whole-exercise generation (shared across programs, see
+# app/shared_answers.py); chat adjustments still ask about the named
+# exercise.
+Movement = Literal["compound", "isolation"]
+_MOVEMENT_PHRASE = {
+    "compound": "compound (multi-joint) exercises such as squats, presses, rows and deadlifts",
+    "isolation": "isolation (single-joint) exercises such as curls, lateral raises, leg extensions "
+    "and calf raises",
+}
+
+
+def build_movement_query(field: str, goal: str, movement: str) -> str:
+    exercises = _MOVEMENT_PHRASE[movement]
+    if field == "reps":
+        return (
+            f"What repetition range per set is recommended for {exercises} to support a "
+            f"training goal of {goal}? Answer with a rep range like '8-12'."
+        )
+    if field == "rir":
+        return (
+            f"How close to failure, in repetitions in reserve (RIR), should sets of {exercises} "
+            f"be taken to support a training goal of {goal}? 0 RIR means the set is taken to failure."
+        )
+    if field == "load":
+        return (
+            f"What training load is recommended for {exercises} to support a training goal of "
+            f"{goal}? Answer with the load ITSELF as a percentage of 1RM (e.g. '75% 1RM') - not a "
+            f"rep range or rep count, even if the source material discusses reps and load together."
+        )
+    raise ValueError(f"No movement-level question for {field}")
+
+
+def generate_for_movement(
+    field: str, goal: str, movement: str, preference: str = "moderate",
+) -> tuple[pydantic.BaseModel, list[dict]]:
+    query = build_movement_query(field, goal, movement)
+    if field == "reps":
+        return _generate_field("reps", str, "intensity", query, field_description=_REPS_DESCRIPTION)
+    if field == "rir":
+        return _generate_field(
+            "rir", RirOption, "intensity", query, field_description=_RIR_DESCRIPTION,
+            guidance=_RIR_GUIDANCE.get(preference),
+        )
+    if field == "load":
+        return _generate_field("load", str, "intensity", query, field_description=_LOAD_DESCRIPTION)
+    raise ValueError(f"No movement-level generation for {field}")
+
+
+def generate_frequency(muscle_group: str | None, goal: str) -> tuple[pydantic.BaseModel, list[dict]]:
     return _generate_field(
         "frequency",
         int,
@@ -421,19 +479,21 @@ def generate_frequency(muscle_group: str, goal: str) -> tuple[pydantic.BaseModel
         "per week for this muscle group.",
     )
 
-#current idea, used to get a set per week number but caller will get api answer and reference against other
-#excercises within same muscle group
-#other consideration potentially is excercises that hit multiple muscle groups (count fractional sets?)
-def build_volume_query(muscle_group: str, goal: str) -> str:
+# muscle_group=None asks about any muscle: whole-block generation asks
+# volume, frequency and progression once per goal (shared by every muscle,
+# see app/shared_answers.py), since the meta-analyses behind them pool
+# muscles rather than giving muscle-specific doses. Per-muscle wording is
+# kept for single-value requests.
+def build_volume_query(muscle_group: str | None, goal: str) -> str:
     # 'Supports as effective', not 'optimal': dosing research reports
     # effective ranges, tiers and diminishing returns, not one best number,
     # and the judge reads this question to decide what a value claims (incl.
     # the unit: this app counts fractional sets, as the meta-analyses do).
     return (
-        f"How many sets per week for {muscle_group} does the research support "
+        f"How many sets per week for {muscle_group or 'each muscle'} does the research support "
         f"as an effective training volume for a goal of {goal}? Sets are "
-        f"counted fractionally: a set where {muscle_group} is a secondary "
-        f"muscle counts as half a set."
+        f"counted fractionally: a set where the muscle is only a secondary "
+        f"mover counts as half a set."
     )
 
 
@@ -462,9 +522,9 @@ def build_rir_query(muscle_group: str, goal: str, exercise_name: str) -> str:
     )
 
 
-def build_frequency_query(muscle_group: str, goal: str) -> str:
+def build_frequency_query(muscle_group: str | None, goal: str) -> str:
     return (
-        f"How many times per week should {muscle_group} be trained to "
+        f"How many times per week should {muscle_group or 'each muscle'} be trained to "
         f"support a training goal of {goal}? Answer with a single whole "
         f"number of sessions per week - if the source material gives a "
         f"range, pick the single most defensible value within it."
@@ -474,7 +534,7 @@ def build_frequency_query(muscle_group: str, goal: str) -> str:
 ProgressionSchemeType = Literal["linear", "undulating"]
 
 
-def generate_progression_scheme(muscle_group: str, goal: str) -> tuple[pydantic.BaseModel, list[dict]]:
+def generate_progression_scheme(muscle_group: str | None, goal: str) -> tuple[pydantic.BaseModel, list[dict]]:
     return _generate_field(
         "scheme",
         ProgressionSchemeType,
@@ -487,10 +547,11 @@ def generate_progression_scheme(muscle_group: str, goal: str) -> tuple[pydantic.
     )
 
 
-def build_progression_query(muscle_group: str, goal: str) -> str:
+def build_progression_query(muscle_group: str | None, goal: str) -> str:
+    target = f"for {muscle_group} " if muscle_group else ""
     return (
         f"For a strength training goal, is linear or undulating "
-        f"periodization recommended for {muscle_group} across a training "
+        f"periodization recommended {target}across a training "
         f"block? Answer with which scheme is recommended, not a description "
         f"of both."
     )

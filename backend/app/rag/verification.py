@@ -112,10 +112,13 @@ class Judge(NamedTuple):
 # verdicts (the same value in the same reported tier accepted once and
 # rejected once) and read a 'no detectable superiority' point as an optimum.
 GENERATION_JUDGE = Judge("gpt-5", reasoning_effort="low")
+# Changing a judge or its prompt? Run scripts/eval_judge.py first, and bump
+# shared_answers.ANSWER_VERSION so stored answers are re-judged.
 STATEMENT_JUDGE = Judge("gpt-5")
 
 
-def judge_citation(query: str, value: int | str, chunk_text: str, judge: Judge = GENERATION_JUDGE) -> JudgeVerdict:
+def judge_citation(query: str, value: int | str, chunk_text: str, judge: Judge | None = None) -> JudgeVerdict:
+    judge = judge or GENERATION_JUDGE  # looked up per call, so it can be swapped (scripts/eval_judge.py)
     # gpt-5 is a reasoning model, which rejects a temperature setting
     options = {"reasoning_effort": judge.reasoning_effort} if judge.reasoning_effort else {}
     completion = client.chat.completions.parse(
@@ -190,7 +193,7 @@ def verify_summary(question: str, summary: str, excerpts: list[str], judge: Judg
         return False
 
 
-def verify_citation(query: str, value: int | str, chunk_text: str, judge: Judge = GENERATION_JUDGE) -> str:
+def verify_citation(query: str, value: int | str, chunk_text: str, judge: Judge | None = None) -> str:
     # Every citation goes to the judge. An accept-only range check used to
     # approve a value without it whenever the excerpt contained a sets range
     # covering the value - which skips every qualifier check: it approved 18

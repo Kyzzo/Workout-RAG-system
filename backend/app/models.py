@@ -75,6 +75,11 @@ class ExerciseSlot(Base):
     secondary_muscle_groups: Mapped[list[str]] = mapped_column(
         ARRAY(String), default=list, server_default="{}"
     )
+    # Multi-joint (compound) or single-joint (isolation). Reps, RIR and load
+    # are researched by movement type, not per exercise, so this picks which
+    # shared answer an exercise gets. Set by AI exercise selection; None for
+    # exercises added by hand until generation classifies them.
+    is_compound: Mapped[bool | None] = mapped_column(nullable=True)
     order: Mapped[int] = mapped_column()
 
     day_template: Mapped["DayTemplate"] = relationship(back_populates="exercise_slots")
@@ -143,6 +148,7 @@ class Citation(Base):
     volume_citations: Mapped[list["VolumeCitation"]] = relationship(back_populates="citation")
     rule_citations: Mapped[list["RuleCitation"]] = relationship(back_populates="citation")
     progression_scheme_citations: Mapped[list["ProgressionSchemeCitation"]] = relationship(back_populates="citation")
+    shared_answer_citations: Mapped[list["SharedAnswerCitation"]] = relationship(back_populates="citation")
 
 class PrescriptionCitation(Base):
     __tablename__ = "prescription_citations"
@@ -274,3 +280,36 @@ class ProgressionSchemeCitation(Base):
 
     scheme: Mapped["ProgressionScheme"] = relationship(back_populates="progression_scheme_citations")
     citation: Mapped["Citation"] = relationship(back_populates="progression_scheme_citations")
+
+
+class SharedAnswer(Base):
+    # One verified research answer reused by every program that asks the same
+    # question (see app/shared_answers.py): e.g. reps for isolation
+    # exercises on a hypertrophy goal, or weekly sets for chest at moderate
+    # volume. The research and the question are the same for everyone, so
+    # it's generated, judged and stored once. Only verified answers are
+    # stored; `key` includes ANSWER_VERSION so a prompt or model change
+    # makes older answers unreachable.
+    __tablename__ = "shared_answers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String, unique=True)
+    field: Mapped[str] = mapped_column(String)
+    value: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
+
+    citations: Mapped[list["SharedAnswerCitation"]] = relationship(back_populates="answer", cascade="all, delete-orphan")
+
+
+class SharedAnswerCitation(Base):
+    # Every judged citation of the answer, verdicts included (same QA parity
+    # as the per-program junction tables, which copy these rows).
+    __tablename__ = "shared_answer_citations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    answer_id: Mapped[int] = mapped_column(ForeignKey("shared_answers.id"))
+    citation_id: Mapped[int] = mapped_column(ForeignKey("citations.id"))
+    verification_status: Mapped[str] = mapped_column(String)
+
+    answer: Mapped["SharedAnswer"] = relationship(back_populates="citations")
+    citation: Mapped["Citation"] = relationship(back_populates="shared_answer_citations")

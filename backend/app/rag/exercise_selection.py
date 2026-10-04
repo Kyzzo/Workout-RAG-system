@@ -178,7 +178,9 @@ def select_exercises(
     return results
 
 
-def _select_group(days: list[PlannedDay], goal: str, split_description: str) -> list[list[tuple[str, str, list[str]]]]:
+def _select_group(
+    days: list[PlannedDay], goal: str, split_description: str,
+) -> list[list[tuple[str, str, list[str], bool]]]:
     schema = _response_schema(days)
     day_lines = "\n".join(f"- {d.name}: {', '.join(d.muscle_groups)}" for d in days)
     request = (
@@ -201,11 +203,9 @@ def _select_group(days: list[PlannedDay], goal: str, split_description: str) -> 
             raise ExerciseSelectionError(f"Model refused to select exercises: {message.refusal}")
         problems = _problems(days, message.parsed)
         if not problems:
-            return [
-                [(name, primary, secondaries) for name, primary, secondaries, _ in
-                 _flatten(day, getattr(message.parsed, f"day_{i + 1}"))]
-                for i, day in enumerate(days)
-            ]
+            # (name, primary, secondaries, is_compound): compound vs isolation
+            # picks which shared reps/RIR/load answer the exercise gets.
+            return [_flatten(day, getattr(message.parsed, f"day_{i + 1}")) for i, day in enumerate(days)]
         feedback = "\n\nYour previous selection had problems - fix them: " + "; ".join(problems)
 
     raise ExerciseSelectionError("Exercise selection didn't cover every target muscle group: " + "; ".join(problems))
@@ -257,3 +257,26 @@ def select_additional_exercises(
         if p.exercise_name.strip().lower() not in existing_lower  # never duplicate what's there
     ]
     return picks[:count]
+
+
+def classify_compound(exercise_name: str) -> bool:
+    """Whether a hand-added exercise is compound (multi-joint) - AI-picked
+    ones are classified when picked. Not a research claim, so the cheap
+    model is fine."""
+    schema = pydantic.create_model("MovementType", is_compound=(bool, ...))
+    completion = client.chat.completions.parse(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": (
+                "Classify a resistance-training exercise. is_compound is true for multi-joint "
+                "movements (squats, presses, rows, pull-ups, deadlifts, lunges) and false for "
+                "single-joint movements (curls, extensions, raises, flyes, calf raises)."
+            )},
+            {"role": "user", "content": exercise_name},
+        ],
+        response_format=schema,
+    )
+    message = completion.choices[0].message
+    if message.refusal or message.parsed is None:
+        raise ExerciseSelectionError(f"Couldn't classify {exercise_name!r}")
+    return message.parsed.is_compound

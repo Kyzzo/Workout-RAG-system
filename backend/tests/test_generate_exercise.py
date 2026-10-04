@@ -31,54 +31,150 @@ def _gen(**fields):
     return MagicMock(side_effect=lambda *a, **k: (SimpleNamespace(**fields), _chunks(*fields["chunk_ids"])))
 
 
+def _movement_gen(**values):
+    """Fake generate_for_movement: one fixed value per field, cited to
+    '<field>-1'. Records each (field, goal, movement, preference) asked."""
+    calls = []
+
+    def fake(field, goal, movement, preference="moderate"):
+        calls.append((field, goal, movement, preference))
+        return (
+            SimpleNamespace(**{field: values[field]}, chunk_ids=[f"{field}-1"], grounding="fully_grounded"),
+            _chunks(f"{field}-1"),
+        )
+    return fake, calls
+
+
+def _add_slot(db_session, prescription, name, is_compound, weeks=(1,)):
+    # Another exercise on the fixture's day, with placeholder weeks.
+    slot = models.ExerciseSlot(
+        day_template_id=prescription.exercise_slot.day_template_id, exercise_name=name,
+        muscle_group="chest", is_compound=is_compound, order=9,
+    )
+    slot.weekly_prescriptions = [models.WeeklyPrescription(week_number=w, sets=0, reps="", load="") for w in weeks]
+    db_session.add(slot)
+    db_session.flush()
+    return slot
+
+
 @patch("app.routers.generation.verify_citation", return_value="primary_support")
-@patch("app.routers.generation.generate_intensity_load")
-@patch("app.routers.generation.generate_volume_sets")
-def test_hypertrophy_exercise_gets_reps_and_rir_once_for_every_week(
-    mock_sets, mock_load, _verify, db_session, owner_and_prescription,
+def test_hypertrophy_exercise_gets_reps_and_rir_for_its_movement_type_every_week(
+    _verify, db_session, owner_and_prescription,
 ):
     user, prescription = owner_and_prescription  # hypertrophy
     slot = _slot_with_weeks(db_session, prescription, [2, 3])
+    slot.is_compound = True
     for wp in slot.weekly_prescriptions:
         wp.sets = 3  # e.g. already split from the muscle's weekly volume
         wp.load = ""
-    reps = _gen(reps="8-12", chunk_ids=["rep-1"], grounding="fully_grounded")
-    rir = _gen(rir="1-2 RIR", chunk_ids=["rir-1"], grounding="fully_grounded")
+    fake, calls = _movement_gen(reps="8-12", rir="1-2 RIR")
 
-    with patch("app.routers.generation.generate_reps", reps), patch("app.routers.generation.generate_rir", rir):
+    with patch("app.routers.generation.generate_for_movement", side_effect=fake):
         result = generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
 
-    # Sets come from the muscle's weekly volume; hypertrophy prescribes no load.
-    mock_sets.assert_not_called()
-    mock_load.assert_not_called()
-    reps.assert_called_once()  # once for the exercise, not once per week
-    rir.assert_called_once()
-    assert reps.call_args.args[2] == slot.exercise_name  # asked per exercise
+    # Asked once per field for the movement type (not per exercise or week);
+    # hypertrophy prescribes no load, and sets come from weekly volume.
+    assert sorted(calls) == [("reps", "hypertrophy", "compound", "moderate"), ("rir", "hypertrophy", "compound", "moderate")]
     weeks = schemas.ExerciseSlotOut.model_validate(result).weekly_prescriptions
     assert [(wp.week_number, wp.sets, wp.reps, wp.load, wp.rir) for wp in weeks] == [
         (w, 3, "8-12", "", "1-2 RIR") for w in (1, 2, 3)
     ]
     for wp in weeks:
-        assert [c.citation.title for c in wp.reps_citations] == ["paper-rep-1"]
+        assert [c.citation.title for c in wp.reps_citations] == ["paper-reps-1"]
         assert [c.citation.title for c in wp.rir_citations] == ["paper-rir-1"]
 
 
 @patch("app.routers.generation.verify_citation", return_value="primary_support")
-@patch("app.routers.generation.generate_intensity_load")
-def test_strength_exercise_also_gets_a_percent_load(mock_load, _verify, db_session, owner_and_prescription):
+def test_strength_exercise_also_gets_a_percent_load(_verify, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription
     prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"
     slot = _slot_with_weeks(db_session, prescription, [2])
-    mock_load.return_value = (SimpleNamespace(load="80% 1RM", chunk_ids=["i-1"], grounding="fully_grounded"), _chunks("i-1"))
-    reps = _gen(reps="3-5", chunk_ids=["rep-1"], grounding="fully_grounded")
-    rir = _gen(rir="1-2 RIR", chunk_ids=["rir-1"], grounding="fully_grounded")
+    slot.is_compound = True
+    fake, _ = _movement_gen(reps="3-5", load="80% 1RM", rir="1-2 RIR")
 
-    with patch("app.routers.generation.generate_reps", reps), patch("app.routers.generation.generate_rir", rir):
+    with patch("app.routers.generation.generate_for_movement", side_effect=fake):
         result = generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
 
     weeks = schemas.ExerciseSlotOut.model_validate(result).weekly_prescriptions
     assert [(wp.reps, wp.load, wp.rir) for wp in weeks] == [("3-5", "80% 1RM", "1-2 RIR")] * 2
-    assert all([c.citation.title for c in wp.load_citations] == ["paper-i-1"] for wp in weeks)
+    assert all([c.citation.title for c in wp.load_citations] == ["paper-load-1"] for wp in weeks)
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+def test_exercises_of_the_same_movement_type_share_one_answer(_verify, db_session, owner_and_prescription):
+    # The cost fix: a second compound exercise reuses the stored, verified
+    # answer (and its citations) instead of asking the model again; an
+    # isolation exercise gets its own.
+    user, prescription = owner_and_prescription
+    bench = prescription.exercise_slot
+    bench.is_compound = True
+    incline = _add_slot(db_session, prescription, "Incline Press", is_compound=True)
+    fly = _add_slot(db_session, prescription, "Cable Fly", is_compound=False)
+    fake, calls = _movement_gen(reps="8-12", rir="1-2 RIR")
+
+    with patch("app.routers.generation.generate_for_movement", side_effect=fake):
+        for slot in (bench, incline, fly):
+            generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
+
+    assert sorted(calls) == [
+        ("reps", "hypertrophy", "compound", "moderate"), ("reps", "hypertrophy", "isolation", "moderate"),
+        ("rir", "hypertrophy", "compound", "moderate"), ("rir", "hypertrophy", "isolation", "moderate"),
+    ]
+    reused = incline.weekly_prescriptions[0]
+    assert (reused.reps, reused.rir) == ("8-12", "1-2 RIR")
+    assert [c.citation.title for c in reused.reps_citations] == ["paper-reps-1"]
+
+
+@patch("app.routers.generation.verify_citation", return_value="contradicted")
+def test_unverified_answers_are_not_shared(_verify, db_session, owner_and_prescription):
+    # An answer the judge couldn't support is never stored for reuse - the
+    # next exercise asks again rather than inheriting an unlucky draw.
+    user, prescription = owner_and_prescription
+    prescription.exercise_slot.is_compound = True
+    other = _add_slot(db_session, prescription, "Incline Press", is_compound=True)
+    fake, calls = _movement_gen(reps="8-12", rir="1-2 RIR")
+
+    with patch("app.routers.generation.generate_for_movement", side_effect=fake):
+        generate_exercise(exercise_slot_id=prescription.exercise_slot_id, db=db_session, current_user=user)
+        generate_exercise(exercise_slot_id=other.id, db=db_session, current_user=user)
+
+    assert len(calls) == 8  # 2 fields x (attempt + retry) x 2 exercises
+    assert db_session.query(models.SharedAnswer).count() == 0
+    assert other.weekly_prescriptions[0].reps_grounding_note.startswith("This value could not be substantiated")
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+def test_volume_preference_only_changes_the_rir_answer(_verify, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    prescription.exercise_slot.is_compound = True
+    fake, calls = _movement_gen(reps="8-12", rir="1-2 RIR")
+
+    with patch("app.routers.generation.generate_for_movement", side_effect=fake):
+        generate_exercise(exercise_slot_id=prescription.exercise_slot_id, db=db_session, current_user=user)
+        prescription.exercise_slot.day_template.mesocycle.program.volume_preference = "minimal"
+        generate_exercise(exercise_slot_id=prescription.exercise_slot_id, db=db_session, current_user=user)
+
+    # reps reused across preferences; RIR asked again (minimal leans closer to failure)
+    assert sorted(calls) == [
+        ("reps", "hypertrophy", "compound", "moderate"),
+        ("rir", "hypertrophy", "compound", "minimal"), ("rir", "hypertrophy", "compound", "moderate"),
+    ]
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+def test_hand_added_exercise_is_classified_once(_verify, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    assert prescription.exercise_slot.is_compound is None  # added by hand
+    fake, calls = _movement_gen(reps="10-15", rir="0-1 RIR")
+
+    with patch("app.routers.generation.classify_compound", return_value=False) as classify, \
+            patch("app.routers.generation.generate_for_movement", side_effect=fake):
+        generate_exercise(exercise_slot_id=prescription.exercise_slot_id, db=db_session, current_user=user)
+        generate_exercise(exercise_slot_id=prescription.exercise_slot_id, db=db_session, current_user=user)
+
+    classify.assert_called_once_with("Barbell Bench Press")
+    assert prescription.exercise_slot.is_compound is False
+    assert {movement for _, _, movement, _ in calls} == {"isolation"}
 
 
 def test_generate_exercise_ownership_enforced(db_session, owner_and_prescription, other_user):

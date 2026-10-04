@@ -6,6 +6,23 @@ from app import models
 from app.database import engine
 
 
+@pytest.fixture(autouse=True)
+def no_unmocked_model_calls(monkeypatch):
+    # Tests must never reach a real model: an unmocked call costs money and
+    # makes the test depend on a live API. Patching a client instance's
+    # method (as tests do) still takes precedence over these class-level
+    # guards.
+    def blocked(*args, **kwargs):
+        raise RuntimeError("Unmocked OpenAI call in a test - patch the generator, judge or client.")
+
+    from openai.resources.chat.completions import Completions
+    from openai.resources.embeddings import Embeddings
+
+    monkeypatch.setattr(Completions, "parse", blocked)
+    monkeypatch.setattr(Completions, "create", blocked)
+    monkeypatch.setattr(Embeddings, "create", blocked)
+
+
 @pytest.fixture()
 def db_session():
     # Standard SQLAlchemy "join an external transaction" pattern: everything
@@ -15,6 +32,13 @@ def db_session():
     connection = engine.connect()
     outer_transaction = connection.begin()
     session = Session(bind=connection)
+
+    # Shared answers are global (reused by every program), so ones a real
+    # generation stored in the dev database would otherwise answer a test's
+    # questions. Cleared inside the outer transaction - rolled back with it.
+    session.query(models.SharedAnswerCitation).delete()
+    session.query(models.SharedAnswer).delete()
+    session.flush()
 
     nested = connection.begin_nested()
 

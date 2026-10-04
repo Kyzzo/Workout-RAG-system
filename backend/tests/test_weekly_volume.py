@@ -159,6 +159,70 @@ def test_endpoint_cites_the_weekly_total_and_replaces_previous(mock_generate, _v
     assert (_sets(bench), _sets(fly)) == ([5, 5], [5, 5])
 
 
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_weekly_volume")
+def test_weekly_volume_is_shared_across_programs(mock_generate, _verify, db_session):
+    # Same goal, preference and muscle -> same research question, answered
+    # once: a second program reuses the verified answer and its citations.
+    user, first, day = _block(db_session, goal="strength")
+    _exercise(db_session, day, "Bench Press", "chest")
+    mock_generate.return_value = (
+        SimpleNamespace(weekly_sets=10, chunk_ids=["v-1"], grounding="fully_grounded"), _chunks("v-1"),
+    )
+    request = schemas.GenerateWeeklyVolumeRequest(muscle_group="chest")
+    generate_weekly_volume_endpoint(mesocycle_id=first.id, request=request, db=db_session, current_user=user)
+
+    second = models.Mesocycle(
+        program=models.Program(user_id=user.id, goal="strength"), name="Block 2", start_week=1, end_week=2,
+    )
+    second_day = models.DayTemplate(mesocycle=second, name="Day", order=1)
+    db_session.add_all([second, second_day])
+    db_session.flush()
+    _exercise(db_session, second_day, "Bench Press", "chest")
+    result = generate_weekly_volume_endpoint(mesocycle_id=second.id, request=request, db=db_session, current_user=user)
+
+    mock_generate.assert_called_once()
+    assert result.volume.weekly_sets == 10
+    assert [c.citation.title for c in result.volume.supporting_citations] == ["paper-v-1"]
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_frequency")
+@patch("app.routers.generation.generate_weekly_volume")
+def test_volume_and_frequency_are_asked_once_for_every_muscle(mock_volume, mock_frequency, _verify, db_session):
+    # The meta-analyses pool muscles, so one goal-level answer (with its
+    # citations) serves each muscle's own record.
+    from app.routers.generation import generate_frequency_endpoint
+
+    user, mesocycle, day = _block(db_session, goal="strength")
+    for name, muscle in (("Bench Press", "chest"), ("Barbell Row", "upper back")):
+        _exercise(db_session, day, name, muscle)
+    mock_volume.return_value = (
+        SimpleNamespace(weekly_sets=10, chunk_ids=["v-1"], grounding="fully_grounded"), _chunks("v-1"),
+    )
+    mock_frequency.return_value = (
+        SimpleNamespace(frequency=2, chunk_ids=["f-1"], grounding="fully_grounded"), _chunks("f-1"),
+    )
+
+    for muscle in ("chest", "upper back"):
+        generate_weekly_volume_endpoint(
+            mesocycle_id=mesocycle.id, request=schemas.GenerateWeeklyVolumeRequest(muscle_group=muscle),
+            db=db_session, current_user=user,
+        )
+        generate_frequency_endpoint(
+            mesocycle_id=mesocycle.id,
+            request=schemas.GenerateFrequencyRequest(muscle_group=muscle, add_days=False),
+            db=db_session, current_user=user,
+        )
+
+    mock_volume.assert_called_once()
+    mock_frequency.assert_called_once()
+    db_session.refresh(mesocycle)
+    assert {v.muscle_group: v.weekly_sets for v in mesocycle.muscle_group_volumes} == {"chest": 10, "upper back": 10}
+    assert all([c.citation.title for c in v.supporting_citations] == ["paper-v-1"] for v in mesocycle.muscle_group_volumes)
+    assert {f.muscle_group: f.frequency for f in mesocycle.muscle_group_frequencies} == {"chest": 2, "upper back": 2}
+
+
 def test_endpoint_ownership_enforced(db_session, other_user):
     _, mesocycle, _ = _block(db_session)
 
@@ -186,7 +250,8 @@ def test_program_volume_preference_reaches_weekly_volume_generation(mock_generat
         db=db_session, current_user=user,
     )
 
-    assert mock_generate.call_args.args == ("chest", "hypertrophy", "minimal")
+    # asked for the goal and preference, not the muscle: one answer serves every muscle
+    assert mock_generate.call_args.args == (None, "hypertrophy", "minimal")
 
 
 def _volume_call(goal, preference):

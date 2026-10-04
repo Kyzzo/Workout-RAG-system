@@ -3,6 +3,8 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 
 from ..rag.generate import (
+    build_movement_query,
+    generate_for_movement,
     Adjustment,
     build_frequency_query,
     build_intensity_query,
@@ -30,7 +32,8 @@ from ..auth import get_current_user
 from ..database import get_db
 from ..citations import get_or_create_citation
 from ..ownership import get_owned_exercise_slot, get_owned_prescription
-from ..rag.exercise_selection import select_additional_exercises
+from ..rag.exercise_selection import ExerciseSelectionError, classify_compound, select_additional_exercises
+from ..shared_answers import Answer, GeneratedAnswer, get_or_generate, shared_key
 
 router = APIRouter(prefix="/weekly-prescriptions", tags=["generation"])
 mesocycle_router = APIRouter(prefix="/mesocycles", tags=["generation"])
@@ -165,6 +168,70 @@ def _verify_chunks(query: str, value, chunk_ids: list[str], chunks_by_id: dict[s
         statuses = list(pool.map(lambda chunk: verify_citation(query, value, chunk["text"]), chunks))
     verified = list(zip(chunks, statuses))
     return verified, any(status in _SUPPORTED_STATUSES for status in statuses)
+
+
+def _generated(attempt, field_name: str) -> GeneratedAnswer:
+    """Runs one generation attempt plus the usual single bounded retry: a
+    retry is worth it when the model claimed grounding but nothing verified
+    (bad luck, not a structural gap); a general_knowledge self-report isn't
+    retried (citation_verification.txt section 7)."""
+    result, verified, any_supported = attempt()
+    if not any_supported and result.grounding != "general_knowledge":
+        result, verified, any_supported = attempt()
+    return GeneratedAnswer(getattr(result, field_name), result.grounding, any_supported, verified)
+
+
+def _note_for(answer: Answer, what: str, muscle_group: str, goal: str) -> str | None:
+    if answer.supported:
+        return None
+    if answer.grounding == "general_knowledge":
+        return _GENERAL_KNOWLEDGE_NOTE
+    logger.warning(
+        "Citation verification could not substantiate a generated %s even after retry - "
+        "possible corpus gap: muscle_group=%s goal=%s", what, muscle_group, goal,
+    )
+    return _UNSUBSTANTIATED_NOTE
+
+
+def _movement(slot: models.ExerciseSlot, db: Session) -> str:
+    # AI-picked exercises are classified when picked; one added by hand is
+    # classified the first time it's generated, and the answer kept.
+    if slot.is_compound is None:
+        try:
+            slot.is_compound = classify_compound(slot.exercise_name)
+        except ExerciseSelectionError:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Couldn't tell whether {slot.exercise_name} is a compound or isolation exercise - try again.",
+            )
+        db.flush()
+    return "compound" if slot.is_compound else "isolation"
+
+
+def _exercise_answer(db: Session, field: str, goal: str, preference: str, movement: str) -> Answer:
+    """Reps, RIR or load for a movement type and goal, shared by every
+    program (app/shared_answers.py). The preference only changes RIR."""
+    key = shared_key("exercise", field, goal, preference if field == "rir" else "-", movement)
+    query = build_movement_query(field, goal, movement)
+
+    def attempt():
+        result, chunks = generate_for_movement(field, goal, movement, preference)
+        chunks_by_id = {c["id"]: c for c in chunks}
+        return (result, *_verify_chunks(query, getattr(result, field), result.chunk_ids, chunks_by_id))
+
+    return get_or_generate(db, key, field, lambda: _generated(attempt, field))
+
+
+def _apply_answer(
+    prescription: models.WeeklyPrescription, field: str, answer: Answer, muscle_group: str, goal: str,
+) -> None:
+    # Replaces this field's value, note and citations; other fields keep theirs.
+    setattr(prescription, field, answer.value)
+    setattr(prescription, f"{field}_grounding_note", _note_for(answer, field, muscle_group, goal))
+    prescription.prescription_citations = [pc for pc in prescription.prescription_citations if pc.field != field] + [
+        models.PrescriptionCitation(citation_id=citation_id, field=field, verification_status=status)
+        for citation_id, status in answer.citations
+    ]
 
 
 def _attempt_generation(
@@ -332,11 +399,13 @@ def generate_exercise(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    # Generates reps, RIR and (strength only) load ONCE per exercise and
-    # applies them to every week of the block - the retrieval queries have
-    # no week in them, so asking again for weeks 2..N would return the same
-    # claims from the same chunks at N times the cost. Sets aren't generated
-    # here: they come from the muscle's cited weekly volume
+    # Reps, RIR and (strength only) load for this exercise's movement type
+    # (compound or isolation), applied to every week of the block. The
+    # research isn't exercise- or week-specific, so each answer is shared
+    # by every exercise of that type in every program with the same goal
+    # (app/shared_answers.py) - asking per exercise cost ~75% of a
+    # program's model calls for mostly identical answers. Sets aren't
+    # generated here: they come from the muscle's cited weekly volume
     # (generate-weekly-volume). Week-to-week change comes from progression.
     slot = get_owned_exercise_slot(exercise_slot_id, db, current_user)
     weeks = sorted(slot.weekly_prescriptions, key=lambda wp: wp.week_number)
@@ -346,9 +415,14 @@ def generate_exercise(
 
     program = slot.day_template.mesocycle.program
     fields = exercise_fields(program.goal)
-    for field in fields:
-        generate_fn, query_fn = field_pipeline(field, slot.exercise_name, program.volume_preference)
-        _generate_and_persist(base, db, generate_fn, query_fn, field)
+    movement = _movement(slot, db)
+    # Every answer first, then apply: storing a new shared answer commits,
+    # and nothing half-applied should be pending when it does.
+    answers = {
+        field: _exercise_answer(db, field, program.goal, program.volume_preference, movement) for field in fields
+    }
+    for field, answer in answers.items():
+        _apply_answer(base, field, answer, slot.muscle_group, program.goal)
 
     copy_fields_to_other_weeks(base, rest, fields)
 
@@ -357,7 +431,7 @@ def generate_exercise(
     return slot
 
 
-def _attempt_frequency_generation(muscle_group: str, goal: str):
+def _attempt_frequency_generation(muscle_group: str | None, goal: str):
     result, chunks = generate_frequency(muscle_group, goal)
     query = build_frequency_query(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
@@ -412,6 +486,7 @@ def _clone_day_for_muscle_group(db: Session, mesocycle: models.Mesocycle, muscle
             day_template_id=new_day.id,
             exercise_name=slot.exercise_name,
             muscle_group=slot.muscle_group,
+            is_compound=slot.is_compound,
             order=slot.order,
         )
         db.add(new_slot)
@@ -459,9 +534,13 @@ def generate_frequency_endpoint(
     muscle_group = request.muscle_group
     goal = mesocycle.program.goal
 
-    result, verified, any_supported = _attempt_frequency_generation(muscle_group, goal)
-    if not any_supported and result.grounding != "general_knowledge":
-        result, verified, any_supported = _attempt_frequency_generation(muscle_group, goal)
+    # One answer per goal, shared by every muscle and program
+    # (app/shared_answers.py): the frequency research pools muscles.
+    answer = get_or_generate(
+        db, shared_key("frequency", goal), "frequency",
+        lambda: _generated(lambda: _attempt_frequency_generation(None, goal), "frequency"),
+    )
+    frequency = int(answer.value)
 
     # Replace, don't accumulate - same rule as prescription citations. One
     # frequency per mesocycle+muscle_group; its citations cascade with it.
@@ -470,28 +549,15 @@ def generate_frequency_endpoint(
     frequency_record = models.MuscleGroupFrequency(
         mesocycle_id=mesocycle.id,
         muscle_group=muscle_group,
-        frequency=result.frequency,
+        frequency=frequency,
+        grounding_note=_note_for(answer, "frequency", muscle_group, goal),
     )
-    if any_supported:
-        frequency_record.grounding_note = None
-    elif result.grounding == "general_knowledge":
-        frequency_record.grounding_note = _GENERAL_KNOWLEDGE_NOTE
-    else:
-        frequency_record.grounding_note = _UNSUBSTANTIATED_NOTE
-        logger.warning(
-            "Citation verification could not substantiate a generated frequency "
-            "even after retry - possible corpus gap: muscle_group=%s goal=%s",
-            muscle_group, goal,
-        )
     db.add(frequency_record)
     db.flush()  # populate frequency_record.id before it's used as a FK below
 
-    for chunk, status in verified:
-        citation = get_or_create_citation(db, chunk)
+    for citation_id, status in answer.citations:
         db.add(models.FrequencyCitation(
-            frequency_id=frequency_record.id,
-            citation_id=citation.id,
-            verification_status=status,
+            frequency_id=frequency_record.id, citation_id=citation_id, verification_status=status,
         ))
 
     # Reconciliation: only ever ADDS days, never modifies or removes
@@ -505,7 +571,7 @@ def generate_frequency_endpoint(
         if any(slot.muscle_group == muscle_group for slot in day.exercise_slots)
     })
     days_added = []
-    shortfall = max(0, result.frequency - current_frequency) if request.add_days else 0
+    shortfall = max(0, frequency - current_frequency) if request.add_days else 0
     for _ in range(shortfall):
         days_added.append(_clone_day_for_muscle_group(db, mesocycle, muscle_group))
 
@@ -520,7 +586,7 @@ def generate_frequency_endpoint(
     )
 
 
-def _attempt_progression_generation(muscle_group: str, goal: str):
+def _attempt_progression_generation(muscle_group: str | None, goal: str):
     result, chunks = generate_progression_scheme(muscle_group, goal)
     query = build_progression_query(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
@@ -615,37 +681,27 @@ def generate_progression_endpoint(
             detail="Progression generation only applies to strength-goal programs.",
         )
 
-    result, verified, any_supported = _attempt_progression_generation(muscle_group, goal)
-    if not any_supported and result.grounding != "general_knowledge":
-        result, verified, any_supported = _attempt_progression_generation(muscle_group, goal)
+    # One answer per goal, shared by every muscle and program
+    # (app/shared_answers.py): periodization research isn't muscle-specific.
+    answer = get_or_generate(
+        db, shared_key("progression", goal), "scheme",
+        lambda: _generated(lambda: _attempt_progression_generation(None, goal), "scheme"),
+    )
 
     _delete_existing(db, models.ProgressionScheme, mesocycle.id, muscle_group)
 
     scheme_record = models.ProgressionScheme(
         mesocycle_id=mesocycle.id,
         muscle_group=muscle_group,
-        scheme=result.scheme,
+        scheme=answer.value,
+        grounding_note=_note_for(answer, "progression scheme", muscle_group, goal),
     )
-    if any_supported:
-        scheme_record.grounding_note = None
-    elif result.grounding == "general_knowledge":
-        scheme_record.grounding_note = _GENERAL_KNOWLEDGE_NOTE
-    else:
-        scheme_record.grounding_note = _UNSUBSTANTIATED_NOTE
-        logger.warning(
-            "Citation verification could not substantiate a generated progression "
-            "scheme even after retry - possible corpus gap: muscle_group=%s goal=%s",
-            muscle_group, goal,
-        )
     db.add(scheme_record)
     db.flush()  # populate scheme_record.id before it's used as a FK below
 
-    for chunk, status in verified:
-        citation = get_or_create_citation(db, chunk)
+    for citation_id, status in answer.citations:
         db.add(models.ProgressionSchemeCitation(
-            scheme_id=scheme_record.id,
-            citation_id=citation.id,
-            verification_status=status,
+            scheme_id=scheme_record.id, citation_id=citation_id, verification_status=status,
         ))
 
     # Mechanical application only exists for "linear" - "undulating" needs an
@@ -653,7 +709,7 @@ def generate_progression_endpoint(
     # scheme itself is still classified and cited either way; only the
     # week-by-week write-back is scoped to linear for now.
     updated_prescriptions = []
-    if result.scheme == "linear":
+    if answer.value == "linear":
         updated_prescriptions = _apply_linear_progression(mesocycle, muscle_group)
 
     db.commit()
@@ -744,9 +800,10 @@ def _add_exercises_to_fit_volume(
             continue
         ordered = sorted(day.exercise_slots, key=lambda s: s.order)
         insert_at = max(i for i, s in enumerate(ordered) if s.muscle_group == muscle_group) + 1
-        for name, secondaries, _compound in picks:
+        for name, secondaries, is_compound in picks:
             slot = models.ExerciseSlot(
-                exercise_name=name, muscle_group=muscle_group, secondary_muscle_groups=secondaries, order=0,
+                exercise_name=name, muscle_group=muscle_group, secondary_muscle_groups=secondaries,
+                is_compound=is_compound, order=0,
             )
             slot.weekly_prescriptions = [
                 models.WeeklyPrescription(week_number=w, sets=0, reps="", load="")
@@ -762,7 +819,7 @@ def _add_exercises_to_fit_volume(
     return added
 
 
-def _attempt_weekly_volume_generation(muscle_group: str, goal: str, preference: str):
+def _attempt_weekly_volume_generation(muscle_group: str | None, goal: str, preference: str):
     result, chunks = generate_weekly_volume(muscle_group, goal, preference)
     query = build_volume_query(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
@@ -827,28 +884,24 @@ def generate_weekly_volume_endpoint(
     goal = mesocycle.program.goal
 
     preference = mesocycle.program.volume_preference
-    result, verified, any_supported = _attempt_weekly_volume_generation(muscle_group, goal, preference)
-    if not any_supported and result.grounding != "general_knowledge":
-        result, verified, any_supported = _attempt_weekly_volume_generation(muscle_group, goal, preference)
+    # One answer per goal and volume preference, shared by every muscle and
+    # program (app/shared_answers.py): the volume meta-analyses pool muscles,
+    # and per muscle the answers barely differed (moderate: 12 sets for 12 of
+    # 14 muscles) at 14x the cost.
+    answer = get_or_generate(
+        db, shared_key("weekly_sets", goal, preference), "weekly_sets",
+        lambda: _generated(lambda: _attempt_weekly_volume_generation(None, goal, preference), "weekly_sets"),
+    )
 
     _delete_existing(db, models.MuscleGroupVolume, mesocycle.id, muscle_group)
-    record = models.MuscleGroupVolume(mesocycle_id=mesocycle.id, muscle_group=muscle_group, weekly_sets=result.weekly_sets)
-    if any_supported:
-        record.grounding_note = None
-    elif result.grounding == "general_knowledge":
-        record.grounding_note = _GENERAL_KNOWLEDGE_NOTE
-    else:
-        record.grounding_note = _UNSUBSTANTIATED_NOTE
-        logger.warning(
-            "Citation verification could not substantiate a generated weekly volume "
-            "even after retry - possible corpus gap: muscle_group=%s goal=%s",
-            muscle_group, goal,
-        )
+    record = models.MuscleGroupVolume(
+        mesocycle_id=mesocycle.id, muscle_group=muscle_group, weekly_sets=int(answer.value),
+        grounding_note=_note_for(answer, "weekly volume", muscle_group, goal),
+    )
     db.add(record)
     db.flush()
-    for chunk, status in verified:
-        citation = get_or_create_citation(db, chunk)
-        db.add(models.VolumeCitation(volume_id=record.id, citation_id=citation.id, verification_status=status))
+    for citation_id, status in answer.citations:
+        db.add(models.VolumeCitation(volume_id=record.id, citation_id=citation_id, verification_status=status))
 
     added = []
     if goal != "strength":
