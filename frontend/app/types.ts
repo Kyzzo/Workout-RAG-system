@@ -100,9 +100,9 @@ export type ProgramSummary = {
 export type VolumePreference = "minimal" | "moderate" | "high";
 
 export const VOLUME_LABELS: Record<VolumePreference, string> = {
-  minimal: "minimal volume (fewer, harder sets)",
-  moderate: "moderate volume",
-  high: "high volume",
+  minimal: "Minimalist",
+  moderate: "Moderate (recommended)",
+  high: "Higher volume",
 };
 
 // Hypertrophy weekly sets per muscle for each preference (fractional sets,

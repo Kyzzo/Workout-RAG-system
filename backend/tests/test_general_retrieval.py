@@ -76,3 +76,14 @@ def test_category_named_in_the_question_is_searched_first():
 
     assert storage.filters == ["volume"]
     assert [c["id"] for c in chunks] == ["v1", "r1"]  # volume finding first, the duplicate not repeated
+
+
+def test_recovery_questions_search_the_recovery_category_first():
+    # Recovery papers back no generated field, so only chat reaches them -
+    # a damage/fatigue question searches that category before the rest.
+    storage = _FakeStorage({"recovery": [_chunk("d1", "damage-paper", 0.4, category="recovery")]}, [])
+
+    chunks = _retrieve("does less muscle damage mean more growth?", storage)
+
+    assert storage.filters == ["recovery"]
+    assert [c["id"] for c in chunks] == ["d1"]

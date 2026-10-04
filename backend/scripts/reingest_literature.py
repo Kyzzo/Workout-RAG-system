@@ -15,13 +15,15 @@ Usage (from backend/):
 
 import argparse
 import uuid
+from typing import get_args
 
 from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue, PayloadSchemaType
 
 from app.rag.data_loader import embed_texts, load_and_chunk_pdf
 from app.rag.qdrant_storage import QdrantStorage
+from app.rag.types import Category
 
-VALID_CATEGORIES = {"volume", "frequency", "intensity", "progression"}
+VALID_CATEGORIES = set(get_args(Category))
 _EMBED_BATCH = 64
 
 

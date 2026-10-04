@@ -8,18 +8,20 @@ Requires both the FastAPI app and the Inngest dev server running:
 Usage:
     uv run python -m scripts.ingest_literature <pdf_path> <category> [source_id]
 
-    category must be one of: volume, frequency, intensity, progression
+    category must be one of: volume, frequency, intensity, progression, recovery
 """
 
 import argparse
 import asyncio
 import sys
+from typing import get_args
 
 import inngest
 
 from app.rag.ingest import inngest_client
+from app.rag.types import Category
 
-VALID_CATEGORIES = {"volume", "frequency", "intensity", "progression"}
+VALID_CATEGORIES = set(get_args(Category))
 
 
 async def main():
