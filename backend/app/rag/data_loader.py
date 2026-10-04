@@ -35,7 +35,9 @@ def _page_text(page) -> str:
     page's visual layout, which interleaves the lines of two-column journal
     pages. Ligatures ('ﬁ') are normalized to plain letters."""
     text = page.extract_text() or ""
-    if _merged_word_ratio(text) > 0.05:
+    # 1%: a clean page scores 0 (every page of every other ingested paper
+    # does); table pages with lost spaces score as low as ~1.3%.
+    if _merged_word_ratio(text) > 0.01:
         layout = page.extract_text(extraction_mode="layout") or ""
         if _merged_word_ratio(layout) < _merged_word_ratio(text):
             text = "\n".join(" ".join(line.split()) for line in layout.splitlines() if line.strip())

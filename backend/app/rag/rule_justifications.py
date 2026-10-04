@@ -7,6 +7,7 @@
 # are shown as support. Rules don't vary per program, so the result is
 # cached in the database and re-run (refresh=True, or
 # scripts/refresh_rule_justifications.py) after new papers are ingested.
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
@@ -37,6 +38,18 @@ RULES = {
         ),
         categories=("volume", "frequency"),
     ),
+    # The basis of the hypertrophy volume options (HYPERTROPHY_VOLUME_BANDS
+    # in generate.py): Minimalist is the higher-efficiency tier, Moderate
+    # and Higher volume split the intermediate one.
+    "volume_efficiency_tiers": Rule(
+        claim=(
+            "For hypertrophy, muscle growth increases with weekly sets per muscle (counted fractionally, "
+            "indirect sets as half) with diminishing returns: 5-10 weekly sets is the higher-efficiency "
+            "range and 11-18 weekly sets the intermediate-efficiency range."
+        ),
+        query="Volume efficiency tiers for hypertrophy by fractional weekly sets per muscle",
+        categories=("volume",),
+    ),
 }
 
 NO_SUPPORT_NOTE = (
@@ -58,15 +71,18 @@ def justify_rule(db: Session, key: str, refresh: bool = False) -> models.RuleJus
         for chunk in _retrieve_chunks(rule.query, category):
             candidates.setdefault(" ".join(chunk["text"].split()), chunk)
 
-    verdicts = []
-    for chunk in candidates.values():
+    def judge(chunk):
+        # A rule claim is prose with qualifiers, so it gets the strict judge;
+        # its candidates are judged in parallel, since a first request (or a
+        # fresh database) runs this pass while the user waits.
         try:
-            # A rule claim is prose with qualifiers, so it gets the strict judge;
-            # refreshes run offline, so its slower speed doesn't matter.
-            status = judge_citation(rule.query, rule.claim, chunk["text"], judge=STATEMENT_JUDGE).outcome
+            return judge_citation(rule.query, rule.claim, chunk["text"], judge=STATEMENT_JUDGE).outcome
         except Exception:
-            status = "unresolved"
-        verdicts.append((chunk, status))
+            return "unresolved"
+
+    chunks = list(candidates.values())
+    with ThreadPoolExecutor(max_workers=max(1, min(len(chunks), 10))) as pool:
+        verdicts = list(zip(chunks, pool.map(judge, chunks)))
 
     if record is None:
         record = models.RuleJustification(rule_key=key, claim=rule.claim)

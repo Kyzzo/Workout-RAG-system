@@ -2,7 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { runBlockGeneration } from "./blockGeneration";
-import { VOLUME_LABELS, volumeLabel, type Program, type ProgramSummary, type VolumePreference } from "./types";
+import { SourcesPanel } from "./Citations";
+import {
+  VOLUME_LABELS,
+  volumeLabel,
+  type Program,
+  type ProgramSummary,
+  type RuleJustification,
+  type VolumePreference,
+} from "./types";
 import { useApi } from "./useApi";
 
 type SplitOption = { key: string; label: string; allowed_days: number[]; day_types: string[] };
@@ -29,6 +37,11 @@ export default function ProgramWizard({
   const [days, setDays] = useState(0);
   const [weeks, setWeeks] = useState("6");
   const [volume, setVolume] = useState<VolumePreference>("moderate");
+  // The verified sources behind the hypertrophy volume ranges, fetched the
+  // first time they're opened.
+  const [tierRule, setTierRule] = useState<RuleJustification | null>(null);
+  const [tierSourcesOpen, setTierSourcesOpen] = useState(false);
+  const [tierRuleError, setTierRuleError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +66,18 @@ export default function ProgramWizard({
   }, [api]);
 
   const split = splits.find((s) => s.key === splitKey);
+
+  async function toggleTierSources() {
+    const opening = !tierSourcesOpen;
+    setTierSourcesOpen(opening);
+    if (!opening || tierRule) return;
+    setTierRuleError(null);
+    try {
+      setTierRule(await api<RuleJustification>("/rules/volume_efficiency_tiers"));
+    } catch (err) {
+      setTierRuleError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   function chooseSplit(key: string) {
     setSplitKey(key);
@@ -153,6 +178,27 @@ export default function ProgramWizard({
           ))}
         </select>
       </div>
+      {goal === "hypertrophy" && (
+        <div className="text-xs text-zinc-500">
+          <p>
+            Volume ranges: Pelland et al. 2025&apos;s efficiency tiers (5-10 sets higher efficiency, 11-18
+            intermediate).{" "}
+            <button type="button" onClick={toggleTierSources} className="underline">
+              {tierSourcesOpen ? "hide sources" : "sources"}
+            </button>
+          </p>
+          {tierSourcesOpen &&
+            (tierRule ? (
+              <SourcesPanel
+                heading={tierRule.claim}
+                citations={tierRule.supporting_citations}
+                note={tierRule.grounding_note}
+              />
+            ) : (
+              <p className={tierRuleError ? "text-red-600" : ""}>{tierRuleError ?? "Loading sources..."}</p>
+            ))}
+        </div>
+      )}
       {split && (
         <p className="text-xs text-zinc-500">
           {split.label} rotates {split.day_types.join(" / ")}. Exercises are picked by AI and aren&apos;t
