@@ -31,15 +31,39 @@ def _retrieve(topic, storage):
         return generate._retrieve_general_chunks(topic)
 
 
-def test_caps_each_paper_and_drops_reference_lists():
-    one_paper = [_chunk(f"r{i}", "rep-range-paper", 0.9 - i / 100, category="intensity") for i in range(6)]
-    storage = _FakeStorage({}, one_paper + [
-        _chunk("bib", "pelland", 0.8, text=_BIBLIOGRAPHY), _chunk("v1", "pelland", 0.7),
-    ])
+def test_diverse_selection_caps_each_paper_then_backfills():
+    # Volume used to get 3 of 5 slots from one study and none from the big
+    # meta-analysis: two per paper first, best-first ...
+    ranked = [_chunk(f"a{i}", "aube", 0.9 - i / 100) for i in range(4)] + [_chunk("p1", "pelland", 0.5)]
 
-    chunks = _retrieve("what should I do?", storage)
+    assert [c["id"] for c in generate._select_diverse(ranked, 3)] == ["a0", "a1", "p1"]
+    # ... and a small category isn't starved: leftover slots are backfilled.
+    assert [c["id"] for c in generate._select_diverse(ranked, 5)] == ["a0", "a1", "a2", "a3", "p1"]
 
-    assert [c["id"] for c in chunks] == ["r0", "r1", "r2", "v1"]  # 3 per paper, bibliography skipped
+
+def test_diverse_selection_drops_reference_lists_and_duplicates():
+    ranked = [
+        _chunk("bib", "pelland", 0.9, text=_BIBLIOGRAPHY),
+        _chunk("v1", "pelland", 0.8, text="growth rose with sets"),
+        _chunk("v1-copy", "pelland", 0.7, text="growth  rose with\nsets"),
+        _chunk("v2", "remmert", 0.6),
+    ]
+
+    assert [c["id"] for c in generate._select_diverse(ranked, 5)] == ["v1", "v2"]
+
+
+def test_generation_retrieval_searches_its_category_wide_then_diversifies():
+    storage = _FakeStorage(
+        {"volume": [_chunk(f"a{i}", "aube", 0.9 - i / 100) for i in range(30)] + [_chunk("p1", "pelland", 0.1)]},
+        [],
+    )
+
+    with patch.object(generate, "embed_texts", return_value=[[0.0]]),          patch.object(generate, "QdrantStorage", return_value=storage):
+        chunks = generate._retrieve_chunks("weekly sets for chest hypertrophy", "volume")
+
+    assert storage.filters == ["volume"]
+    assert len(chunks) == generate.GENERATION_TOP_K
+    assert "p1" in [c["id"] for c in chunks]  # a low-ranked second paper still gets in
 
 
 def test_category_named_in_the_question_is_searched_first():

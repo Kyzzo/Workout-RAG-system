@@ -97,31 +97,22 @@ def _build_response_schema(
     )
 
 
-def _retrieve_chunks(query: str, category: str | None) -> list[dict]:
-    query_vector = embed_texts([query])[0]
+# Retrieval settings. Tuned for today's corpus (1-7 papers per category);
+# raise them as categories grow toward 20-30 papers (target then: ~40
+# candidates -> 10-12 kept for generation, ~60-80 -> 15-20 for chat, still
+# max 2 per paper) and check each change with scripts/eval_retrieval.py.
+# Generation runs dozens of field calls per block, many in parallel, so its
+# count also bounds prompt tokens against the account's rate limit.
+GENERATION_TOP_K = 10
+GENERATION_CANDIDATES = 40
+GENERAL_TOP_K = 15
+GENERAL_CANDIDATES = 40
+# Per paper before backfilling. Without a cap one paper fills most slots
+# (weekly volume got 3 of 5 excerpts from one 8-week study and none from the
+# Pelland 2025 meta-analysis); but it's a preference, not a limit, since a
+# category with one or two papers would otherwise get fewer excerpts.
+MAX_CHUNKS_PER_PAPER = 2
 
-    # category=None (general Q&A, not tied to one of the four dosage
-    # categories) searches the whole literature corpus unfiltered, rather
-    # than forcing an arbitrary category choice on a question that isn't
-    # actually about a single prescribed parameter.
-    category_filter = (
-        Filter(must=[FieldCondition(key="category", match=MatchValue(value=category))])
-        if category is not None
-        else None
-    )
-    return QdrantStorage(collection="literature").search(
-        query_vector, top_k=5, query_filter=category_filter
-    )
-
-
-# General questions span the whole corpus, so they cast a wider net than a
-# single field's top 5: one paper can otherwise fill every slot (a question
-# mentioning a "range" pulled three excerpts of a rep-range paper and none
-# of the volume meta-analyses), and reference-list chunks crowd out
-# findings.
-_GENERAL_TOP_K = 15
-_GENERAL_CANDIDATES = 40
-_MAX_CHUNKS_PER_PAPER = 3
 # A question clearly about one dosage category searches it first.
 _CATEGORY_KEYWORDS = {
     "volume": re.compile(r"\b(sets?|volume)\b", re.I),
@@ -138,32 +129,59 @@ def _is_reference_list(text: str) -> bool:
     return len(_CITATION_ENTRY.findall(text)) >= 3
 
 
+def _category_filter(category: str) -> Filter:
+    return Filter(must=[FieldCondition(key="category", match=MatchValue(value=category))])
+
+
+def _select_diverse(ranked: list[dict], top_k: int, max_per_paper: int = MAX_CHUNKS_PER_PAPER) -> list[dict]:
+    """Best-first selection from ranked candidates: drops duplicates and
+    reference lists, takes up to `max_per_paper` from each paper, then
+    backfills any remaining slots with the next-best excerpts regardless of
+    paper, so a small category isn't starved."""
+    usable, seen_text = [], set()
+    for chunk in ranked:
+        key = " ".join(chunk["text"].split())
+        if key in seen_text or _is_reference_list(chunk["text"]):
+            continue
+        seen_text.add(key)
+        usable.append(chunk)
+
+    chosen, per_paper = [], {}
+    for chunk in usable:
+        if per_paper.get(chunk["source"], 0) < max_per_paper:
+            per_paper[chunk["source"]] = per_paper.get(chunk["source"], 0) + 1
+            chosen.append(chunk)
+            if len(chosen) == top_k:
+                return chosen
+    picked = {id(c) for c in chosen}
+    backfill = [c for c in usable if id(c) not in picked][: top_k - len(chosen)]
+    order = {id(c): i for i, c in enumerate(usable)}
+    return sorted(chosen + backfill, key=lambda c: order[id(c)])
+
+
+def _retrieve_chunks(query: str, category: str | None) -> list[dict]:
+    """A generated field's evidence: its category's excerpts (category=None
+    searches the whole corpus), diversified across papers."""
+    query_vector = embed_texts([query])[0]
+    candidates = QdrantStorage(collection="literature").search(
+        query_vector, top_k=GENERATION_CANDIDATES,
+        query_filter=_category_filter(category) if category is not None else None,
+    )
+    return _select_diverse(candidates, GENERATION_TOP_K)
+
+
 def _retrieve_general_chunks(topic: str) -> list[dict]:
+    """A chat question's evidence: categories it names first (best match
+    first across them), then the rest of the corpus."""
     query_vector = embed_texts([topic])[0]
     storage = QdrantStorage(collection="literature")
     matched = [cat for cat, pattern in _CATEGORY_KEYWORDS.items() if pattern.search(topic)]
     ranked = []
     for category in matched:
-        ranked += storage.search(
-            query_vector, top_k=_GENERAL_TOP_K,
-            query_filter=Filter(must=[FieldCondition(key="category", match=MatchValue(value=category))]),
-        )
+        ranked += storage.search(query_vector, top_k=GENERAL_TOP_K, query_filter=_category_filter(category))
     ranked.sort(key=lambda c: c.get("score", 0.0), reverse=True)
-    ranked += storage.search(query_vector, top_k=_GENERAL_CANDIDATES)  # the rest of the corpus after
-
-    chosen, seen_text, per_paper = [], set(), {}
-    for chunk in ranked:
-        key = " ".join(chunk["text"].split())
-        if key in seen_text or _is_reference_list(chunk["text"]):
-            continue
-        if per_paper.get(chunk["source"], 0) >= _MAX_CHUNKS_PER_PAPER:
-            continue
-        seen_text.add(key)
-        per_paper[chunk["source"]] = per_paper.get(chunk["source"], 0) + 1
-        chosen.append(chunk)
-        if len(chosen) == _GENERAL_TOP_K:
-            break
-    return chosen
+    ranked += storage.search(query_vector, top_k=GENERAL_CANDIDATES)
+    return _select_diverse(ranked, GENERAL_TOP_K)
 
 
 def _generate_field(
