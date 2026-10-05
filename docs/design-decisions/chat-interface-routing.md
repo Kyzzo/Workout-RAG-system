@@ -76,15 +76,13 @@ not for whatever handles a chat-originated action.
 ## What each route does with citations
 
 The editing path uses the full field-level verification pipeline
-unchanged. The discussion path costs nothing extra in verification terms
-at all — it reads and displays an already-computed, already-verified
-result rather than re-running anything. The general-question path uses
-response-level citation, reusing only the cheap, universal part of the
-field-level design (constraining citable IDs to what was actually
-retrieved, since preventing fabricated citations is worth doing
-regardless of citation granularity) without the field-specific numeric
-verification, since there's no single persisted value to check a claim
-against.
+unchanged. The discussion path starts from the prescription's stored,
+already-verified citations rather than retrieving anything new. The
+general-question path was sketched as response-level citation, reusing
+only the universal part of the field-level design (constraining citable
+IDs to what was actually retrieved). Building it showed that wasn't enough
+— both the discussion and general paths ended up verifying their answers
+sentence by sentence (below).
 
 ## What building it changed
 
@@ -95,7 +93,7 @@ one shared ownership check that the direct API routes also use, rather
 than a second copy written for chat. Negative-path tests call each chat
 action as a different user and assert it's rejected.
 
-Two parts of the sketch turned out to be too simple once they ran against
+Parts of the sketch turned out to be too simple once they ran against
 real input:
 
 - **"Discussion costs nothing" was only half true.** The first version of
@@ -117,6 +115,19 @@ real input:
   whole. Citations that fail are dropped from what's shown, with the same
   single bounded retry and caveat messages used everywhere else in
   generation.
+- **Claim-level became statement-level, with a verified summary.** A
+  later answer cited two real sources correctly and still stated something
+  neither said ("18 to 31 sets is optimal", merging one study's data
+  boundary with another's strength finding). Answers are now written as
+  individual statements, each judged against each source it cites for
+  changed units, outcomes, populations or finding strength; statements
+  that fail are removed, and if none survive the user is told the corpus
+  doesn't support a confident answer instead of getting unverified prose.
+  A short summary — allowed to synthesize a rough, hedged range across
+  sources — leads the answer and is judged against all its sources
+  together. Discussion answers get the same statement checks, since
+  rephrasing a verified excerpt can still misrepresent it. See
+  [Accuracy Hardening](../engineering-log/accuracy-hardening.md).
 
 ## Genuinely open questions
 

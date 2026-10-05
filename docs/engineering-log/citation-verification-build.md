@@ -33,6 +33,13 @@ retrieved piece of content.
 
 ## The cheap check: what a simple heuristic can and can't do
 
+> **Later change:** this cheap check was removed. It could wrongly
+> *accept* a citation — approving a value because a range in the excerpt
+> covered it, without checking that the range was for the same outcome —
+> so every citation now goes to the judge. See
+> [Accuracy Hardening](accuracy-hardening.md). The section below is kept
+> as a record of how it was built and tested.
+
 The fast, accept-only check looks for a directly stated numeric match
 between a cited source and the generated value, and — per the design —
 never rejects a citation on its own, only confirms one.

@@ -34,7 +34,7 @@ feature that would determine the right shape.
 Volume research states weekly sets per muscle, so that weekly total is now
 what gets generated and cited, once per muscle per training block; each
 exercise's sets are a mechanical split of it (secondary work counted at
-half, at most four sets per exercise for hypertrophy and five for strength),
+half, at most three sets per exercise for hypertrophy and five for strength),
 and a plan that can't reach the cited target says so rather than cramming
 the week into one exercise. The single-value edit paths below (regenerating
 one week's sets, chat adjustments) still use the older shared-budget
@@ -68,6 +68,38 @@ retrieval surfaces the same evidence for every muscle until muscle-specific
 research is added.
 
 ## Retrieval and generation
+
+**Paper-level metadata.** Retrieval now reranks candidates by how well
+they answer the question ([retrieval design](design-decisions/retrieval-and-reranking.md)),
+but it still only sees excerpt text. Recording each paper's study type
+(meta-analysis, trial, review), outcome (hypertrophy or strength) and
+population (trained or untrained) at ingestion would allow a hard filter to
+the program's goal and a preference for meta-analyses — and would resolve
+the goal-filtering and sub-category items below with the same mechanism.
+
+**Thin research categories.** Rep ranges and progression each rest on a
+single paper, frequency on three. No retrieval or verification tuning
+compensates for that; expanding those categories matters more than adding
+more volume research.
+
+**Judge consistency.** The verification judge occasionally gives different
+verdicts on the same genuinely borderline excerpt between runs. Shared
+answers are judged twice before they're stored, and a regression check
+tracks the known cases, which bounds this rather than eliminating it.
+
+**Personalization on top of shared answers.** Research answers are shared
+across every program with the same goal and volume preference
+([design](design-decisions/shared-research-answers.md)). Anything that
+should differ per person — training experience, injuries, recovery
+capacity — has to be layered on top of them rather than stored in them.
+
+**Whole-program fatigue and recovery evidence.** Each muscle's volume is
+grounded in per-muscle dose-response research, but nothing checks the load
+of a whole session or week, which no per-muscle study covers. A dedicated
+recovery category exists in the corpus for muscle-damage, between-session
+recovery and deload research; once populated, it could back cited rules
+for rest-day spacing and deloads, with a labeled practical session-size
+warning in the meantime.
 
 **Exercise selection is AI-chosen and uncited.** The program wizard has a
 model pick exercises for each day of the chosen split. Each pick is

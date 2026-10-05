@@ -29,8 +29,18 @@ The *why* behind the harder architectural choices.
 - [Chat Interface Routing](design-decisions/chat-interface-routing.md) —
   routing a chat message to the right handling mode (edit, discuss, or
   general research question) without trusting a model-supplied identifier,
-  and why general answers ended up needing claim-level rather than
-  answer-level citations.
+  and why answers ended up verified sentence by sentence.
+- [Retrieval and Reranking](design-decisions/retrieval-and-reranking.md) —
+  why similarity search ranks wording rather than answers, and how
+  per-paper candidates plus a reranker took expected-paper recall to 23/23.
+- [Shared Research Answers](design-decisions/shared-research-answers.md) —
+  asking each research question at the level the research answers it and
+  storing verified answers for reuse: ~590 large-model calls per program
+  down to 29 for the first of a setup and 0 after, without weakening
+  verification.
+- [Research-Bounded Program Options](design-decisions/research-bounded-program-options.md) —
+  tying user-facing choices (volume, frequency) and mechanical rules to
+  cited evidence, and what the options said before they were.
 
 ## Engineering log
 
@@ -59,6 +69,11 @@ real data caught — not just a polished summary.
   building the verification pipeline, and the real precision gaps found
   only by testing against messy real corpus data instead of clean
   hand-written examples.
+- [Accuracy Hardening](engineering-log/accuracy-hardening.md) — a chat
+  answer with correct citations and an incorrect claim, and everything it
+  led to: statement-level verification, choosing the judge model by
+  measurement, bugs only real runs exposed, a regression harness for
+  judgment, and the cost work that followed.
 
 ## What's next
 
