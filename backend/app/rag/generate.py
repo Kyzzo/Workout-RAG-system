@@ -1,3 +1,4 @@
+import logging
 import re
 from dataclasses import dataclass
 from typing import Literal
@@ -13,6 +14,7 @@ from .qdrant_storage import QdrantStorage
 load_dotenv()
 
 client = OpenAI()
+logger = logging.getLogger(__name__)
 
 GroundingLevel = Literal["fully_grounded", "blended", "general_knowledge"]
 
@@ -116,7 +118,12 @@ def _build_response_schema(
 GENERATION_TOP_K = 10
 GENERATION_CANDIDATES = 40
 GENERAL_TOP_K = 15
-GENERAL_CANDIDATES = 40
+GENERAL_CANDIDATES = 60
+# Plus the best few chunks from EACH paper, so a paper whose wording is far
+# from the question still reaches the reranker (the RIR meta-analyses never
+# made a top-40 dominated by three papers).
+CANDIDATES_PER_PAPER = 3
+MAX_PAPERS = 40
 # Per paper before backfilling. Without a cap one paper fills most slots
 # (weekly volume got 3 of 5 excerpts from one 8-week study and none from the
 # Pelland 2025 meta-analysis); but it's a preference, not a limit, since a
@@ -146,11 +153,9 @@ def _category_filter(category: str) -> Filter:
     return Filter(must=[FieldCondition(key="category", match=MatchValue(value=category))])
 
 
-def _select_diverse(ranked: list[dict], top_k: int, max_per_paper: int = MAX_CHUNKS_PER_PAPER) -> list[dict]:
-    """Best-first selection from ranked candidates: drops duplicates and
-    reference lists, takes up to `max_per_paper` from each paper, then
-    backfills any remaining slots with the next-best excerpts regardless of
-    paper, so a small category isn't starved."""
+def _usable(ranked: list[dict]) -> list[dict]:
+    """Drops duplicate excerpts (a paper ingested under two categories has
+    identical chunks under different ids) and reference lists, keeping order."""
     usable, seen_text = [], set()
     for chunk in ranked:
         key = " ".join(chunk["text"].split())
@@ -158,6 +163,15 @@ def _select_diverse(ranked: list[dict], top_k: int, max_per_paper: int = MAX_CHU
             continue
         seen_text.add(key)
         usable.append(chunk)
+    return usable
+
+
+def _select_diverse(ranked: list[dict], top_k: int, max_per_paper: int = MAX_CHUNKS_PER_PAPER) -> list[dict]:
+    """Best-first selection from ranked candidates: drops duplicates and
+    reference lists, takes up to `max_per_paper` from each paper, then
+    backfills any remaining slots with the next-best excerpts regardless of
+    paper, so a small category isn't starved."""
+    usable = _usable(ranked)
 
     chosen, per_paper = [], {}
     for chunk in usable:
@@ -172,20 +186,97 @@ def _select_diverse(ranked: list[dict], top_k: int, max_per_paper: int = MAX_CHU
     return sorted(chosen + backfill, key=lambda c: order[id(c)])
 
 
-def _retrieve_chunks(query: str, category: str | None) -> list[dict]:
-    """A generated field's evidence: its category's excerpts (category=None
-    searches the whole corpus), diversified across papers."""
-    query_vector = embed_texts([query])[0]
-    candidates = QdrantStorage(collection="literature").search(
-        query_vector, top_k=GENERATION_CANDIDATES,
-        query_filter=_category_filter(category) if category is not None else None,
+# Reranking. Similarity search ranks excerpts by how closely their WORDING
+# matches the question, which buries findings written in statistics
+# language: asked whether 3x a week beats 2x, it returned eight excerpts of
+# the study titled "...Two Versus Three Days Per Week" and none of Pelland's
+# meta-regression result ("the marginal slope ... between frequency and
+# hypertrophy was 0.32%"). So similarity search only gathers candidates, and
+# a cheap model scores how well each one answers the question. Not a
+# research claim (every cited excerpt is still judged), so the cheap model
+# is fine; if it fails, the similarity order is used.
+# (model, reasoning effort). gpt-4o-mini scored a directly relevant finding
+# ('no significant difference between failure and non-failure') as 0;
+# gpt-4.1-mini scored it 6 in ~2.5s (gpt-5-mini similar but 4-15s).
+RERANK_MODEL = ("gpt-4.1-mini", None)
+RERANK_MIN_SCORE = 4  # below: same topic but no finding that bears on the question
+_RERANK_PROMPT = (
+    "You rank research excerpts by how well they answer a question, for a system that cites them as "
+    "evidence. Score every excerpt from 0 to 10: 9-10 = reports a finding that directly answers the "
+    "question, for the outcome it asks about (e.g. hypertrophy vs strength); 6-8 = reports findings "
+    "that clearly inform the answer; 4-5 = related findings that only partly bear on it; 1-3 = same "
+    "topic but no finding that answers it (introduction, methods, study aims, limitations, a finding "
+    "for a different outcome); 0 = unrelated or a reference list. Judge what the excerpt reports, not "
+    "how many words it shares with the question - a statistical result can answer the question "
+    "directly. Score every excerpt once."
+)
+
+
+def _rerank(question: str, candidates: list[dict]) -> list[dict]:
+    """Candidates ordered by the reranker's score (ties keep similarity
+    order), each with a `rerank_score`. On any failure, returned unchanged."""
+    if len(candidates) < 2:
+        return candidates
+    # One required field per excerpt, so structured output guarantees every
+    # excerpt gets a score - a free-form list let the model score only a few
+    # (the rest defaulted to 0 and were treated as irrelevant).
+    schema = pydantic.create_model(
+        "ExcerptScores", **{f"excerpt_{i}": (int, ...) for i in range(len(candidates))},
     )
-    return _select_diverse(candidates, GENERATION_TOP_K)
+    numbered = "\n\n".join(
+        f"[{i}] ({c['source']}) {' '.join(c['text'].split())[:1500]}" for i, c in enumerate(candidates)
+    )
+    try:
+        model, effort = RERANK_MODEL
+        completion = client.chat.completions.parse(
+            model=model,
+            **({"reasoning_effort": effort} if effort else {"temperature": 0}),
+            messages=[
+                {"role": "system", "content": _RERANK_PROMPT},
+                {"role": "user", "content": f"Question: {question}\n\nExcerpts:\n{numbered}"},
+            ],
+            response_format=schema,
+        )
+        parsed = completion.choices[0].message.parsed
+        scores = {i: max(0, min(10, getattr(parsed, f"excerpt_{i}"))) for i in range(len(candidates))}
+    except Exception:
+        logger.warning("Reranking failed; using similarity order", exc_info=True)
+        return candidates
+    scored = [{**c, "rerank_score": scores[i]} for i, c in enumerate(candidates)]
+    order = sorted(range(len(scored)), key=lambda i: (-scored[i]["rerank_score"], i))
+    return [scored[i] for i in order]
+
+
+def _select(question: str, candidates: list[dict], top_k: int) -> list[dict]:
+    """Rerank, then pick: excerpts that bear on the question first (spread
+    across papers, max 2 per paper before backfill), and only if that leaves
+    room, the best of the rest - so a weak excerpt from another paper never
+    displaces a strong second one from the same paper."""
+    reranked = _rerank(question, _usable(candidates))
+    relevant = [c for c in reranked if c.get("rerank_score", RERANK_MIN_SCORE) >= RERANK_MIN_SCORE]
+    chosen = _select_diverse(relevant, top_k)
+    if len(chosen) < top_k:
+        picked = {id(c) for c in chosen}
+        chosen += [c for c in reranked if id(c) not in picked and c not in relevant][: top_k - len(chosen)]
+    return chosen
+
+
+def _retrieve_chunks(query: str, category: str | None) -> list[dict]:
+    """A generated field's (or rule's) evidence: its category's excerpts
+    (category=None searches the whole corpus), reranked and diversified."""
+    query_vector = embed_texts([query])[0]
+    storage = QdrantStorage(collection="literature")
+    query_filter = _category_filter(category) if category is not None else None
+    candidates = storage.search(query_vector, top_k=GENERATION_CANDIDATES, query_filter=query_filter)
+    candidates += storage.search_per_source(
+        query_vector, per_source=CANDIDATES_PER_PAPER, sources=MAX_PAPERS, query_filter=query_filter,
+    )
+    return _select(query, candidates, GENERATION_TOP_K)
 
 
 def _retrieve_general_chunks(topic: str) -> list[dict]:
-    """A chat question's evidence: categories it names first (best match
-    first across them), then the rest of the corpus."""
+    """A chat question's evidence: candidates from the categories it names
+    and from the whole corpus, reranked and diversified."""
     query_vector = embed_texts([topic])[0]
     storage = QdrantStorage(collection="literature")
     matched = [cat for cat, pattern in _CATEGORY_KEYWORDS.items() if pattern.search(topic)]
@@ -194,7 +285,8 @@ def _retrieve_general_chunks(topic: str) -> list[dict]:
         ranked += storage.search(query_vector, top_k=GENERAL_TOP_K, query_filter=_category_filter(category))
     ranked.sort(key=lambda c: c.get("score", 0.0), reverse=True)
     ranked += storage.search(query_vector, top_k=GENERAL_CANDIDATES)
-    return _select_diverse(ranked, GENERAL_TOP_K)
+    ranked += storage.search_per_source(query_vector, per_source=CANDIDATES_PER_PAPER, sources=MAX_PAPERS)
+    return _select(topic, ranked, GENERAL_TOP_K)
 
 
 # The model that picks generated values, as (model, reasoning effort).

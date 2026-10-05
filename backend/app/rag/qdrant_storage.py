@@ -19,6 +19,19 @@ REQUIRED_PAYLOAD_INDEXES = {
 }
 
 
+def _to_chunks(results) -> list[dict]:
+    chunks = []
+    for r in results:
+        payload = getattr(r, "payload", None) or {}
+        text = payload.get("text", "")
+        if text:
+            chunks.append({
+                "id": str(r.id), "text": text, "source": payload.get("source", ""),
+                "category": payload.get("category"), "score": getattr(r, "score", 0.0),
+            })
+    return chunks
+
+
 class QdrantStorage:
     def __init__(self, collection: str, dim: int = 3072):
         self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
@@ -51,15 +64,23 @@ class QdrantStorage:
             with_payload=True,
             limit=top_k,
         ).points
+        return _to_chunks(results)
 
-        chunks = []
-        for r in results:
-            payload = getattr(r, "payload", None) or {}
-            text = payload.get("text", "")
-            if text:
-                chunks.append({
-                    "id": str(r.id), "text": text, "source": payload.get("source", ""),
-                    "category": payload.get("category"), "score": getattr(r, "score", 0.0),
-                })
-
-        return chunks
+    def search_per_source(
+        self, query_vector: list[float], per_source: int, sources: int, query_filter: Filter | None = None,
+    ):
+        """The best `per_source` chunks from each of up to `sources` papers,
+        best first - so every paper reaches the reranker even when one paper's
+        wording dominates plain similarity search. Needs the `source` payload
+        index (created by scripts/reingest_literature.py)."""
+        groups = self.client.query_points_groups(
+            collection_name=self.collection,
+            query=query_vector,
+            group_by="source",
+            query_filter=query_filter,
+            limit=sources,
+            group_size=per_source,
+            with_payload=True,
+        ).groups
+        chunks = _to_chunks([hit for group in groups for hit in group.hits])
+        return sorted(chunks, key=lambda c: c["score"], reverse=True)
