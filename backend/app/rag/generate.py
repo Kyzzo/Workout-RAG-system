@@ -367,46 +367,40 @@ def max_sets_per_exercise(goal: str) -> int:
 
 VolumePreference = Literal["minimal", "moderate", "high"]
 
-# Where to land inside the range the research supports. Not a different
-# claim: every option must still be a value the cited excerpts support, and
-# verification checks it the same way - a preference picks a point in the
-# supported range, it doesn't widen the range.
-_VOLUME_GUIDANCE = {
-    "minimal": "a minimal-effective-dose approach (fewer, harder sets). Choose the "
-    "LOWEST weekly set count the provided research still reports as effective, "
-    "not the optimum.",
-    # Moderate needs saying too: left unguided, the model aimed for the
-    # 'no detectable superiority' point (~31 weekly sets) as if it were
-    # the target.
-    "moderate": "a moderate approach. Choose a weekly set count inside the range "
-    "the provided research reports as effective AND efficient - not the highest "
-    "volume where any benefit was still detected, and never a 'no detectable "
-    "superiority' point itself.",
-    "high": "a high-volume approach. Choose toward the HIGH end of the weekly set "
-    "range the provided research supports, where it still reports added benefit - "
-    "never a 'no detectable superiority' point itself.",
+# Weekly sets per goal and volume preference, in fractional sets (the app's
+# count), bound to Pelland et al. 2025's efficiency tiers so every option
+# stays where added sets still pay off efficiently. The model picks the
+# value within the band (schema-enforced) and cites it.
+# - Hypertrophy (tiers: higher efficiency 5-10, intermediate 11-18): minimal
+#   is the higher-efficiency tier, moderate and high split the intermediate.
+# - Strength (tiers: minimum effective dose 1, higher efficiency 2,
+#   intermediate 3-4; past that 'additional weekly sets do not consistently
+#   enhance strength gains'): minimal 1-2, moderate 3, high 4 - capped at
+#   the efficient tiers by product choice, like hypertrophy.
+VOLUME_BANDS = {
+    "hypertrophy": {"minimal": (5, 10), "moderate": (11, 14), "high": (15, 18)},
+    "strength": {"minimal": (1, 2), "moderate": (3, 3), "high": (4, 4)},
+}
+_TIER_DESCRIPTIONS = {
+    "hypertrophy": "higher efficiency 5-10, intermediate 11-18 fractional weekly sets",
+    "strength": (
+        "minimum effective dose 1, higher efficiency 2, intermediate 3-4 fractional weekly "
+        "sets; beyond that, additional sets don't consistently enhance strength gains"
+    ),
 }
 
-# Hypertrophy weekly sets per volume preference, in fractional sets (the
-# app's count). Bound to Pelland et al. 2025's two most efficient tiers -
-# 'higher efficiency' 5-10 and 'intermediate' 11-18 weekly sets - so every
-# option stays where added sets still buy growth efficiently: minimal is
-# the higher-efficiency tier, moderate and high split the intermediate one.
-# The model picks the value within the band (schema-enforced) and cites it;
-# strength keeps the open guidance above, since these tiers are hypertrophy
-# findings.
-HYPERTROPHY_VOLUME_BANDS = {"minimal": (5, 10), "moderate": (11, 14), "high": (15, 18)}
 
-
-def _hypertrophy_band_guidance(preference: str) -> str:
-    low, high = HYPERTROPHY_VOLUME_BANDS[preference]
+def _band_guidance(goal: str, preference: str) -> str:
+    low, high = VOLUME_BANDS[goal][preference]
+    target = f"{low} weekly sets" if low == high else f"between {low} and {high} weekly sets"
     return (
-        f"a {preference}-volume approach: choose between {low} and {high} weekly sets, "
-        f"the part of the research's most efficient range (Pelland et al. 2025's "
-        f"efficiency tiers: higher efficiency 5-10, intermediate 11-18 fractional "
-        f"weekly sets) that this preference covers. Pick the value in that band the "
-        f"provided research best supports for this muscle."
+        f"a {preference}-volume approach: choose {target}, the part of the research's most "
+        f"efficient range (Pelland et al. 2025's {goal} efficiency tiers: {_TIER_DESCRIPTIONS[goal]}) "
+        f"that this preference covers. Pick the value in that band the provided research best "
+        f"supports."
     )
+
+
 _RIR_GUIDANCE = {
     "minimal": "a low-volume approach that relies on effort: choose the closest-to-"
     "failure option the provided research supports.",
@@ -418,21 +412,16 @@ def generate_weekly_volume(
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     # The claim the volume research actually makes - weekly sets for the
     # muscle - so verification compares like with like.
-    band = HYPERTROPHY_VOLUME_BANDS.get(preference) if goal == "hypertrophy" else None
-    if band:
-        value_type = Literal[tuple(range(band[0], band[1] + 1))]
-        guidance = _hypertrophy_band_guidance(preference)
-    else:
-        value_type, guidance = int, _VOLUME_GUIDANCE.get(preference)
+    low, high = VOLUME_BANDS[goal][preference]
     return _generate_field(
-        "weekly_sets", value_type, "volume", build_volume_query(muscle_group, goal),
+        "weekly_sets", Literal[tuple(range(low, high + 1))], "volume", build_volume_query(muscle_group, goal),
         field_description="Total sets per WEEK for this muscle, across all of its "
         "exercises and sessions combined. This app counts sets FRACTIONALLY: a set "
         "where the muscle is the main target counts as 1, a set where it's a "
         "secondary muscle counts as 0.5. If a source reports direct sets only, or "
         "fractional sets, keep that distinction in mind rather than treating them "
         "as the same number.",
-        guidance=guidance,
+        guidance=_band_guidance(goal, preference),
     )
 
 

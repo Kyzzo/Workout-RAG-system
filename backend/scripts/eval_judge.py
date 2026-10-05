@@ -37,7 +37,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.rag import verification
-from app.rag.generate import HYPERTROPHY_VOLUME_BANDS, build_reps_query, build_rir_query, build_volume_query
+from app.rag.generate import VOLUME_BANDS, build_reps_query, build_rir_query, build_volume_query
 from app.rag.verification import STATEMENT_JUDGE, Judge, judge_citation
 
 EXCERPTS = json.loads((Path(__file__).parent / "eval_fixtures" / "judge_excerpts.json").read_text(encoding="utf-8"))
@@ -118,13 +118,13 @@ JUDGE_CASES = [
               "similar growth across loads >= ~30% 1RM, moderate loads the most efficient"),
 ]
 
-# (muscle, goal, preference): hypertrophy must land in its preference's band
-# and verify; strength has no band, so it must at least verify.
+# (muscle, goal, preference): the value must land in its goal and
+# preference's band (VOLUME_BANDS) and verify.
 GENERATION_CASES = [
     (muscle, "hypertrophy", preference)
     for muscle in ("chest", "quadriceps")
     for preference in ("minimal", "moderate", "high")
-] + [("chest", "strength", "moderate")]
+] + [("chest", "strength", preference) for preference in ("minimal", "moderate", "high")]
 
 
 def _run_judge_case(case: JudgeCase) -> tuple[bool, str]:
@@ -147,7 +147,7 @@ def _run_generation_case(case) -> tuple[bool, str]:
         result, verified, any_supported = _attempt_weekly_volume_generation(muscle, goal, preference)
     except Exception as e:
         return False, f"error: {type(e).__name__}"
-    band = HYPERTROPHY_VOLUME_BANDS.get(preference) if goal == "hypertrophy" else None
+    band = VOLUME_BANDS.get(goal, {}).get(preference)
     in_band = band is None or band[0] <= result.weekly_sets <= band[1]
     papers = len({chunk["source"] for chunk, status in verified if status in SUPPORTED})
     return in_band and any_supported, f"{result.weekly_sets}/wk, {'verified' if any_supported else 'UNVERIFIED'} ({papers} papers)"
@@ -211,7 +211,7 @@ def main():
 
     describe_judge = lambda c: f"{c.name} -> expect {c.expect} ({c.judge} judge): {c.why}"
     describe_gen = lambda c: f"weekly volume {c[0]} / {c[1]} / {c[2]}" + (
-        f" -> in {HYPERTROPHY_VOLUME_BANDS[c[2]]} and verified" if c[1] == "hypertrophy" else " -> verified")
+        f" -> in {VOLUME_BANDS[c[1]][c[2]]} and verified")
     if args.list:
         for case in JUDGE_CASES:
             print("judge      ", describe_judge(case))

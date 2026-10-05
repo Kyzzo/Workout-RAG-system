@@ -105,21 +105,21 @@ export const VOLUME_LABELS: Record<VolumePreference, string> = {
   high: "Higher volume",
 };
 
-// Hypertrophy weekly sets per muscle for each preference (fractional sets,
-// secondary work at half) - mirrors HYPERTROPHY_VOLUME_BANDS in the backend:
-// Pelland et al. 2025's higher-efficiency (5-10) and intermediate (11-18)
-// tiers.
-export const HYPERTROPHY_VOLUME_BANDS: Record<VolumePreference, [number, number]> = {
-  minimal: [5, 10],
-  moderate: [11, 14],
-  high: [15, 18],
+// Weekly sets per muscle for each goal and preference (fractional sets,
+// secondary work at half) - mirrors VOLUME_BANDS in the backend: Pelland et
+// al. 2025's efficiency tiers for hypertrophy (5-10, 11-18) and strength
+// (1-2, 3-4).
+export const VOLUME_BANDS: Record<string, Record<VolumePreference, [number, number]>> = {
+  hypertrophy: { minimal: [5, 10], moderate: [11, 14], high: [15, 18] },
+  strength: { minimal: [1, 2], moderate: [3, 3], high: [4, 4] },
 };
 
 export function volumeLabel(preference: VolumePreference, goal: string): string {
   const label = VOLUME_LABELS[preference] ?? preference;
-  if (goal !== "hypertrophy") return label;
-  const [low, high] = HYPERTROPHY_VOLUME_BANDS[preference];
-  return `${label} - ${low}-${high} sets/week per muscle`;
+  const band = VOLUME_BANDS[goal]?.[preference];
+  if (!band) return label;
+  const [low, high] = band;
+  return `${label} - ${low === high ? low : `${low}-${high}`} sets/week per muscle`;
 }
 
 export type Program = {

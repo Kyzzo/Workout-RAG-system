@@ -38,7 +38,7 @@ RULES = {
         ),
         categories=("volume", "frequency"),
     ),
-    # The basis of the hypertrophy volume options (HYPERTROPHY_VOLUME_BANDS
+    # The basis of the hypertrophy volume options (VOLUME_BANDS
     # in generate.py): Minimalist is the higher-efficiency tier, Moderate
     # and Higher volume split the intermediate one.
     "volume_efficiency_tiers": Rule(
@@ -48,6 +48,17 @@ RULES = {
             "range and 11-18 weekly sets the intermediate-efficiency range."
         ),
         query="Volume efficiency tiers for hypertrophy by fractional weekly sets per muscle",
+        categories=("volume",),
+    ),
+    # The basis of the strength volume options (VOLUME_BANDS in generate.py).
+    "strength_volume_efficiency_tiers": Rule(
+        claim=(
+            "For strength, gains increase with weekly sets per muscle (counted fractionally) with "
+            "strong diminishing returns: 1 weekly set is the minimum effective dose, 2 sets the "
+            "higher-efficiency range and 3-4 sets the intermediate range, and additional weekly sets "
+            "beyond that do not consistently enhance strength gains."
+        ),
+        query="Volume efficiency tiers for strength gains by fractional weekly sets",
         categories=("volume",),
     ),
     # The two halves of the hypertrophy frequency explanation shown in the

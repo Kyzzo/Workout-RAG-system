@@ -264,29 +264,42 @@ def _volume_call(goal, preference):
     return kwargs["messages"][-1]["content"], kwargs["response_format"]
 
 
-@pytest.mark.parametrize("preference, low, high", [("minimal", 5, 10), ("moderate", 11, 14), ("high", 15, 18)])
-def test_hypertrophy_preference_binds_weekly_sets_to_its_efficiency_band(preference, low, high):
-    # Pelland 2025's higher-efficiency (5-10) and intermediate (11-18) tiers:
-    # the schema only accepts values inside the preference's band.
-    prompt, schema = _volume_call("hypertrophy", preference)
+@pytest.mark.parametrize("goal, preference, low, high", [
+    # Pelland 2025's efficiency tiers - hypertrophy: higher efficiency 5-10,
+    # intermediate 11-18; strength: higher efficiency 2, intermediate 3-4
+    # (past 4, more sets don't consistently add strength).
+    ("hypertrophy", "minimal", 5, 10), ("hypertrophy", "moderate", 11, 14), ("hypertrophy", "high", 15, 18),
+    ("strength", "minimal", 1, 2), ("strength", "moderate", 3, 3), ("strength", "high", 4, 4),
+])
+def test_volume_preference_binds_weekly_sets_to_its_efficiency_band(goal, preference, low, high):
+    # The schema only accepts values inside the preference's band.
+    prompt, schema = _volume_call(goal, preference)
 
-    assert f"between {low} and {high} weekly sets" in prompt
-    allowed = schema.model_json_schema()["properties"]["weekly_sets"]["enum"]
+    assert (f"choose {low} weekly sets" if low == high else f"between {low} and {high} weekly sets") in prompt
+    assert f"{goal} efficiency tiers" in prompt
+    field = schema.model_json_schema()["properties"]["weekly_sets"]
+    allowed = field["enum"] if "enum" in field else [field["const"]]  # one-value band -> const
     assert allowed == list(range(low, high + 1))
 
 
-@pytest.mark.parametrize("preference, expected", [
-    ("minimal", "LOWEST weekly set count"),
-    ("high", "HIGH end"),
-    # unguided, moderate aimed for the 'no detectable superiority' point (~31)
-    ("moderate", "effective AND efficient"),
-])
-def test_strength_preference_is_open_guidance(preference, expected):
-    prompt, schema = _volume_call("strength", preference)
+@patch("app.routers.generation.verify_citation")
+def test_shared_answers_count_an_excerpt_only_when_both_judge_passes_agree(mock_verify):
+    # Shared answers are reused by every program, so each cited excerpt is
+    # judged twice and the weaker verdict kept.
+    from app.routers.generation import _verify_chunks
 
-    assert "User preference:" in prompt and expected in prompt
-    assert schema.model_json_schema()["properties"]["weekly_sets"]["type"] == "integer"
+    verdicts = {"agree": ["primary_support", "primary_support"], "split": ["primary_support", "contradicted"],
+                "mixed": ["primary_support", "contextual_support"]}
+    calls = {key: iter(v) for key, v in verdicts.items()}
+    mock_verify.side_effect = lambda query, value, text: next(calls[text])
+    chunks = {key: {"id": key, "text": key, "source": f"paper-{key}"} for key in verdicts}
 
+    verified, supported = _verify_chunks("q", 12, list(chunks), chunks, passes=2)
+
+    assert {chunk["id"]: status for chunk, status in verified} == {
+        "agree": "primary_support", "split": "contradicted", "mixed": "contextual_support",
+    }
+    assert supported and mock_verify.call_count == 6
 
 
 # --- spreading a muscle's sets across more exercises (hypertrophy) -------------

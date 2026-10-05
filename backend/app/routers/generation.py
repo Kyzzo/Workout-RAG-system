@@ -156,16 +156,34 @@ def _sibling_volume_summary(prescription: models.WeeklyPrescription, db: Session
     return "\n".join(lines) if lines else None
 
 
-def _verify_chunks(query: str, value, chunk_ids: list[str], chunks_by_id: dict[str, dict]):
+# How strongly each verdict supports a value, for combining two verdicts.
+_STATUS_STRENGTH = {"primary_support": 2, "contextual_support": 1}
+
+# Shared answers (app/shared_answers.py) are judged twice: one stored answer
+# is reused by every program, and the judge occasionally disagrees with
+# itself on borderline excerpts (e.g. '8-12 reps' supported in 2 of 3 runs).
+SHARED_JUDGE_PASSES = 2
+
+
+def _weakest(statuses: list[str]) -> str:
+    """The least-supportive verdict: an excerpt only counts as support if
+    every pass agreed it does."""
+    return min(statuses, key=lambda status: _STATUS_STRENGTH.get(status, 0))
+
+
+def _verify_chunks(query: str, value, chunk_ids: list[str], chunks_by_id: dict[str, dict], passes: int = 1):
     """Judges every cited chunk for this value, in parallel (a value cites
-    several chunks and each judge call takes seconds). Returns
-    (verified: [(chunk, status)], any_supported). Chunk ids are schema-
-    constrained to this call's retrieved set, so they're always present."""
+    several chunks and each judge call takes seconds), `passes` times each,
+    keeping the weakest verdict per chunk. Returns (verified: [(chunk,
+    status)], any_supported). Chunk ids are schema-constrained to this
+    call's retrieved set, so they're always present."""
     chunks = [chunks_by_id[chunk_id] for chunk_id in dict.fromkeys(chunk_ids)]
     if not chunks:
         return [], False
-    with ThreadPoolExecutor(max_workers=min(len(chunks), 10)) as pool:
-        statuses = list(pool.map(lambda chunk: verify_citation(query, value, chunk["text"]), chunks))
+    jobs = [chunk for chunk in chunks for _ in range(passes)]
+    with ThreadPoolExecutor(max_workers=min(len(jobs), 10)) as pool:
+        verdicts = list(pool.map(lambda chunk: verify_citation(query, value, chunk["text"]), jobs))
+    statuses = [_weakest(verdicts[i * passes:(i + 1) * passes]) for i in range(len(chunks))]
     verified = list(zip(chunks, statuses))
     return verified, any(status in _SUPPORTED_STATUSES for status in statuses)
 
@@ -217,7 +235,9 @@ def _exercise_answer(db: Session, field: str, goal: str, preference: str, moveme
     def attempt():
         result, chunks = generate_for_movement(field, goal, movement, preference)
         chunks_by_id = {c["id"]: c for c in chunks}
-        return (result, *_verify_chunks(query, getattr(result, field), result.chunk_ids, chunks_by_id))
+        return (result, *_verify_chunks(
+            query, getattr(result, field), result.chunk_ids, chunks_by_id, passes=SHARED_JUDGE_PASSES,
+        ))
 
     return get_or_generate(db, key, field, lambda: _generated(attempt, field))
 
@@ -436,7 +456,9 @@ def _attempt_frequency_generation(muscle_group: str | None, goal: str):
     query = build_frequency_query(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
 
-    return (result, *_verify_chunks(query, result.frequency, result.chunk_ids, chunks_by_id))
+    return (result, *_verify_chunks(
+        query, result.frequency, result.chunk_ids, chunks_by_id, passes=SHARED_JUDGE_PASSES,
+    ))
 
 
 def _delete_existing(db: Session, model, mesocycle_id: int, muscle_group: str) -> None:
@@ -591,7 +613,9 @@ def _attempt_progression_generation(muscle_group: str | None, goal: str):
     query = build_progression_query(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
 
-    return (result, *_verify_chunks(query, result.scheme, result.chunk_ids, chunks_by_id))
+    return (result, *_verify_chunks(
+        query, result.scheme, result.chunk_ids, chunks_by_id, passes=SHARED_JUDGE_PASSES,
+    ))
 
 
 _LOAD_PERCENT_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*%")
@@ -824,7 +848,9 @@ def _attempt_weekly_volume_generation(muscle_group: str | None, goal: str, prefe
     query = build_volume_query(muscle_group, goal)
     chunks_by_id = {c["id"]: c for c in chunks}
 
-    return (result, *_verify_chunks(query, result.weekly_sets, result.chunk_ids, chunks_by_id))
+    return (result, *_verify_chunks(
+        query, result.weekly_sets, result.chunk_ids, chunks_by_id, passes=SHARED_JUDGE_PASSES,
+    ))
 
 
 def _split_weekly_sets(mesocycle: models.Mesocycle, muscle_group: str, weekly_sets: int, goal: str) -> int:

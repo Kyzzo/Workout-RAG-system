@@ -182,6 +182,12 @@ export default function ProgramWizard({
           ))}
         </select>
       </div>
+      {goal === "strength" && (
+        <RuleSources
+          text="Volume ranges: Pelland et al. 2025's strength efficiency tiers (1 set minimum effective dose, 2 higher efficiency, 3-4 intermediate; more doesn't consistently add strength)."
+          ruleKeys={["strength_volume_efficiency_tiers"]}
+        />
+      )}
       {goal === "hypertrophy" && (
         <>
           <RuleSources
