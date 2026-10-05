@@ -52,7 +52,10 @@ class JudgeCase:
     question: str
     answer: str | int
     judge: str  # "statement" (chat prose, rule claims) or "generation" (bare values)
-    expect: str  # "supported" or "rejected"
+    # "supported", "rejected", or "not_direct": a deliberately borderline
+    # case where related evidence or a rejection are both defensible, and
+    # the only wrong verdict is claiming the excerpt states the value.
+    expect: str
     why: str
 
 
@@ -113,9 +116,16 @@ JUDGE_CASES = [
     JudgeCase("3-4 RIR beyond what was studied", "refalo_key_points",
               build_rir_query("quadriceps", "hypertrophy", "Leg Extension"), "3-4 RIR", "generation", "rejected",
               "the excerpt supports 1-2 RIR (and 0-2), not stopping 3-4 reps short"),
-    JudgeCase("8-12 reps inside the loading spectrum", "schoenfeld_loading",
-              build_reps_query("chest", "hypertrophy", "Barbell Bench Press"), "8-12", "generation", "supported",
-              "similar growth across loads >= ~30% 1RM, moderate loads the most efficient"),
+    # Deliberately borderline. The excerpt is about LOAD (%1RM) and says
+    # there's "no ideal hypertrophy zone"; supporting "8-12 reps" needs the
+    # inference that moderate loads ~ 8-12 reps. The judge splits between
+    # related evidence and contradicted (both defensible), so this case
+    # doesn't test which - it tests that the judge never OVERCLAIMS on
+    # borderline evidence by calling it direct support. Don't "fix" it by
+    # expecting either verdict.
+    JudgeCase("8-12 reps vs a load-only excerpt (borderline)", "schoenfeld_loading",
+              build_reps_query("chest", "hypertrophy", "Barbell Bench Press"), "8-12", "generation", "not_direct",
+              "the excerpt discusses load, not reps - related or rejected are both fine, 'states this directly' isn't"),
 ]
 
 # (muscle, goal, preference): the value must land in its goal and
@@ -135,6 +145,8 @@ def _run_judge_case(case: JudgeCase) -> tuple[bool, str]:
         verdict = judge_citation(case.question, case.answer, EXCERPTS[case.excerpt]["text"], judge=judge)
     except Exception as e:  # an error is a failed run, not a crash of the whole check
         return False, f"error: {type(e).__name__}"
+    if case.expect == "not_direct":
+        return verdict.outcome != "primary_support", verdict.outcome
     supported = verdict.outcome in SUPPORTED
     return supported == (case.expect == "supported"), verdict.outcome
 
