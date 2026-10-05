@@ -21,6 +21,7 @@ from ..rag.generate import (
     generate_weekly_volume,
     max_sets_per_exercise,
 )
+from ..rag.corpus import evidence_text
 from ..rag.verification import verify_citation
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -182,7 +183,7 @@ def _verify_chunks(query: str, value, chunk_ids: list[str], chunks_by_id: dict[s
         return [], False
     jobs = [chunk for chunk in chunks for _ in range(passes)]
     with ThreadPoolExecutor(max_workers=min(len(jobs), 10)) as pool:
-        verdicts = list(pool.map(lambda chunk: verify_citation(query, value, chunk["text"]), jobs))
+        verdicts = list(pool.map(lambda chunk: verify_citation(query, value, evidence_text(chunk)), jobs))
     statuses = [_weakest(verdicts[i * passes:(i + 1) * passes]) for i in range(len(chunks))]
     verified = list(zip(chunks, statuses))
     return verified, any(status in _SUPPORTED_STATUSES for status in statuses)

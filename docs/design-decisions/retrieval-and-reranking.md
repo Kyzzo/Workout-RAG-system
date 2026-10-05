@@ -84,13 +84,32 @@ is first created, so per program it's effectively zero. It can also save
 cost: better evidence means fewer weak citations for the judge to reject
 and fewer retries.
 
+## Paper metadata
+
+Every paper is listed in a corpus manifest with its study type
+(meta-analysis, randomized trial, review), the outcome it measured
+(hypertrophy, strength or both), its population (trained, untrained or
+mixed), year and publication status, and those tags are stored on each of
+its excerpts. That changes three things:
+
+- **Goal filtering is exact.** A strength program or question only
+  considers strength and both-outcome papers; a hypertrophy one only
+  hypertrophy and both. Wording-based ranking and the reranker couldn't
+  reliably tell outcomes apart (a squat-strength finding had been cited
+  for hypertrophy volume). If filtering would leave fewer than two papers,
+  retrieval falls back to everything rather than citing a single study.
+- **Every model sees what kind of evidence it's reading.** Excerpts reach
+  the generator, reranker and judge labeled ("Pelland et al. 2025 ·
+  meta-analysis · hypertrophy and strength · mixed training status"), so
+  "weigh meta-analyses over single studies" and "don't generalize beyond
+  the population studied" act on facts rather than inference. The same
+  label is what users see on each source.
+- **Ingestion refuses untagged papers**, and the manifest made duplicates
+  visible: two papers had been stored twice (once per category); each is
+  now one copy serving both categories.
+
 ## What's still missing
 
-- **Paper metadata.** Study type (meta-analysis, randomized trial,
-  review), outcome (hypertrophy or strength) and population (trained or
-  untrained) aren't recorded per paper, so reranking can't prefer a
-  meta-analysis or hard-filter to the program's goal; it can only judge the
-  excerpt text. That's the next step as the corpus grows.
 - **Thin categories.** Reranking can't conjure evidence that isn't there:
   rep ranges rest on one paper and progression on one. More papers matter
   more than any retrieval tuning for those.

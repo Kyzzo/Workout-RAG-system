@@ -28,16 +28,25 @@ class _FakeStorage:
     def __init__(self, by_category, unfiltered, per_source=()):
         self.by_category, self.unfiltered, self.filters = by_category, unfiltered, []
         self.per_source = list(per_source)
+        self.outcome_filters = []
 
     def search_per_source(self, vector, per_source, sources, query_filter=None):
         return list(self.per_source)
 
     def search(self, vector, top_k=5, query_filter=None):
-        if query_filter is None:
-            return self.unfiltered[:top_k]
-        category = query_filter.must[0].match.value
-        self.filters.append(category)
-        return self.by_category.get(category, [])[:top_k]
+        conditions = {c.key: c.match for c in (query_filter.must if query_filter else [])}
+        if "outcome" in conditions:
+            self.outcome_filters.append(sorted(conditions["outcome"].any))
+        if "categories" not in conditions:
+            found = self.unfiltered
+        else:
+            category = conditions["categories"].value
+            self.filters.append(category)
+            found = self.by_category.get(category, [])
+        if "outcome" in conditions:
+            allowed = set(conditions["outcome"].any)
+            found = [c for c in found if c.get("outcome", "both") in allowed]
+        return found[:top_k]
 
 
 def _retrieve(topic, storage):
@@ -100,7 +109,9 @@ def test_recovery_questions_search_the_recovery_category_first():
 
     chunks = _retrieve("does less muscle damage mean more growth?", storage)
 
-    assert storage.filters == ["recovery"]
+    # searched filtered to the question's outcome, then again unfiltered
+    # since one paper is too few
+    assert set(storage.filters) == {"recovery"}
     assert [c["id"] for c in chunks] == ["d1"]
 
 
@@ -150,3 +161,50 @@ def test_a_paper_outside_the_top_similarity_results_still_reaches_selection():
         chunks = generate._retrieve_chunks("how close to failure for strength?", None)
 
     assert "meta" in [c["id"] for c in chunks]
+
+
+def test_strength_question_only_considers_strength_and_both_outcome_papers():
+    storage = _FakeStorage({}, [
+        {**_chunk("h1", "hyp-only", 0.9), "outcome": "hypertrophy"},
+        {**_chunk("s1", "strength-meta", 0.8), "outcome": "strength"},
+        {**_chunk("b1", "both-trial", 0.7), "outcome": "both"},
+    ])
+
+    chunks = _retrieve("how many sets per week for squat strength?", storage)
+
+    assert storage.outcome_filters and storage.outcome_filters[0] == ["both", "strength"]
+    assert [c["id"] for c in chunks] == ["s1", "b1"]
+
+
+def test_outcome_filter_falls_back_when_too_few_papers_remain():
+    # A thin category: only one paper matches the outcome, so retrieval
+    # widens to everything rather than citing a single study.
+    storage = _FakeStorage({}, [
+        {**_chunk("h1", "hyp-a", 0.9), "outcome": "hypertrophy"},
+        {**_chunk("h2", "hyp-b", 0.8), "outcome": "hypertrophy"},
+        {**_chunk("s1", "strength-only", 0.7), "outcome": "strength"},
+    ])
+
+    chunks = _retrieve("what rep range builds strength?", storage)
+
+    assert [c["id"] for c in chunks] == ["h1", "h2", "s1"]
+
+
+def test_question_naming_both_outcomes_is_not_filtered():
+    storage = _FakeStorage({}, [{**_chunk("h1", "hyp", 0.9), "outcome": "hypertrophy"}])
+
+    _retrieve("does volume matter for both hypertrophy and strength?", storage)
+
+    assert storage.outcome_filters == []
+
+
+def test_excerpts_are_labeled_with_their_evidence_type():
+    from app.rag.corpus import evidence_label
+
+    chunk = {"source": "pelland-etal-2025", "citation": "Pelland et al. 2025", "study_type": "meta-analysis",
+             "outcome": "both", "population": "mixed", "publication": "journal"}
+
+    assert evidence_label(chunk) == (
+        "Pelland et al. 2025 · meta-analysis · hypertrophy and strength · mixed training status"
+    )
+    assert evidence_label({"source": "untagged-paper"}) == "untagged-paper"

@@ -1,0 +1,161 @@
+{
+  "_comment": "Every paper in the research corpus, with the tags retrieval and verification use. Ingestion refuses a paper that isn't listed here. After editing tags, run scripts/apply_paper_metadata.py (it updates stored excerpts in place, no re-embedding). Paths are relative to the repo root. merged_from: older source ids whose excerpts this entry replaces (duplicate ingests of the same paper).",
+  "papers": [
+    {
+      "source": "androulakis-korakakis-etal-2020-min-dose",
+      "citation": "Androulakis-Korakakis et al. 2020",
+      "pdf": "lifting_science_dataset_strength/volume/Androulakis-Korakakis et al. 2020.pdf",
+      "categories": ["volume"],
+      "study_type": "meta-analysis",
+      "outcome": "strength",
+      "population": "trained",
+      "year": 2020,
+      "publication": "journal"
+    },
+    {
+      "source": "aube-etal-2022-volume",
+      "citation": "Aube et al. 2022",
+      "pdf": "lifting_science_dataset_hypertrophy/volume/Aube et al. 2022.pdf",
+      "categories": ["volume"],
+      "study_type": "randomized-trial",
+      "outcome": "both",
+      "population": "trained",
+      "year": 2022,
+      "publication": "journal"
+    },
+    {
+      "source": "grgic-etal-2022-failure-meta",
+      "citation": "Grgic et al. 2022",
+      "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Grgic-et-al-2022.pdf",
+      "categories": ["intensity"],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2022,
+      "publication": "journal"
+    },
+    {
+      "source": "hermann-etal-2024-without-fail",
+      "citation": "Hermann et al. 2024",
+      "pdf": "lifting_science_dataset_hypertrophy/intensity-load/proximity_to_failure/Without_fail_Muscular_adaptations_in_single_set_re.pdf",
+      "categories": ["intensity"],
+      "study_type": "randomized-trial",
+      "outcome": "both",
+      "population": "trained",
+      "year": 2024,
+      "publication": "unconfirmed"
+    },
+    {
+      "source": "lasevicius-etal-2019-2x-vs-3x",
+      "citation": "Lasevicius et al. 2019",
+      "pdf": "lifting_science_dataset_hypertrophy/frequency/Lasevicius-etal-2019-2x-vs-3x.pdf",
+      "categories": ["frequency"],
+      "study_type": "randomized-trial",
+      "outcome": "both",
+      "population": "trained",
+      "year": 2019,
+      "publication": "journal"
+    },
+    {
+      "source": "lasevicius-etal-2022-failure-load",
+      "citation": "Lasevicius et al. 2022",
+      "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Lasevicius-et-al-2022.pdf",
+      "categories": ["intensity"],
+      "study_type": "randomized-trial",
+      "outcome": "both",
+      "population": "untrained",
+      "year": 2022,
+      "publication": "journal"
+    },
+    {
+      "source": "pelland-etal-2025",
+      "citation": "Pelland et al. 2025",
+      "pdf": "lifting_science_dataset_hypertrophy/volume/Pelland-etal-2025-volume.pdf",
+      "categories": ["volume", "frequency"],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2025,
+      "publication": "journal",
+      "merged_from": ["pelland-etal-2025-volume", "pelland-etal-2025-frequency"]
+    },
+    {
+      "source": "refalo-etal-2023-proximity-failure-meta",
+      "citation": "Refalo et al. 2023",
+      "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Refalo-et-al-2023.pdf",
+      "categories": ["intensity"],
+      "study_type": "meta-analysis",
+      "outcome": "hypertrophy",
+      "population": "mixed",
+      "year": 2023,
+      "publication": "journal"
+    },
+    {
+      "source": "refalo-etal-2024-failure-vs-rir",
+      "citation": "Refalo et al. 2024",
+      "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Refalo-et-al-2024.pdf",
+      "categories": ["intensity"],
+      "study_type": "randomized-trial",
+      "outcome": "hypertrophy",
+      "population": "trained",
+      "year": 2024,
+      "publication": "journal"
+    },
+    {
+      "source": "remmert-etal-2025-per-session-volume",
+      "citation": "Remmert et al. 2025",
+      "pdf": "lifting_science_dataset_hypertrophy/volume/Remmert-etal-2025-per-session-volume.pdf",
+      "categories": ["volume", "frequency"],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2025,
+      "publication": "preprint",
+      "merged_from": ["remmert-etal-2025-per-session-volume", "remmert-etal-2025-per-session-volume-frequency"]
+    },
+    {
+      "source": "robinson-etal-2024-proximity-to-failure",
+      "citation": "Robinson et al. 2024",
+      "pdf": "lifting_science_dataset_hypertrophy/intensity-load/proximity_to_failure/Exploring the Dose–Response Relationship Between Estimated.pdf",
+      "categories": ["intensity"],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2024,
+      "publication": "journal"
+    },
+    {
+      "source": "schoenfeld-etal-2021",
+      "citation": "Schoenfeld et al. 2021",
+      "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Schoenfeld-etal-2021.pdf",
+      "categories": ["intensity"],
+      "study_type": "review",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2021,
+      "publication": "journal"
+    },
+    {
+      "source": "weekly-sets-dose-response",
+      "citation": "Pelland et al. (preprint)",
+      "pdf": "lifting_science_dataset_hypertrophy/volume/The+Resistance+Training+Dose-Response.pdf",
+      "categories": ["volume"],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2024,
+      "publication": "preprint"
+    },
+    {
+      "source": "zhang-etal-2026",
+      "citation": "Zhang et al. 2026",
+      "pdf": "lifting_science_dataset_strength/progression/zhang-etal-2026.pdf",
+      "categories": ["progression"],
+      "study_type": "meta-analysis",
+      "outcome": "strength",
+      "population": "mixed",
+      "year": 2026,
+      "publication": "journal"
+    }
+  ]
+}

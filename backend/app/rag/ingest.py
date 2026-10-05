@@ -4,6 +4,7 @@ import uuid
 
 import inngest
 
+from .corpus import paper
 from .data_loader import embed_texts, load_and_chunk_pdf
 from .qdrant_storage import QdrantStorage
 from .types import ChunksAndMeta, UpsertResult
@@ -23,11 +24,10 @@ inngest_client = inngest.Inngest(
 )
 async def ingest_literature_pdf(ctx: inngest.Context):
     def _load(ctx: inngest.Context) -> ChunksAndMeta:
-        pdf_path = ctx.event.data["pdf_path"]
-        category = ctx.event.data["category"]
-        source_id = ctx.event.data.get("source_id", pdf_path)
-        chunks = load_and_chunk_pdf(pdf_path)
-        return ChunksAndMeta(chunks=chunks, source_id=source_id, category=category)
+        # The paper must be in corpus/papers.json: its PDF and tags come from there.
+        source_id = ctx.event.data["source_id"]
+        chunks = load_and_chunk_pdf(str(paper(source_id).pdf_path))
+        return ChunksAndMeta(chunks=chunks, source_id=source_id)
 
     def _upsert(data: ChunksAndMeta) -> UpsertResult:
         vecs = embed_texts(data.chunks)
@@ -35,10 +35,8 @@ async def ingest_literature_pdf(ctx: inngest.Context):
             str(uuid.uuid5(uuid.NAMESPACE_URL, f"{data.source_id}:{i}"))
             for i in range(len(data.chunks))
         ]
-        payloads = [
-            {"source": data.source_id, "text": data.chunks[i], "category": data.category}
-            for i in range(len(data.chunks))
-        ]
+        tags = paper(data.source_id).payload()
+        payloads = [{**tags, "text": text} for text in data.chunks]
         QdrantStorage(collection="literature").upsert(ids, vecs, payloads)
         return UpsertResult(ingested=len(data.chunks))
 

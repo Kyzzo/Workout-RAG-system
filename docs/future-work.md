@@ -69,13 +69,11 @@ research is added.
 
 ## Retrieval and generation
 
-**Paper-level metadata.** Retrieval now reranks candidates by how well
-they answer the question ([retrieval design](design-decisions/retrieval-and-reranking.md)),
-but it still only sees excerpt text. Recording each paper's study type
-(meta-analysis, trial, review), outcome (hypertrophy or strength) and
-population (trained or untrained) at ingestion would allow a hard filter to
-the program's goal and a preference for meta-analyses — and would resolve
-the goal-filtering and sub-category items below with the same mechanism.
+**Population-aware retrieval.** Papers are now tagged with study type,
+outcome and population, and retrieval filters to the program's goal
+([retrieval design](design-decisions/retrieval-and-reranking.md#paper-metadata)).
+Population is shown to every model but not yet filtered on, because
+programs don't record the user's training experience (see below).
 
 **Thin research categories.** Rep ranges and progression each rest on a
 single paper, frequency on three. No retrieval or verification tuning
@@ -113,6 +111,8 @@ where that doesn't really apply. Grounding selection would need
 exercise-selection research in the corpus and an exercise-level citation
 target in the schema.
 
+**Training goal — resolved.** Papers are tagged by outcome and retrieval
+filters to the program's goal. Original note, kept for context:
 **Training goal isn't a hard filter on retrieved content, only a soft
 semantic influence.** Research category (volume, frequency, intensity,
 progression) is an exact-match filter on retrieval. Training goal

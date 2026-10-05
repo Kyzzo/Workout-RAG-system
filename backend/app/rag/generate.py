@@ -6,8 +6,9 @@ from typing import Literal
 import pydantic
 from dotenv import load_dotenv
 from openai import OpenAI
-from qdrant_client.models import FieldCondition, Filter, MatchValue
+from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
 
+from .corpus import evidence_label
 from .data_loader import embed_texts
 from .qdrant_storage import QdrantStorage
 
@@ -149,8 +150,42 @@ def _is_reference_list(text: str) -> bool:
     return len(_CITATION_ENTRY.findall(text)) >= 3
 
 
+def _category_condition(category: str) -> FieldCondition:
+    # `categories` is a list on each excerpt (a paper can serve several).
+    return FieldCondition(key="categories", match=MatchValue(value=category))
+
+
 def _category_filter(category: str) -> Filter:
-    return Filter(must=[FieldCondition(key="category", match=MatchValue(value=category))])
+    return Filter(must=[_category_condition(category)])
+
+
+# Outcome filtering (corpus/papers.json tags each paper hypertrophy,
+# strength or both): a strength question only sees strength and both-outcome
+# papers. Similarity and the reranker couldn't reliably tell the outcome
+# from wording - a strength finding (~18 sets for squat 1RM) was cited for
+# hypertrophy volume, and the reranker scored a hypertrophy result 8/10 for
+# a strength question. If filtering leaves fewer than this many papers
+# (thin categories), retrieval falls back to unfiltered.
+MIN_PAPERS_AFTER_OUTCOME_FILTER = 2
+_OUTCOME_KEYWORDS = {
+    "hypertrophy": re.compile(r"\b(hypertroph\w*|muscle (growth|size|mass)|grow\w*|bigger)\b", re.I),
+    "strength": re.compile(r"\b(strength|stronger|1rm|one-rep max|powerlift\w*)\b", re.I),
+}
+
+
+def _build_filter(category: str | None, outcome: str | None) -> Filter | None:
+    conditions = []
+    if category is not None:
+        conditions.append(_category_condition(category))
+    if outcome is not None:
+        conditions.append(FieldCondition(key="outcome", match=MatchAny(any=[outcome, "both"])))
+    return Filter(must=conditions) if conditions else None
+
+
+def _outcome_of(question: str) -> str | None:
+    """The outcome a chat question asks about, if it names exactly one."""
+    named = [outcome for outcome, pattern in _OUTCOME_KEYWORDS.items() if pattern.search(question)]
+    return named[0] if len(named) == 1 else None
 
 
 def _usable(ranked: list[dict]) -> list[dict]:
@@ -208,7 +243,9 @@ _RERANK_PROMPT = (
     "topic but no finding that answers it (introduction, methods, study aims, limitations, a finding "
     "for a different outcome); 0 = unrelated or a reference list. Judge what the excerpt reports, not "
     "how many words it shares with the question - a statistical result can answer the question "
-    "directly. Score every excerpt once."
+    "directly. Each excerpt is labeled with its paper, study type, outcome and population: when "
+    "excerpts answer about equally well, score meta-analyses above single studies and reviews, and "
+    "findings for the question's outcome and population above others. Score every excerpt once."
 )
 
 
@@ -224,7 +261,7 @@ def _rerank(question: str, candidates: list[dict]) -> list[dict]:
         "ExcerptScores", **{f"excerpt_{i}": (int, ...) for i in range(len(candidates))},
     )
     numbered = "\n\n".join(
-        f"[{i}] ({c['source']}) {' '.join(c['text'].split())[:1500]}" for i, c in enumerate(candidates)
+        f"[{i}] ({evidence_label(c)}) {' '.join(c['text'].split())[:1500]}" for i, c in enumerate(candidates)
     )
     try:
         model, effort = RERANK_MODEL
@@ -261,16 +298,27 @@ def _select(question: str, candidates: list[dict], top_k: int) -> list[dict]:
     return chosen
 
 
-def _retrieve_chunks(query: str, category: str | None) -> list[dict]:
+def _enough_papers(candidates: list[dict]) -> bool:
+    return len({c["source"] for c in _usable(candidates)}) >= MIN_PAPERS_AFTER_OUTCOME_FILTER
+
+
+def _retrieve_chunks(query: str, category: str | None, outcome: str | None = None) -> list[dict]:
     """A generated field's (or rule's) evidence: its category's excerpts
-    (category=None searches the whole corpus), reranked and diversified."""
+    (category=None searches the whole corpus), limited to papers on the
+    program's outcome when enough exist, then reranked and diversified."""
     query_vector = embed_texts([query])[0]
     storage = QdrantStorage(collection="literature")
-    query_filter = _category_filter(category) if category is not None else None
-    candidates = storage.search(query_vector, top_k=GENERATION_CANDIDATES, query_filter=query_filter)
-    candidates += storage.search_per_source(
-        query_vector, per_source=CANDIDATES_PER_PAPER, sources=MAX_PAPERS, query_filter=query_filter,
-    )
+
+    def gather(outcome_filter):
+        query_filter = _build_filter(category, outcome_filter)
+        found = storage.search(query_vector, top_k=GENERATION_CANDIDATES, query_filter=query_filter)
+        return found + storage.search_per_source(
+            query_vector, per_source=CANDIDATES_PER_PAPER, sources=MAX_PAPERS, query_filter=query_filter,
+        )
+
+    candidates = gather(outcome)
+    if outcome is not None and not _enough_papers(candidates):
+        candidates = gather(None)
     return _select(query, candidates, GENERATION_TOP_K)
 
 
@@ -280,12 +328,25 @@ def _retrieve_general_chunks(topic: str) -> list[dict]:
     query_vector = embed_texts([topic])[0]
     storage = QdrantStorage(collection="literature")
     matched = [cat for cat, pattern in _CATEGORY_KEYWORDS.items() if pattern.search(topic)]
-    ranked = []
-    for category in matched:
-        ranked += storage.search(query_vector, top_k=GENERAL_TOP_K, query_filter=_category_filter(category))
-    ranked.sort(key=lambda c: c.get("score", 0.0), reverse=True)
-    ranked += storage.search(query_vector, top_k=GENERAL_CANDIDATES)
-    ranked += storage.search_per_source(query_vector, per_source=CANDIDATES_PER_PAPER, sources=MAX_PAPERS)
+    outcome = _outcome_of(topic)
+
+    def gather(outcome_filter):
+        ranked = []
+        for category in matched:
+            ranked += storage.search(
+                query_vector, top_k=GENERAL_TOP_K, query_filter=_build_filter(category, outcome_filter),
+            )
+        ranked.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+        whole_corpus = _build_filter(None, outcome_filter)
+        ranked += storage.search(query_vector, top_k=GENERAL_CANDIDATES, query_filter=whole_corpus)
+        ranked += storage.search_per_source(
+            query_vector, per_source=CANDIDATES_PER_PAPER, sources=MAX_PAPERS, query_filter=whole_corpus,
+        )
+        return ranked
+
+    ranked = gather(outcome)
+    if outcome is not None and not _enough_papers(ranked):
+        ranked = gather(None)
     return _select(topic, ranked, GENERAL_TOP_K)
 
 
@@ -308,10 +369,11 @@ def _generate_field(
     sibling_context: str | None = None,
     adjustment: Adjustment | None = None,
     guidance: str | None = None,
+    outcome: str | None = None,
 ) -> tuple[pydantic.BaseModel, list[dict]]:
-    chunks = _retrieve_chunks(query, category)
+    chunks = _retrieve_chunks(query, category, outcome)
 
-    context_block = "\n\n".join(f"[{c['id']}] ({c['source']}) {c['text']}" for c in chunks)
+    context_block = "\n\n".join(f"[{c['id']}] ({evidence_label(c)}) {c['text']}" for c in chunks)
     locked_type = adjustment.locked_type() if adjustment else None
     response_schema = _build_response_schema(
         field_name, locked_type or field_type, field_description, [c["id"] for c in chunks]
@@ -421,7 +483,7 @@ def generate_weekly_volume(
         "secondary muscle counts as 0.5. If a source reports direct sets only, or "
         "fractional sets, keep that distinction in mind rather than treating them "
         "as the same number.",
-        guidance=_band_guidance(goal, preference),
+        guidance=_band_guidance(goal, preference), outcome=goal,
     )
 
 
@@ -437,7 +499,7 @@ def generate_volume_sets(
         field_description=f"Sets for THIS exercise in ONE session (at most {cap}). The research "
         "gives weekly totals for the whole muscle; this exercise gets a share of that "
         "weekly budget, never the whole of it.",
-        sibling_context=sibling_context, adjustment=adjustment,
+        sibling_context=sibling_context, adjustment=adjustment, outcome=goal,
     )
 
 
@@ -452,7 +514,7 @@ def generate_intensity_load(
     # through for a benefit that hasn't been demonstrated to exist.
     return _generate_field(
         "load", str, "intensity", build_intensity_query(muscle_group, goal),
-        field_description=_LOAD_DESCRIPTION, adjustment=adjustment,
+        field_description=_LOAD_DESCRIPTION, adjustment=adjustment, outcome=goal,
     )
 
 
@@ -480,7 +542,7 @@ def generate_reps(
     # "intensity" - rep range and load are two sides of the same variable.
     return _generate_field(
         "reps", str, "intensity", build_reps_query(muscle_group, goal, exercise_name),
-        field_description=_REPS_DESCRIPTION, adjustment=adjustment,
+        field_description=_REPS_DESCRIPTION, adjustment=adjustment, outcome=goal,
     )
 
 
@@ -492,7 +554,7 @@ def generate_rir(
     return _generate_field(
         "rir", RirOption, "intensity", build_rir_query(muscle_group, goal, exercise_name),
         field_description=_RIR_DESCRIPTION, adjustment=adjustment,
-        guidance=_RIR_GUIDANCE.get(preference),
+        guidance=_RIR_GUIDANCE.get(preference), outcome=goal,
     )
 
 
@@ -539,14 +601,14 @@ def generate_for_movement(
 ) -> tuple[pydantic.BaseModel, list[dict]]:
     query = build_movement_query(field, goal, movement)
     if field == "reps":
-        return _generate_field("reps", str, "intensity", query, field_description=_REPS_DESCRIPTION)
+        return _generate_field("reps", str, "intensity", query, field_description=_REPS_DESCRIPTION, outcome=goal)
     if field == "rir":
         return _generate_field(
             "rir", RirOption, "intensity", query, field_description=_RIR_DESCRIPTION,
-            guidance=_RIR_GUIDANCE.get(preference),
+            guidance=_RIR_GUIDANCE.get(preference), outcome=goal,
         )
     if field == "load":
-        return _generate_field("load", str, "intensity", query, field_description=_LOAD_DESCRIPTION)
+        return _generate_field("load", str, "intensity", query, field_description=_LOAD_DESCRIPTION, outcome=goal)
     raise ValueError(f"No movement-level generation for {field}")
 
 
@@ -558,6 +620,7 @@ def generate_frequency(muscle_group: str | None, goal: str) -> tuple[pydantic.Ba
         build_frequency_query(muscle_group, goal),
         field_description="Training frequency as a single integer - sessions "
         "per week for this muscle group.",
+        outcome=goal,
     )
 
 # muscle_group=None asks about any muscle: whole-block generation asks
@@ -625,6 +688,7 @@ def generate_progression_scheme(muscle_group: str | None, goal: str) -> tuple[py
         "'linear' (progressively increasing intensity/decreasing volume "
         "across the block) or 'undulating' (intensity/volume varies "
         "week to week or day to day rather than trending in one direction).",
+        outcome=goal,
     )
 
 
@@ -774,7 +838,7 @@ def answer_general_question(topic: str) -> tuple[pydantic.BaseModel, list[dict]]
     # General Q&A (chat mode 3): not tied to one dosage category, so
     # it searches the whole corpus. Returns a summary and statements to verify.
     chunks = _retrieve_general_chunks(topic)
-    context_block = "\n\n".join(f"[{c['id']}] ({c['source']}) {c['text']}" for c in chunks)
+    context_block = "\n\n".join(f"[{c['id']}] ({evidence_label(c)}) {c['text']}" for c in chunks)
     parsed = _answer_in_statements(
         _QA_SYSTEM_PROMPT, f"Context:\n{context_block}\n\nQuestion: {topic}", [c["id"] for c in chunks],
         with_summary=True,

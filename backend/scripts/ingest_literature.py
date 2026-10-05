@@ -1,45 +1,35 @@
 """
-Trigger ingestion of a single PDF into the "literature" Qdrant collection.
+Trigger ingestion of one paper into the "literature" Qdrant collection.
+The paper must be listed in corpus/papers.json first - its PDF path,
+categories and tags come from there.
 
 Requires both the FastAPI app and the Inngest dev server running:
     uvicorn app.main:app --port 8000 --reload
     npx inngest-cli@latest dev -u http://localhost:8000/api/inngest
 
 Usage:
-    uv run python -m scripts.ingest_literature <pdf_path> <category> [source_id]
+    uv run python -m scripts.ingest_literature <source_id>
 
-    category must be one of: volume, frequency, intensity, progression, recovery
+For a quick re-ingest without Inngest, see scripts/reingest_literature.py.
 """
 
 import argparse
 import asyncio
-import sys
-from typing import get_args
 
 import inngest
 
+from app.rag.corpus import paper
 from app.rag.ingest import inngest_client
-from app.rag.types import Category
-
-VALID_CATEGORIES = set(get_args(Category))
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Ingest a PDF into the literature collection")
-    parser.add_argument("pdf_path", help="Path to the PDF file")
-    parser.add_argument("category", choices=sorted(VALID_CATEGORIES))
-    parser.add_argument("source_id", nargs="?", default=None, help="Defaults to the pdf_path")
+    parser = argparse.ArgumentParser(description="Ingest a paper listed in corpus/papers.json")
+    parser.add_argument("source_id")
     args = parser.parse_args()
+    paper(args.source_id)  # fail fast if it isn't in the manifest
 
     event_ids = await inngest_client.send(
-        inngest.Event(
-            name="rag/ingest_literature",
-            data={
-                "pdf_path": args.pdf_path,
-                "category": args.category,
-                "source_id": args.source_id or args.pdf_path,
-            },
-        )
+        inngest.Event(name="rag/ingest_literature", data={"source_id": args.source_id})
     )
     print(f"Sent event {event_ids[0]} — check the Inngest dashboard (localhost:8288) for run status.")
 

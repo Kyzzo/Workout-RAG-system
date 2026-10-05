@@ -29,7 +29,7 @@ def _clear(db_session):
 @patch("app.rag.rule_justifications._retrieve_chunks")
 def test_rule_shows_only_judge_accepted_excerpts_and_is_cached(mock_retrieve, mock_judge, db_session):
     _clear(db_session)
-    mock_retrieve.side_effect = lambda query, category: _chunks(f"{category}-1", "shared")
+    mock_retrieve.side_effect = lambda query, category, outcome=None: _chunks(f"{category}-1", "shared")
     verdicts = {"excerpt for volume-1": "primary_support", "excerpt for frequency-1": "contradicted",
                 "excerpt for shared": "contextual_support"}
     mock_judge.side_effect = lambda q, claim, text, judge: SimpleNamespace(outcome=verdicts[text], reasoning="")
@@ -48,7 +48,7 @@ def test_rule_shows_only_judge_accepted_excerpts_and_is_cached(mock_retrieve, mo
 @patch("app.rag.rule_justifications._retrieve_chunks")
 def test_refresh_rejudges_and_unsupported_rules_say_so(mock_retrieve, mock_judge, db_session):
     _clear(db_session)
-    mock_retrieve.side_effect = lambda query, category: _chunks(f"{category}-1")
+    mock_retrieve.side_effect = lambda query, category, outcome=None: _chunks(f"{category}-1")
     mock_judge.return_value = SimpleNamespace(outcome="primary_support", reasoning="")
     justify_rule(db_session, "even_session_split")
 
@@ -73,7 +73,7 @@ def test_unknown_rule_is_404(db_session, owner_and_prescription):
 def test_same_excerpt_from_a_double_ingested_paper_is_judged_once(mock_retrieve, mock_judge, db_session):
     _clear(db_session)
     # the same paper ingested as volume AND frequency: identical text, different ids
-    mock_retrieve.side_effect = lambda query, category: [
+    mock_retrieve.side_effect = lambda query, category, outcome=None: [
         {"id": f"{category}-copy", "text": "per-session volume shows diminishing returns", "source": f"paper-{category}"}
     ]
     mock_judge.return_value = SimpleNamespace(outcome="primary_support", reasoning="")

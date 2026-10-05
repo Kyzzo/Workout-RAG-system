@@ -12,8 +12,7 @@ Category = Literal["volume", "frequency", "intensity", "progression", "recovery"
 
 class ChunksAndMeta(pydantic.BaseModel):
     chunks: list[str]
-    source_id: str
-    category: Category
+    source_id: str  # its tags come from corpus/papers.json
 
 
 class UpsertResult(pydantic.BaseModel):

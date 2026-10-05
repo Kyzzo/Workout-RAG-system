@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..citations import get_or_create_citation
+from .corpus import evidence_text
 from .generate import _retrieve_chunks
 from .verification import STATEMENT_JUDGE, judge_citation
 
@@ -24,6 +25,7 @@ class Rule:
     claim: str  # what the rule asserts - the thing citations must support
     query: str  # how to retrieve candidate evidence for it
     categories: tuple[str, ...]
+    outcome: str | None = None  # the outcome the claim is about, if one (retrieval filter)
 
 
 RULES = {
@@ -49,6 +51,7 @@ RULES = {
         ),
         query="Volume efficiency tiers for hypertrophy by fractional weekly sets per muscle",
         categories=("volume",),
+        outcome="hypertrophy",
     ),
     # The basis of the strength volume options (VOLUME_BANDS in generate.py).
     "strength_volume_efficiency_tiers": Rule(
@@ -60,6 +63,7 @@ RULES = {
         ),
         query="Volume efficiency tiers for strength gains by fractional weekly sets",
         categories=("volume",),
+        outcome="strength",
     ),
     # The two halves of the hypertrophy frequency explanation shown in the
     # wizard and per muscle (hypertrophy frequency isn't generated as a
@@ -73,6 +77,7 @@ RULES = {
         ),
         query="Training frequency two versus three days per week with equated volume and muscle hypertrophy",
         categories=("frequency",),
+        outcome="hypertrophy",
     ),
     "per_session_diminishing_returns": Rule(
         claim=(
@@ -82,6 +87,7 @@ RULES = {
         ),
         query="Per-session set volume diminishing returns for hypertrophy and spreading weekly volume across sessions",
         categories=("volume", "frequency"),
+        outcome="hypertrophy",
     ),
 }
 
@@ -101,7 +107,7 @@ def justify_rule(db: Session, key: str, refresh: bool = False) -> models.RuleJus
     # different ids, which would otherwise show up as duplicate excerpts.
     candidates = {}
     for category in rule.categories:
-        for chunk in _retrieve_chunks(rule.query, category):
+        for chunk in _retrieve_chunks(rule.query, category, rule.outcome):
             candidates.setdefault(" ".join(chunk["text"].split()), chunk)
 
     def judge(chunk):
@@ -109,7 +115,7 @@ def justify_rule(db: Session, key: str, refresh: bool = False) -> models.RuleJus
         # its candidates are judged in parallel, since a first request (or a
         # fresh database) runs this pass while the user waits.
         try:
-            return judge_citation(rule.query, rule.claim, chunk["text"], judge=STATEMENT_JUDGE).outcome
+            return judge_citation(rule.query, rule.claim, evidence_text(chunk), judge=STATEMENT_JUDGE).outcome
         except Exception:
             return "unresolved"
 

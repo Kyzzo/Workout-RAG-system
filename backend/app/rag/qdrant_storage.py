@@ -10,13 +10,17 @@ QDRANT_URL = os.environ["QDRANT_URL"]
 QDRANT_API_KEY = os.environ["QDRANT_API_KEY"]
 
 # Qdrant Cloud's strict mode refuses to filter on a payload field at all
-# unless it has an index — each collection needs the field its retrieval
-# filtering actually depends on: "literature" filters by research category,
-# "user_context" will filter by user_id (the privacy boundary).
+# unless it has an index — each collection needs the fields its retrieval
+# filtering actually depends on: "literature" filters by research
+# categories, outcome and paper (source); "user_context" will filter by
+# user_id (the privacy boundary).
 REQUIRED_PAYLOAD_INDEXES = {
-    "literature": "category",
-    "user_context": "user_id",
+    "literature": ("categories", "outcome", "source"),
+    "user_context": ("user_id",),
 }
+
+# Paper-level tags stored on every excerpt (corpus/papers.json).
+_TAG_FIELDS = ("categories", "citation", "study_type", "outcome", "population", "year", "publication")
 
 
 def _to_chunks(results) -> list[dict]:
@@ -28,6 +32,7 @@ def _to_chunks(results) -> list[dict]:
             chunks.append({
                 "id": str(r.id), "text": text, "source": payload.get("source", ""),
                 "category": payload.get("category"), "score": getattr(r, "score", 0.0),
+                **{field: payload[field] for field in _TAG_FIELDS if field in payload},
             })
     return chunks
 
@@ -41,8 +46,7 @@ class QdrantStorage:
                 collection_name=self.collection,
                 vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
             )
-            index_field = REQUIRED_PAYLOAD_INDEXES.get(collection)
-            if index_field:
+            for index_field in REQUIRED_PAYLOAD_INDEXES.get(collection, ()):
                 self.client.create_payload_index(
                     collection_name=self.collection,
                     field_name=index_field,

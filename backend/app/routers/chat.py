@@ -20,6 +20,7 @@ from ..rag.generate import (
     generate_volume_sets,
     max_sets_per_exercise,
 )
+from ..rag.corpus import evidence_label, evidence_text
 from ..rag.verification import STATEMENT_JUDGE, verify_citation, verify_summary
 from .generation import (
     _GENERAL_KNOWLEDGE_NOTE,
@@ -210,7 +211,7 @@ def _verify_statements(question: str, parsed, sources: dict[str, dict]):
 
     def judge(pair):
         text, source = pair
-        return verify_citation(question, text, source["text"], judge=STATEMENT_JUDGE)
+        return verify_citation(question, text, evidence_text(source), judge=STATEMENT_JUDGE)
 
     summary = getattr(parsed, "summary", None)
     summary_sources = (
@@ -222,7 +223,7 @@ def _verify_statements(question: str, parsed, sources: dict[str, dict]):
     if pairs or summary_sources:
         with ThreadPoolExecutor(max_workers=min(len(pairs) + 1, 16)) as pool:
             summary_check = (
-                pool.submit(verify_summary, question, summary.text, [s["text"] for s in summary_sources])
+                pool.submit(verify_summary, question, summary.text, [evidence_text(s) for s in summary_sources])
                 if summary_sources else None
             )
             statuses = list(pool.map(judge, pairs))
@@ -262,7 +263,7 @@ def _compose(kept, field_of=lambda source: None, summary=None):
             if key not in numbers:
                 numbers[key] = len(numbers) + 1
                 citations.append(schemas.ChatCitationOut(
-                    title=source["source"], snippet=source["text"], field=field_of(source),
+                    title=evidence_label(source), snippet=source["text"], field=field_of(source),
                 ))
             refs.append(numbers[key])
         suffix = " " + "".join(f"[{n}]" for n in sorted(set(refs))) if refs else ""
