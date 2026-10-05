@@ -2,13 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { runBlockGeneration } from "./blockGeneration";
-import { SourcesPanel } from "./Citations";
+import { RuleSources } from "./RuleSources";
 import {
   VOLUME_LABELS,
   volumeLabel,
   type Program,
   type ProgramSummary,
-  type RuleJustification,
   type VolumePreference,
 } from "./types";
 import { useApi } from "./useApi";
@@ -16,6 +15,24 @@ import { useApi } from "./useApi";
 type SplitOption = { key: string; label: string; allowed_days: number[]; day_types: string[] };
 
 const GOALS = ["hypertrophy", "strength"];
+
+// Each muscle sits in one of a split's day types, so training days divided
+// by day types is how many times a week each muscle is trained.
+function perMuscle(split: SplitOption, days: number) {
+  return days / split.day_types.length;
+}
+
+function frequencyLabel(split: SplitOption, days: number) {
+  return `${perMuscle(split, days)}x per muscle · ${days} days/week`;
+}
+
+// The split's day count closest to a per-muscle frequency (default 2x).
+function daysForFrequency(split: SplitOption, frequency: number) {
+  return split.allowed_days.reduce((best, d) =>
+    Math.abs(perMuscle(split, d) - frequency) < Math.abs(perMuscle(split, best) - frequency) ? d : best,
+  );
+}
+
 const selectClass = "border rounded px-3 py-2 bg-white dark:bg-zinc-900";
 
 // Generates a whole program from four choices: the structure (days, rest
@@ -37,11 +54,6 @@ export default function ProgramWizard({
   const [days, setDays] = useState(0);
   const [weeks, setWeeks] = useState("6");
   const [volume, setVolume] = useState<VolumePreference>("moderate");
-  // The verified sources behind the hypertrophy volume ranges, fetched the
-  // first time they're opened.
-  const [tierRule, setTierRule] = useState<RuleJustification | null>(null);
-  const [tierSourcesOpen, setTierSourcesOpen] = useState(false);
-  const [tierRuleError, setTierRuleError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +67,7 @@ export default function ProgramWizard({
         if (stale) return;
         setSplits(list);
         setSplitKey(list[0]?.key ?? "");
-        setDays(list[0]?.allowed_days[0] ?? 0);
+        setDays(list[0] ? daysForFrequency(list[0], 2) : 0);
       } catch (err) {
         if (!stale) setError(err instanceof Error ? err.message : String(err));
       }
@@ -67,23 +79,11 @@ export default function ProgramWizard({
 
   const split = splits.find((s) => s.key === splitKey);
 
-  async function toggleTierSources() {
-    const opening = !tierSourcesOpen;
-    setTierSourcesOpen(opening);
-    if (!opening || tierRule) return;
-    setTierRuleError(null);
-    try {
-      setTierRule(await api<RuleJustification>("/rules/volume_efficiency_tiers"));
-    } catch (err) {
-      setTierRuleError(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   function chooseSplit(key: string) {
     setSplitKey(key);
     const next = splits.find((s) => s.key === key);
-    // Keep the day count if the new split supports it, else its first option.
-    if (next && !next.allowed_days.includes(days)) setDays(next.allowed_days[0]);
+    // Keep the per-muscle frequency across splits (as close as the new one allows).
+    if (next) setDays(daysForFrequency(next, split ? perMuscle(split, days) : 2));
   }
 
   async function handleGenerate(e: React.FormEvent) {
@@ -141,15 +141,19 @@ export default function ProgramWizard({
             </option>
           ))}
         </select>
+        {/* Frequency per muscle and days per week map one-to-one within a
+            split (each muscle sits in one day type), so picking a frequency
+            picks the days. */}
         <select
           value={days}
           onChange={(e) => setDays(Number(e.target.value))}
           className={selectClass}
           disabled={running}
+          title="How many times a week each muscle is trained. With weekly sets matched, research shows no significant growth difference between 2x and 3x; more sessions help spread higher volume."
         >
           {(split?.allowed_days ?? []).map((d) => (
             <option key={d} value={d}>
-              {d} days/week
+              {frequencyLabel(split!, d)}
             </option>
           ))}
         </select>
@@ -179,25 +183,21 @@ export default function ProgramWizard({
         </select>
       </div>
       {goal === "hypertrophy" && (
-        <div className="text-xs text-zinc-500">
-          <p>
-            Volume ranges: Pelland et al. 2025&apos;s efficiency tiers (5-10 sets higher efficiency, 11-18
-            intermediate).{" "}
-            <button type="button" onClick={toggleTierSources} className="underline">
-              {tierSourcesOpen ? "hide sources" : "sources"}
-            </button>
-          </p>
-          {tierSourcesOpen &&
-            (tierRule ? (
-              <SourcesPanel
-                heading={tierRule.claim}
-                citations={tierRule.supporting_citations}
-                note={tierRule.grounding_note}
-              />
-            ) : (
-              <p className={tierRuleError ? "text-red-600" : ""}>{tierRuleError ?? "Loading sources..."}</p>
-            ))}
-        </div>
+        <>
+          <RuleSources
+            text="Volume ranges: Pelland et al. 2025's efficiency tiers (5-10 sets higher efficiency, 11-18 intermediate)."
+            ruleKeys={["volume_efficiency_tiers"]}
+          />
+          <RuleSources
+            text={
+              "Frequency: with weekly sets matched, studies show no significant growth difference between " +
+              "training a muscle 2x and 3x a week. More sessions still help at higher volumes, since gains " +
+              "within one session diminish past ~11 sets."
+            }
+            ruleKeys={["frequency_matched_volume", "per_session_diminishing_returns"]}
+            secondHeading="Why more sessions help at higher volume"
+          />
+        </>
       )}
       {split && (
         <p className="text-xs text-zinc-500">

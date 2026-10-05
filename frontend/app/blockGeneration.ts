@@ -93,11 +93,17 @@ async function runSteps(
     hooks.onProgress(`${phase} ${done}/${total}`);
   };
 
-  done = 0;
-  hooks.onProgress(`Frequency 0/${groups.length}`);
-  await runParallel(groups.map((group) => counted("Frequency", groups.length, () =>
-    step(`Frequency (${group})`, `/mesocycles/${mesocycleId}/generate-frequency`, { muscle_group: group, add_days: false }),
-  )));
+  // Strength only: frequency does change strength gains, so it's a cited
+  // number to compare against. For hypertrophy it isn't generated - with
+  // weekly sets matched it doesn't change growth detectably, and the program
+  // view shows that cited finding instead.
+  if (program.goal === "strength") {
+    done = 0;
+    hooks.onProgress(`Frequency 0/${groups.length}`);
+    await runParallel(groups.map((group) => counted("Frequency", groups.length, () =>
+      step(`Frequency (${group})`, `/mesocycles/${mesocycleId}/generate-frequency`, { muscle_group: group, add_days: false }),
+    )));
+  }
 
   // Sequential, in VOLUME_ORDER, so each muscle's split sees the secondary
   // credit from muscles already split.

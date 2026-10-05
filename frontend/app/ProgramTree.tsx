@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { runBlockGeneration } from "./blockGeneration";
 import ProgressionGuide from "./ProgressionGuide";
 import { SourcesBadge, SourcesPanel } from "./Citations";
+import { RuleSources } from "./RuleSources";
 import { AddDayForm, AddExerciseForm, AddMesocycleForm } from "./StructureForms";
 import {
   volumeLabel,
@@ -341,6 +342,23 @@ export default function ProgramTree({
                   </span>
                 </summary>
                 <div className="flex flex-col mt-2">
+                  {/* Hypertrophy frequency isn't a generated number: with weekly
+                      sets matched it doesn't change growth detectably, so the
+                      cited finding is shown once and each muscle shows its
+                      plan's frequency and per-session load instead. */}
+                  {!strength && (
+                    <div className="pb-2 border-b">
+                      <RuleSources
+                        text={
+                          "Frequency: with weekly sets matched, studies show no significant growth difference " +
+                          "between training a muscle 2x and 3x a week. More sessions help at higher volumes, " +
+                          "since gains within one session diminish past ~11 sets."
+                        }
+                        ruleKeys={["frequency_matched_volume", "per_session_diminishing_returns"]}
+                        secondHeading="Why more sessions help at higher volume"
+                      />
+                    </div>
+                  )}
                   {muscleGroups.map((group) => {
                     const frequency = mesocycle.muscle_group_frequencies.find((f) => f.muscle_group === group);
                     const volume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group);
@@ -353,7 +371,12 @@ export default function ProgramTree({
                       <div key={group} className="py-1.5 border-b last:border-b-0">
                         <div className="flex flex-wrap items-center gap-3">
                           <span className="w-24">{group}</span>
-                          <span className="text-zinc-500">you train it {daysTraining(mesocycle, group)}x/week</span>
+                          <span className="text-zinc-500">
+                            you train it {daysTraining(mesocycle, group)}x/week
+                            {!strength && daysTraining(mesocycle, group) > 0 && (
+                              <> · ~{Math.round(delivered / daysTraining(mesocycle, group))} sets per session</>
+                            )}
+                          </span>
                           {volume && (
                             <span>
                               {volume.weekly_sets} sets/week suggested
@@ -370,7 +393,7 @@ export default function ProgramTree({
                               </span>
                             </span>
                           )}
-                          {frequency && (
+                          {strength && frequency && (
                             <span>
                               research suggests {frequency.frequency}x/week
                               <SourcesBadge
@@ -400,14 +423,16 @@ export default function ProgramTree({
                           >
                             {busyKey === `volume-${mesocycle.id}-${group}` ? "generating..." : "generate volume"}
                           </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => generateFrequency(mesocycle, group)}
-                            className={actionClass}
-                          >
-                            {busyKey === `frequency-${mesocycle.id}-${group}` ? "generating..." : "generate frequency"}
-                          </button>
+                          {strength && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => generateFrequency(mesocycle, group)}
+                              className={actionClass}
+                            >
+                              {busyKey === `frequency-${mesocycle.id}-${group}` ? "generating..." : "generate frequency"}
+                            </button>
+                          )}
                           {program.goal === "strength" && (
                             <button
                               type="button"
@@ -426,7 +451,7 @@ export default function ProgramTree({
                             note={volume.grounding_note}
                           />
                         )}
-                        {frequency && openSources === freqKey && (
+                        {strength && frequency && openSources === freqKey && (
                           <SourcesPanel
                             heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
                             citations={frequency.supporting_citations}

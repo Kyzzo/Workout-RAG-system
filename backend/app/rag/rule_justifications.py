@@ -50,6 +50,28 @@ RULES = {
         query="Volume efficiency tiers for hypertrophy by fractional weekly sets per muscle",
         categories=("volume",),
     ),
+    # The two halves of the hypertrophy frequency explanation shown in the
+    # wizard and per muscle (hypertrophy frequency isn't generated as a
+    # number: with volume matched it doesn't move growth detectably, so a
+    # single "research suggests Nx" read as if other frequencies were worse).
+    "frequency_matched_volume": Rule(
+        claim=(
+            "When weekly sets are matched, training a muscle three times per week has not produced "
+            "significantly more hypertrophy than training it twice per week, and training frequency's "
+            "independent effect on hypertrophy is small."
+        ),
+        query="Training frequency two versus three days per week with equated volume and muscle hypertrophy",
+        categories=("frequency",),
+    ),
+    "per_session_diminishing_returns": Rule(
+        claim=(
+            "Hypertrophy shows diminishing returns as sets per session increase, with no detectable "
+            "advantage beyond roughly 11 fractional sets for a muscle in one session, so higher weekly "
+            "volumes are better spread across more sessions."
+        ),
+        query="Per-session set volume diminishing returns for hypertrophy and spreading weekly volume across sessions",
+        categories=("volume", "frequency"),
+    ),
 }
 
 NO_SUPPORT_NOTE = (

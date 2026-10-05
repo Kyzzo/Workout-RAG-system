@@ -52,6 +52,13 @@ CASES = [
     ("chat: set range wording",
      lambda: G._retrieve_general_chunks("what is the most optimal set range per muscle group for hypertrophy"),
      {"pelland-etal-2025-volume", "remmert-etal-2025-per-session-volume"}),
+    ("chat: 3x vs 2x frequency",
+     lambda: G._retrieve_general_chunks("Is training a muscle 3 times a week better than 2 times for hypertrophy?"),
+     {"lasevicius-etal-2019-2x-vs-3x", "pelland-etal-2025-frequency"}),
+    ("rule: frequency with matched volume",
+     lambda: G._retrieve_chunks(
+         "Training frequency two versus three days per week with equated volume and muscle hypertrophy", "frequency"),
+     {"lasevicius-etal-2019-2x-vs-3x"}),
     ("chat: proximity to failure",
      lambda: G._retrieve_general_chunks("how close to failure should I train for hypertrophy"),
      {"refalo-etal-2023-proximity-failure-meta", "robinson-etal-2024-proximity-to-failure"}),
