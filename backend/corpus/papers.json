@@ -89,6 +89,27 @@
           "find": "\\",
           "replace": "<",
           "min_count": 5
+        },
+        {
+          "find": "(sets 9 repetitions)",
+          "replace": "(sets × repetitions)",
+          "min_count": 3
+        },
+        {
+          "find": "(?<=\\s)(\\d{1,2}(?:–\\d)?) 9 (\\d{1,2}(?:–\\d{1,2})?%?)(?=[ ;])",
+          "replace": "\\1 × \\2",
+          "regex": true,
+          "min_count": 23
+        },
+        {
+          "find": "/C211",
+          "replace": "©",
+          "min_count": 1
+        },
+        {
+          "find": "/C22",
+          "replace": "",
+          "min_count": 1
         }
       ]
     },
@@ -103,7 +124,34 @@
       "outcome": "both",
       "population": "mixed",
       "year": 2022,
-      "publication": "journal"
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "/C211",
+          "replace": "©",
+          "min_count": 1
+        },
+        {
+          "find": "/C20",
+          "replace": "≤",
+          "min_count": 1
+        },
+        {
+          "find": "/C19",
+          "replace": "",
+          "min_count": 8
+        },
+        {
+          "find": "/C0",
+          "replace": "−",
+          "min_count": 99
+        },
+        {
+          "find": "£",
+          "replace": "≤",
+          "min_count": 21
+        }
+      ]
     },
     {
       "source": "harries-etal-2015-linear-vs-undulating",
@@ -249,7 +297,60 @@
       "outcome": "both",
       "population": "trained",
       "year": 2017,
-      "publication": "journal"
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "/C210",
+          "replace": "®",
+          "min_count": 1
+        },
+        {
+          "find": "/C176",
+          "replace": "°",
+          "min_count": 1
+        },
+        {
+          "find": "/C19",
+          "replace": "",
+          "min_count": 71
+        },
+        {
+          "find": "/C6",
+          "replace": "±",
+          "min_count": 236
+        },
+        {
+          "find": "/C0",
+          "replace": "−",
+          "min_count": 2
+        },
+        {
+          "find": "(group[’']?) 9 ([‘']?time)",
+          "replace": "\\1 × \\2",
+          "regex": true,
+          "min_count": 6
+        },
+        {
+          "find": "2 9 2 fac",
+          "replace": "2 × 2 fac",
+          "min_count": 1
+        },
+        {
+          "find": "256 9 256",
+          "replace": "256 × 256",
+          "min_count": 1
+        },
+        {
+          "find": "1.64 mm 9 1.64 mm",
+          "replace": "1.64 mm × 1.64 mm",
+          "min_count": 1
+        },
+        {
+          "find": "lifted) 9 concentric",
+          "replace": "lifted) × concentric",
+          "min_count": 1
+        }
+      ]
     },
     {
       "source": "pelland-etal-2025",
@@ -280,7 +381,24 @@
       "outcome": "both",
       "population": "trained",
       "year": 2022,
-      "publication": "journal"
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "/C14",
+          "replace": "°",
+          "min_count": 2
+        },
+        {
+          "find": "/C15",
+          "replace": "•",
+          "min_count": 10
+        },
+        {
+          "find": "SEM /C2",
+          "replace": "SEM ×",
+          "min_count": 1
+        }
+      ]
     },
     {
       "source": "refalo-etal-2023-proximity-failure-meta",

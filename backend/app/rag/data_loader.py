@@ -50,22 +50,48 @@ def _apply_fix(text: str, fix) -> tuple[str, int]:
     return text.replace(fix.find, fix.replace), text.count(fix.find)
 
 
-def load_and_chunk_pdf(path: str, text_fixes=()) -> list[str]:
-    """`text_fixes`: the paper's corpus TextFix entries, applied per page
+# A line that is only a references heading. Everything after a paper's last
+# one is bibliography (plus licence and author-contribution boilerplate) -
+# checked against every paper in the corpus.
+_REFERENCES_HEADING = re.compile(
+    r"^\s*(references|reference list|literature cited|bibliography)\s*:?\s*$", re.I | re.M,
+)
+
+BODY, REFERENCES = "body", "references"
+
+
+def load_and_chunk_pdf(path: str, text_fixes=()) -> list[tuple[str, str]]:
+    """The paper's chunks as (text, section) pairs, section being 'body' or
+    'references'. The text is split at the references heading before
+    chunking, so no chunk mixes findings with bibliography and retrieval
+    can leave the bibliography out (a reference list cites the very topics
+    a question asks about, so it matches well but states no findings).
+
+    `text_fixes`: the paper's corpus TextFix entries, applied per page
     before chunking. Raises if a fix matches fewer times than its
     min_count, so a stale fix can't silently leave wrong numbers in."""
-    chunks = []
+    pages = []
     counts = [0] * len(text_fixes)
     for page in PdfReader(path).pages:
         text = _page_text(page)
         for i, fix in enumerate(text_fixes):
             text, n = _apply_fix(text, fix)
             counts[i] += n
-        if text.strip():
-            chunks.extend(splitter.split_text(text))
+        pages.append(text)
     for fix, n in zip(text_fixes, counts):
         if n < fix.min_count:
             raise ValueError(f"Text fix {fix.find!r} matched {n} times in {path}, expected at least {fix.min_count}")
+
+    headings = [(i, m.start()) for i, text in enumerate(pages) for m in _REFERENCES_HEADING.finditer(text)]
+    split_page, split_at = headings[-1] if headings else (len(pages), 0)
+    chunks = []
+    for i, text in enumerate(pages):
+        parts = [(text, BODY)] if i < split_page else [(text, REFERENCES)]
+        if i == split_page:
+            parts = [(text[:split_at], BODY), (text[split_at:], REFERENCES)]
+        for part, section in parts:
+            if part.strip():
+                chunks.extend((chunk, section) for chunk in splitter.split_text(part))
     return chunks
 
 

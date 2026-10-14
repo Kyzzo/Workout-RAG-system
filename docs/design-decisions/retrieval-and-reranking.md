@@ -35,18 +35,26 @@ questions:
    pass exists because the top-N by similarity often came from just three
    papers, so a meta-analysis phrased differently never even became a
    candidate.
-2. **Drop what can't be evidence.** Duplicate excerpts (a paper filed under
-   two categories) and reference lists (detected by repeated
-   journal-citation patterns) are removed.
+2. **Drop what can't be evidence.** Each paper is split at its References
+   heading when it's ingested, so its bibliography becomes separate,
+   tagged excerpts that the search itself leaves out — a reference list
+   names the very topics a question asks about, so it matches well but
+   states no findings, and in the per-paper pass it used to take a paper's
+   few slots. Duplicate excerpts (a paper filed under two categories) are
+   removed too.
 3. **Rerank by meaning.** A small model scores every candidate 0–10 for
    how well it *answers the question* — a finding that directly answers it
    for the right outcome scores high; an introduction, methods passage or
    a finding for a different outcome scores low. Statistical results count
-   as answers even when they share no words with the question.
+   as answers even when they share no words with the question. Candidates
+   are scored in batches of 15, in parallel: sent all at once (100+
+   excerpts once the corpus reached 26 papers), the scores went
+   near-uniform and stopped separating answers from background.
 4. **Pick for relevance first, then spread.** Excerpts scoring at least 4
    are taken first, at most two per paper so one study can't fill every
-   slot, then backfilled by score; weaker excerpts only fill leftover room.
-   Ten excerpts for a generated value, fifteen for a chat answer.
+   slot, then backfilled; weaker excerpts only fill leftover room, and are
+   spread across papers the same way. Ten excerpts for a generated value,
+   fifteen for a chat answer.
 
 If the reranker fails, retrieval falls back to similarity order — reranking
 improves evidence, it isn't allowed to break generation.
@@ -75,9 +83,26 @@ Result: all expected papers retrieved (23 of 23), with most questions
 drawing on five to ten papers at most two excerpts each — where before one
 paper often supplied five to nine.
 
+Growing the corpus from 14 to 26 papers surfaced two more:
+
+- **Bibliographies taking slots.** For a rep-range question, the per-paper
+  pass gave two load meta-analyses three slots each — mostly their
+  reference lists, which the citation-pattern detector missed in some
+  journals' formats. Their findings never reached the reranker, and one
+  review supplied 8 of 10 excerpts. Splitting papers at the References
+  heading fixed this for every citation style at once.
+- **Too many excerpts per reranker call** (above): scored in one call, a
+  frequency question gave 10/10 to most excerpts of unrelated
+  proximity-to-failure papers. Batching restored discrimination.
+
+After both: 39 of 40 expected papers. The one miss is a meta-analysis whose
+findings rank below its discussion for one long, templated generation
+question.
+
 ## Cost
 
-One small-model call per retrieval. Chat pays it once per question (a few
+A few small-model calls per retrieval (one per batch of 15 candidates, in
+parallel — about the same total tokens as a single call). Chat pays it once per question (a few
 percent of an answer's cost, since each answer already makes many judge
 calls). Generation pays it only when a [shared answer](shared-research-answers.md)
 is first created, so per program it's effectively zero. It can also save
@@ -110,9 +135,14 @@ its excerpts. That changes three things:
 
 ## What's still missing
 
-- **Thin categories.** Reranking can't conjure evidence that isn't there:
-  rep ranges rest on one paper and progression on one. More papers matter
-  more than any retrieval tuning for those.
+- **Thin categories.** Reranking can't conjure evidence that isn't there.
+  Rep ranges and progression each rested on one paper until the corpus
+  grew to 26; recovery still rests on two.
+- **Long generation questions.** A generation question names exercises and
+  asks for a format ("answer with a rep range like '8-12'"), which pulls
+  similarity toward passages that mention exercises rather than ones that
+  report results. Searching with a shorter statement of what's being asked
+  would likely help.
 - **The reranker is generous.** It sometimes scores a hypertrophy finding
   highly for a strength question. That's tolerable because the judge, not
   the reranker, decides what counts as support — reranking only decides

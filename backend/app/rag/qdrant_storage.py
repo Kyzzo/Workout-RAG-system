@@ -1,8 +1,12 @@
+import hashlib
 import os
+import uuid
 
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, Filter, PayloadSchemaType, PointStruct, VectorParams
+from qdrant_client.models import (
+    Distance, FieldCondition, Filter, MatchValue, PayloadSchemaType, PointStruct, VectorParams,
+)
 
 load_dotenv()
 
@@ -12,17 +16,40 @@ QDRANT_API_KEY = os.environ["QDRANT_API_KEY"]
 # Qdrant Cloud's strict mode refuses to filter on a payload field at all
 # unless it has an index — each collection needs the fields its retrieval
 # filtering actually depends on: "literature" filters by research
-# categories, outcome and paper (source); "user_context" will filter by
-# user_id (the privacy boundary).
+# categories, outcome, paper (source) and section (to leave bibliographies
+# out); "user_context" will filter by user_id (the privacy boundary).
 REQUIRED_PAYLOAD_INDEXES = {
-    "literature": ("categories", "outcome", "source"),
+    "literature": ("categories", "outcome", "source", "section"),
     "user_context": ("user_id",),
 }
 
-# Paper-level tags stored on every excerpt (corpus/papers.json).
+# Paper-level tags stored on every excerpt (corpus/papers.json), plus the
+# excerpt's section ('body' or 'references', set at ingestion).
 _TAG_FIELDS = (
     "categories", "citation", "study_type", "outcome", "population", "year", "publication", "evidence_note",
+    "section",
 )
+
+# Reference lists name the very topics a question asks about, so they match
+# well but state no findings - and in per-paper search they took a paper's
+# few slots (Lopez 2021's best match for a rep-range question was its
+# bibliography). Excluded in the search itself, so they never take a slot.
+_IS_REFERENCES = FieldCondition(key="section", match=MatchValue(value="references"))
+
+
+def _without_references(query_filter: Filter | None) -> Filter:
+    if query_filter is None:
+        return Filter(must_not=[_IS_REFERENCES])
+    return query_filter.model_copy(update={"must_not": [*(query_filter.must_not or []), _IS_REFERENCES]})
+
+
+def chunk_point_id(source: str, index: int, text: str) -> str:
+    """A chunk's Qdrant point id. Citations are stored by point id and reused
+    when a chunk is retrieved again, so the id includes the text: re-chunking
+    a paper (a loader change shifts every index) must not hand an old
+    citation's id - and the excerpt it showed - to different text."""
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{source}:{index}:{digest}"))
 
 
 def _to_chunks(results) -> list[dict]:
@@ -62,11 +89,14 @@ class QdrantStorage:
         ]
         self.client.upsert(self.collection, points=points)
 
+    def _filter(self, query_filter: Filter | None) -> Filter | None:
+        return _without_references(query_filter) if self.collection == "literature" else query_filter
+
     def search(self, query_vector: list[float], top_k: int = 5, query_filter: Filter | None = None):
         results = self.client.query_points(
             collection_name=self.collection,
             query=query_vector,
-            query_filter=query_filter,
+            query_filter=self._filter(query_filter),
             with_payload=True,
             limit=top_k,
         ).points
@@ -83,7 +113,7 @@ class QdrantStorage:
             collection_name=self.collection,
             query=query_vector,
             group_by="source",
-            query_filter=query_filter,
+            query_filter=self._filter(query_filter),
             limit=sources,
             group_size=per_source,
             with_payload=True,

@@ -1,5 +1,6 @@
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Literal
 
@@ -194,11 +195,18 @@ def _outcome_of(question: str) -> str | None:
 
 def _usable(ranked: list[dict]) -> list[dict]:
     """Drops duplicate excerpts (a paper ingested under two categories has
-    identical chunks under different ids) and reference lists, keeping order."""
+    identical chunks under different ids) and reference lists, keeping order.
+    Excerpts tagged with a section were split from the bibliography at
+    ingestion (and the search already leaves 'references' out); the
+    citation-count heuristic is only a fallback for untagged ones, since it
+    also drops findings that happen to cite three DOIs."""
     usable, seen_text = [], set()
     for chunk in ranked:
         key = " ".join(chunk["text"].split())
-        if key in seen_text or _is_reference_list(chunk["text"]):
+        is_reference = (
+            chunk["section"] == "references" if "section" in chunk else _is_reference_list(chunk["text"])
+        )
+        if key in seen_text or is_reference:
             continue
         seen_text.add(key)
         usable.append(chunk)
@@ -253,36 +261,51 @@ _RERANK_PROMPT = (
 )
 
 
+# Excerpts per reranker call. Scored all at once, 100+ excerpts (26 papers'
+# candidates) got near-uniform scores - a 10 for most excerpts of
+# proximity-to-failure papers on a frequency question, 9 for the direct
+# 2x-vs-3x trial. Batches score on the same absolute rubric, in parallel,
+# and cost about the same tokens (only the question and rubric repeat).
+RERANK_BATCH = 15
+
+
+def _score_batch(question: str, batch: list[dict]) -> list[int]:
+    # One required field per excerpt, so structured output guarantees every
+    # excerpt gets a score - a free-form list let the model score only a few
+    # (the rest defaulted to 0 and were treated as irrelevant).
+    schema = pydantic.create_model(
+        "ExcerptScores", **{f"excerpt_{i}": (int, ...) for i in range(len(batch))},
+    )
+    numbered = "\n\n".join(
+        f"[{i}] ({evidence_label(c)}) {' '.join(c['text'].split())[:1500]}" for i, c in enumerate(batch)
+    )
+    model, effort = RERANK_MODEL
+    completion = client.chat.completions.parse(
+        model=model,
+        **({"reasoning_effort": effort} if effort else {"temperature": 0}),
+        messages=[
+            {"role": "system", "content": _RERANK_PROMPT},
+            {"role": "user", "content": f"Question: {question}\n\nExcerpts:\n{numbered}"},
+        ],
+        response_format=schema,
+    )
+    parsed = completion.choices[0].message.parsed
+    return [max(0, min(10, getattr(parsed, f"excerpt_{i}"))) for i in range(len(batch))]
+
+
 def _rerank(question: str, candidates: list[dict]) -> list[dict]:
     """Candidates ordered by the reranker's score (ties keep similarity
     order), each with a `rerank_score`. On any failure, returned unchanged."""
     if len(candidates) < 2:
         return candidates
-    # One required field per excerpt, so structured output guarantees every
-    # excerpt gets a score - a free-form list let the model score only a few
-    # (the rest defaulted to 0 and were treated as irrelevant).
-    schema = pydantic.create_model(
-        "ExcerptScores", **{f"excerpt_{i}": (int, ...) for i in range(len(candidates))},
-    )
-    numbered = "\n\n".join(
-        f"[{i}] ({evidence_label(c)}) {' '.join(c['text'].split())[:1500]}" for i, c in enumerate(candidates)
-    )
+    batches = [candidates[i:i + RERANK_BATCH] for i in range(0, len(candidates), RERANK_BATCH)]
     try:
-        model, effort = RERANK_MODEL
-        completion = client.chat.completions.parse(
-            model=model,
-            **({"reasoning_effort": effort} if effort else {"temperature": 0}),
-            messages=[
-                {"role": "system", "content": _RERANK_PROMPT},
-                {"role": "user", "content": f"Question: {question}\n\nExcerpts:\n{numbered}"},
-            ],
-            response_format=schema,
-        )
-        parsed = completion.choices[0].message.parsed
-        scores = {i: max(0, min(10, getattr(parsed, f"excerpt_{i}"))) for i in range(len(candidates))}
+        with ThreadPoolExecutor(max_workers=len(batches)) as pool:
+            batch_scores = list(pool.map(lambda batch: _score_batch(question, batch), batches))
     except Exception:
         logger.warning("Reranking failed; using similarity order", exc_info=True)
         return candidates
+    scores = [score for batch in batch_scores for score in batch]
     scored = [{**c, "rerank_score": scores[i]} for i, c in enumerate(candidates)]
     order = sorted(range(len(scored)), key=lambda i: (-scored[i]["rerank_score"], i))
     return [scored[i] for i in order]
@@ -297,8 +320,13 @@ def _select(question: str, candidates: list[dict], top_k: int) -> list[dict]:
     relevant = [c for c in reranked if c.get("rerank_score", RERANK_MIN_SCORE) >= RERANK_MIN_SCORE]
     chosen = _select_diverse(relevant, top_k)
     if len(chosen) < top_k:
+        # The rest are below the bar, so spread them across papers too:
+        # filled in plain score order, one paper with a long tail of 3/10s
+        # took every remaining slot (Schoenfeld 2021 took 7 of 10 for a
+        # rep-range question while Lopez 2021, also at 3/10, got none).
         picked = {id(c) for c in chosen}
-        chosen += [c for c in reranked if id(c) not in picked and c not in relevant][: top_k - len(chosen)]
+        rest = [c for c in reranked if id(c) not in picked and c not in relevant]
+        chosen += _select_diverse(rest, top_k - len(chosen))
     return chosen
 
 

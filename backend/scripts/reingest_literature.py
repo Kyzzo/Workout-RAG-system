@@ -14,13 +14,12 @@ Usage (from backend/):
 """
 
 import argparse
-import uuid
 
 from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue, PayloadSchemaType
 
 from app.rag.corpus import paper
 from app.rag.data_loader import embed_texts, load_and_chunk_pdf
-from app.rag.qdrant_storage import REQUIRED_PAYLOAD_INDEXES, QdrantStorage
+from app.rag.qdrant_storage import REQUIRED_PAYLOAD_INDEXES, QdrantStorage, chunk_point_id
 
 _EMBED_BATCH = 64
 
@@ -31,9 +30,10 @@ def main():
     args = parser.parse_args()
     entry = paper(args.source_id)
 
-    chunks = load_and_chunk_pdf(str(entry.pdf_path), entry.text_fixes)
-    if not chunks:
+    sectioned = load_and_chunk_pdf(str(entry.pdf_path), entry.text_fixes)
+    if not sectioned:
         raise SystemExit("No text extracted - nothing replaced.")
+    chunks = [text for text, _ in sectioned]
     vectors = []
     for start in range(0, len(chunks), _EMBED_BATCH):
         vectors += embed_texts(chunks[start:start + _EMBED_BATCH])
@@ -48,9 +48,9 @@ def main():
     # Delete first: the new extraction can yield fewer chunks than the old,
     # and leftover old ids would otherwise stay retrievable.
     storage.client.delete(storage.collection, points_selector=FilterSelector(filter=source_filter), wait=True)
-    ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, f"{entry.source}:{i}")) for i in range(len(chunks))]
+    ids = [chunk_point_id(entry.source, i, text) for i, text in enumerate(chunks)]
     tags = entry.payload()
-    storage.upsert(ids, vectors, [{**tags, "text": text} for text in chunks])
+    storage.upsert(ids, vectors, [{**tags, "text": text, "section": section} for text, section in sectioned])
     after = storage.client.count(storage.collection, count_filter=source_filter, exact=True).count
     print(f"{entry.source}: replaced {before} chunks with {after}")
     print("Next: scripts.clear_shared_answers and scripts.refresh_rule_justifications (local and production).")

@@ -1,12 +1,11 @@
 import datetime
 import logging
-import uuid
 
 import inngest
 
 from .corpus import paper
 from .data_loader import embed_texts, load_and_chunk_pdf
-from .qdrant_storage import QdrantStorage
+from .qdrant_storage import QdrantStorage, chunk_point_id
 from .types import ChunksAndMeta, UpsertResult
 
 inngest_client = inngest.Inngest(
@@ -27,17 +26,16 @@ async def ingest_literature_pdf(ctx: inngest.Context):
         # The paper must be in corpus/papers.json: its PDF and tags come from there.
         source_id = ctx.event.data["source_id"]
         entry = paper(source_id)
-        chunks = load_and_chunk_pdf(str(entry.pdf_path), entry.text_fixes)
-        return ChunksAndMeta(chunks=chunks, source_id=source_id)
+        sectioned = load_and_chunk_pdf(str(entry.pdf_path), entry.text_fixes)
+        return ChunksAndMeta(
+            chunks=[text for text, _ in sectioned], sections=[section for _, section in sectioned], source_id=source_id,
+        )
 
     def _upsert(data: ChunksAndMeta) -> UpsertResult:
         vecs = embed_texts(data.chunks)
-        ids = [
-            str(uuid.uuid5(uuid.NAMESPACE_URL, f"{data.source_id}:{i}"))
-            for i in range(len(data.chunks))
-        ]
+        ids = [chunk_point_id(data.source_id, i, text) for i, text in enumerate(data.chunks)]
         tags = paper(data.source_id).payload()
-        payloads = [{**tags, "text": text} for text in data.chunks]
+        payloads = [{**tags, "text": text, "section": section} for text, section in zip(data.chunks, data.sections)]
         QdrantStorage(collection="literature").upsert(ids, vecs, payloads)
         return UpsertResult(ingested=len(data.chunks))
 

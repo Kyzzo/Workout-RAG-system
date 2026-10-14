@@ -132,6 +132,25 @@ def test_rerank_orders_by_how_well_excerpts_answer_the_question():
     assert [c["rerank_score"] for c in ranked] == [9, 6, 2]
 
 
+def test_large_candidate_sets_are_reranked_in_batches():
+    # 20 candidates -> two calls (15 + 5); scores come back per batch and
+    # must land on the right excerpts. The best one is in the second batch.
+    candidates = [_chunk(f"c{i}", f"p{i}", 1 - i / 100) for i in range(20)]
+    calls = []
+
+    def fake_parse(**kwargs):
+        n = len(kwargs["response_format"].model_fields)
+        calls.append(n)
+        return _scored({i: (9 if n == 5 and i == 2 else 3) for i in range(n)})
+
+    with patch.object(generate.client.chat.completions, "parse", side_effect=fake_parse):
+        ranked = generate._rerank("q", candidates)
+
+    assert sorted(calls) == [5, 15]
+    assert ranked[0]["id"] == "c17" and ranked[0]["rerank_score"] == 9
+    assert [c["id"] for c in ranked[1:4]] == ["c0", "c1", "c2"]  # ties keep similarity order
+
+
 def test_failed_rerank_keeps_similarity_order():
     candidates = [_chunk("a", "p1", 0.9), _chunk("b", "p2", 0.8)]
     with patch.object(generate.client.chat.completions, "parse", side_effect=RuntimeError("down")):
@@ -149,6 +168,16 @@ def test_select_after_rerank_never_lets_a_weak_excerpt_displace_a_strong_one():
                       return_value=_scored({0: 9, 1: 8, 2: 7, 3: 2})):
         assert [c["id"] for c in generate._select("q", candidates, 3)] == ["a1", "a2", "a3"]
         assert [c["id"] for c in generate._select("q", candidates, 4)] == ["a1", "a2", "a3", "b-intro"]
+
+
+def test_below_threshold_backfill_is_spread_across_papers():
+    # One strong excerpt, then a long tail of 3/10s from paper A and a single
+    # 3/10 from paper B: B gets a slot instead of A taking all of them.
+    candidates = [_chunk("strong", "S", 0.9), _chunk("a1", "A", 0.85), _chunk("a2", "A", 0.84),
+                  _chunk("a3", "A", 0.83), _chunk("a4", "A", 0.82), _chunk("b1", "B", 0.5)]
+    with patch.object(generate.client.chat.completions, "parse",
+                      return_value=_scored({0: 9, 1: 3, 2: 3, 3: 3, 4: 3, 5: 3})):
+        assert [c["id"] for c in generate._select("q", candidates, 4)] == ["strong", "a1", "a2", "b1"]
 
 
 def test_a_paper_outside_the_top_similarity_results_still_reaches_selection():

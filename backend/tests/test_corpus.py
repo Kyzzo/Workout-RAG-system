@@ -48,6 +48,40 @@ def test_a_text_fix_that_stops_matching_fails_ingestion(monkeypatch):
         data_loader.load_and_chunk_pdf("paper.pdf", [TextFix(find="MD = 21.67", replace="MD = −1.67")])
 
 
+def test_chunks_after_the_references_heading_are_tagged_references(monkeypatch):
+    from app.rag import data_loader
+
+    class _Page:
+        def __init__(self, text):
+            self.text = text
+
+        def extract_text(self, **_):
+            return self.text
+
+    pages = [
+        _Page("Results. Heavy and light loads produced similar hypertrophy."),
+        _Page("Practical applications: either load works.\nREFERENCES\n1. Smith J. A study. J Strength Cond Res 31: 1-9, 2017."),
+        _Page("2. Jones K. Another study. Sports Med 47: 10-20, 2017."),
+    ]
+    monkeypatch.setattr(data_loader, "PdfReader", lambda path: type("R", (), {"pages": pages})())
+    sections = [(section, text.split()[0]) for text, section in data_loader.load_and_chunk_pdf("paper.pdf")]
+
+    # The practical applications on the heading's page stay in the body.
+    assert sections == [("body", "Results."), ("body", "Practical"), ("references", "REFERENCES"), ("references", "2.")]
+
+
+def test_literature_searches_leave_reference_lists_out():
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+    from app.rag.qdrant_storage import _without_references
+
+    category = FieldCondition(key="categories", match=MatchValue(value="volume"))
+    combined = _without_references(Filter(must=[category]))
+    assert combined.must == [category]
+    assert [c.key for c in combined.must_not] == ["section"]
+    assert [c.key for c in _without_references(None).must_not] == ["section"]
+
+
 def test_evidence_note_is_part_of_the_label():
     from app.rag.corpus import evidence_label
 

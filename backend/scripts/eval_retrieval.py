@@ -87,9 +87,11 @@ CASES = [
     ("chat: add reps or weight",
      lambda: G._retrieve_general_chunks("Should I add reps or add weight to progress for muscle growth?"),
      {"plotkin-etal-2022-load-vs-reps-progression"}),
-    ("chat: velocity loss / stopping short of failure for strength",
+    # The failure-vs-non-failure meta-analyses, not Pareja-Blanco 2017 (one
+    # 22-person trial framed as velocity loss), are what this should find.
+    ("chat: failure for strength",
      lambda: G._retrieve_general_chunks("Do I need to train to failure to get stronger on squats?"),
-     {"pareja-blanco-etal-2017-velocity-loss"}),
+     {"grgic-etal-2022-failure-meta", "robinson-etal-2024-proximity-to-failure"}),
     ("chat: at least 10 sets per week",
      lambda: G._retrieve_general_chunks("Do I need at least 10 sets per muscle per week to maximize growth?"),
      {"schoenfeld-etal-2017-volume-dose-response", "pelland-etal-2025"}),

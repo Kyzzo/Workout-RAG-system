@@ -13,6 +13,7 @@ Category = Literal["volume", "frequency", "intensity", "progression", "recovery"
 
 class ChunksAndMeta(pydantic.BaseModel):
     chunks: list[str]
+    sections: list[str]  # 'body' or 'references', one per chunk
     source_id: str  # its tags come from corpus/papers.json
 
 
