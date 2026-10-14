@@ -31,7 +31,7 @@ def main():
     args = parser.parse_args()
     entry = paper(args.source_id)
 
-    chunks = load_and_chunk_pdf(str(entry.pdf_path))
+    chunks = load_and_chunk_pdf(str(entry.pdf_path), entry.text_fixes)
     if not chunks:
         raise SystemExit("No text extracted - nothing replaced.")
     vectors = []

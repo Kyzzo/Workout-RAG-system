@@ -26,7 +26,8 @@ async def ingest_literature_pdf(ctx: inngest.Context):
     def _load(ctx: inngest.Context) -> ChunksAndMeta:
         # The paper must be in corpus/papers.json: its PDF and tags come from there.
         source_id = ctx.event.data["source_id"]
-        chunks = load_and_chunk_pdf(str(paper(source_id).pdf_path))
+        entry = paper(source_id)
+        chunks = load_and_chunk_pdf(str(entry.pdf_path), entry.text_fixes)
         return ChunksAndMeta(chunks=chunks, source_id=source_id)
 
     def _upsert(data: ChunksAndMeta) -> UpsertResult:

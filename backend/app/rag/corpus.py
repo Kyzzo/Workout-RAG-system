@@ -16,12 +16,30 @@ from .types import Category
 MANIFEST_PATH = Path(__file__).resolve().parents[2] / "corpus" / "papers.json"
 REPO_ROOT = MANIFEST_PATH.parents[2]
 
-StudyType = Literal["meta-analysis", "randomized-trial", "review"]
+# training-study: one group followed through a program, no randomized comparison.
+StudyType = Literal["meta-analysis", "randomized-trial", "review", "training-study"]
 Outcome = Literal["hypertrophy", "strength", "both"]
 Population = Literal["trained", "untrained", "mixed"]
 Publication = Literal["journal", "preprint", "unconfirmed"]
 
-_STUDY_TYPE_LABEL = {"meta-analysis": "meta-analysis", "randomized-trial": "randomized trial", "review": "review"}
+_STUDY_TYPE_LABEL = {
+    "meta-analysis": "meta-analysis",
+    "randomized-trial": "randomized trial",
+    "review": "review",
+    "training-study": "uncontrolled training study",
+}
+
+
+class TextFix(pydantic.BaseModel):
+    """A correction to a paper's extracted text, for PDFs whose fonts map
+    symbols to the wrong characters (a minus sign extracted as '2', '='
+    as '5'). Applied to each page before chunking. `min_count` is how many
+    matches the paper must contain: a fix that stops matching (a new PDF
+    copy, a loader change) fails ingestion instead of silently not applying."""
+    find: str
+    replace: str
+    regex: bool = False
+    min_count: int = 1
 _OUTCOME_LABEL = {"hypertrophy": "hypertrophy", "strength": "strength", "both": "hypertrophy and strength"}
 _POPULATION_LABEL = {"trained": "trained lifters", "untrained": "untrained participants", "mixed": "mixed training status"}
 
@@ -37,6 +55,10 @@ class Paper(pydantic.BaseModel):
     year: int
     publication: Publication
     merged_from: list[str] = []
+    # Appended to the evidence label every model sees, for a caveat the tags
+    # can't express (a finding later meta-analyses overturned, a tiny sample).
+    evidence_note: str = ""
+    text_fixes: list[TextFix] = []
 
     @property
     def pdf_path(self) -> Path:
@@ -55,6 +77,7 @@ class Paper(pydantic.BaseModel):
             "population": self.population,
             "year": self.year,
             "publication": self.publication,
+            "evidence_note": self.evidence_note,
         }
 
 
@@ -72,6 +95,7 @@ def evidence_label(chunk: dict) -> str:
     ]
     if chunk.get("publication") == "preprint":
         parts.append("preprint")
+    parts.append(chunk.get("evidence_note") or "")
     return " · ".join(p for p in parts if p)
 
 

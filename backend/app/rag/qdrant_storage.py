@@ -20,7 +20,9 @@ REQUIRED_PAYLOAD_INDEXES = {
 }
 
 # Paper-level tags stored on every excerpt (corpus/papers.json).
-_TAG_FIELDS = ("categories", "citation", "study_type", "outcome", "population", "year", "publication")
+_TAG_FIELDS = (
+    "categories", "citation", "study_type", "outcome", "population", "year", "publication", "evidence_note",
+)
 
 
 def _to_chunks(results) -> list[dict]:

@@ -44,12 +44,28 @@ def _page_text(page) -> str:
     return unicodedata.normalize("NFKC", text)
 
 
-def load_and_chunk_pdf(path: str) -> list[str]:
+def _apply_fix(text: str, fix) -> tuple[str, int]:
+    if fix.regex:
+        return re.subn(fix.find, fix.replace, text)
+    return text.replace(fix.find, fix.replace), text.count(fix.find)
+
+
+def load_and_chunk_pdf(path: str, text_fixes=()) -> list[str]:
+    """`text_fixes`: the paper's corpus TextFix entries, applied per page
+    before chunking. Raises if a fix matches fewer times than its
+    min_count, so a stale fix can't silently leave wrong numbers in."""
     chunks = []
+    counts = [0] * len(text_fixes)
     for page in PdfReader(path).pages:
         text = _page_text(page)
+        for i, fix in enumerate(text_fixes):
+            text, n = _apply_fix(text, fix)
+            counts[i] += n
         if text.strip():
             chunks.extend(splitter.split_text(text))
+    for fix, n in zip(text_fixes, counts):
+        if n < fix.min_count:
+            raise ValueError(f"Text fix {fix.find!r} matched {n} times in {path}, expected at least {fix.min_count}")
     return chunks
 
 

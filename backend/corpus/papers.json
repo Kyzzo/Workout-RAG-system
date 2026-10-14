@@ -5,7 +5,9 @@
       "source": "androulakis-korakakis-etal-2020-min-dose",
       "citation": "Androulakis-Korakakis et al. 2020",
       "pdf": "lifting_science_dataset_strength/volume/Androulakis-Korakakis et al. 2020.pdf",
-      "categories": ["volume"],
+      "categories": [
+        "volume"
+      ],
       "study_type": "meta-analysis",
       "outcome": "strength",
       "population": "trained",
@@ -16,7 +18,9 @@
       "source": "aube-etal-2022-volume",
       "citation": "Aube et al. 2022",
       "pdf": "lifting_science_dataset_hypertrophy/volume/Aube et al. 2022.pdf",
-      "categories": ["volume"],
+      "categories": [
+        "volume"
+      ],
       "study_type": "randomized-trial",
       "outcome": "both",
       "population": "trained",
@@ -24,10 +28,77 @@
       "publication": "journal"
     },
     {
+      "source": "coleman-etal-2024-deload",
+      "citation": "Coleman et al. 2024",
+      "pdf": "lifting_science_dataset_hypertrophy/recovery/Coleman-etal-2024-deload.pdf",
+      "categories": [
+        "recovery"
+      ],
+      "study_type": "randomized-trial",
+      "outcome": "both",
+      "population": "trained",
+      "year": 2024,
+      "publication": "journal"
+    },
+    {
+      "source": "damas-etal-2016-damage-mps-hypertrophy",
+      "citation": "Damas et al. 2016",
+      "pdf": "lifting_science_dataset_hypertrophy/recovery/Damas-etal-2016-damage-mps-hypertrophy.pdf",
+      "categories": [
+        "recovery"
+      ],
+      "study_type": "training-study",
+      "outcome": "hypertrophy",
+      "population": "untrained",
+      "year": 2016,
+      "publication": "journal",
+      "evidence_note": "n=10 men, previously trained but 6+ months detrained",
+      "text_fixes": [
+        {
+          "find": "/2248",
+          "replace": "≈",
+          "min_count": 5
+        },
+        {
+          "find": "/2264",
+          "replace": "≤",
+          "min_count": 2
+        }
+      ]
+    },
+    {
+      "source": "grgic-etal-2018-frequency-strength-meta",
+      "citation": "Grgic et al. 2018",
+      "pdf": "lifting_science_dataset_strength/frequency/Grgic-etal-2018-frequency-strength-meta.pdf",
+      "categories": [
+        "frequency"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "strength",
+      "population": "mixed",
+      "year": 2018,
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "\\b4\\?",
+          "replace": "4+",
+          "regex": true,
+          "min_count": 10
+        },
+        {
+          "find": "\\",
+          "replace": "<",
+          "min_count": 5
+        }
+      ]
+    },
+    {
       "source": "grgic-etal-2022-failure-meta",
       "citation": "Grgic et al. 2022",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Grgic-et-al-2022.pdf",
-      "categories": ["intensity"],
+      "categories": [
+        "intensity"
+      ],
       "study_type": "meta-analysis",
       "outcome": "both",
       "population": "mixed",
@@ -35,10 +106,47 @@
       "publication": "journal"
     },
     {
+      "source": "harries-etal-2015-linear-vs-undulating",
+      "citation": "Harries et al. 2015",
+      "pdf": "lifting_science_dataset_strength/progression/Harries-etal-2015-linear-vs-undulating.pdf",
+      "categories": [
+        "progression"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "strength",
+      "population": "mixed",
+      "year": 2015,
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "[ 22.05 to",
+          "replace": "[−2.05 to"
+        },
+        {
+          "find": "[ p , 0.37]",
+          "replace": "[p < 0.37]"
+        },
+        {
+          "find": "[ 22.48 to",
+          "replace": "[−2.48 to"
+        },
+        {
+          "find": "MD = 21.67",
+          "replace": "MD = −1.67"
+        },
+        {
+          "find": "[210.88 to",
+          "replace": "[−10.88 to"
+        }
+      ]
+    },
+    {
       "source": "hermann-etal-2024-without-fail",
       "citation": "Hermann et al. 2024",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/proximity_to_failure/Without_fail_Muscular_adaptations_in_single_set_re.pdf",
-      "categories": ["intensity"],
+      "categories": [
+        "intensity"
+      ],
       "study_type": "randomized-trial",
       "outcome": "both",
       "population": "trained",
@@ -46,10 +154,45 @@
       "publication": "unconfirmed"
     },
     {
+      "source": "kassiano-etal-2022-exercise-variation-review",
+      "citation": "Kassiano et al. 2022",
+      "pdf": "lifting_science_dataset_hypertrophy/volume/Kassiano-etal-2022-exercise-variation-review.pdf",
+      "categories": [
+        "exercise-selection"
+      ],
+      "study_type": "review",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2022,
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "\\b(ES|N|n|mean)\\s5\\s",
+          "replace": "\\1 = ",
+          "regex": true,
+          "min_count": 70
+        },
+        {
+          "find": "$0.80",
+          "replace": "≥0.80"
+        },
+        {
+          "find": "#0.11",
+          "replace": "≤0.11"
+        },
+        {
+          "find": "6.1 6 0.6",
+          "replace": "6.1 ± 0.6"
+        }
+      ]
+    },
+    {
       "source": "lasevicius-etal-2019-2x-vs-3x",
       "citation": "Lasevicius et al. 2019",
       "pdf": "lifting_science_dataset_hypertrophy/frequency/Lasevicius-etal-2019-2x-vs-3x.pdf",
-      "categories": ["frequency"],
+      "categories": [
+        "frequency"
+      ],
       "study_type": "randomized-trial",
       "outcome": "both",
       "population": "trained",
@@ -60,7 +203,9 @@
       "source": "lasevicius-etal-2022-failure-load",
       "citation": "Lasevicius et al. 2022",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Lasevicius-et-al-2022.pdf",
-      "categories": ["intensity"],
+      "categories": [
+        "intensity"
+      ],
       "study_type": "randomized-trial",
       "outcome": "both",
       "population": "untrained",
@@ -68,22 +213,82 @@
       "publication": "journal"
     },
     {
+      "source": "lopez-etal-2021-load-network-meta",
+      "citation": "Lopez et al. 2021",
+      "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Lopez-etal-2021-load-network-meta.pdf",
+      "categories": [
+        "intensity"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2021,
+      "publication": "journal"
+    },
+    {
+      "source": "moesgaard-etal-2022-periodization-meta",
+      "citation": "Moesgaard et al. 2022",
+      "pdf": "lifting_science_dataset_strength/progression/Moesgaard-etal-2022-periodization-meta.pdf",
+      "categories": [
+        "progression"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2022,
+      "publication": "journal"
+    },
+    {
+      "source": "pareja-blanco-etal-2017-velocity-loss",
+      "citation": "Pareja-Blanco et al. 2017",
+      "pdf": "lifting_science_dataset_hypertrophy/intensity-load/proximity_to_failure/Pareja-Blanco-etal-2017-velocity-loss.pdf",
+      "categories": [
+        "intensity"
+      ],
+      "study_type": "randomized-trial",
+      "outcome": "both",
+      "population": "trained",
+      "year": 2017,
+      "publication": "journal"
+    },
+    {
       "source": "pelland-etal-2025",
       "citation": "Pelland et al. 2025",
       "pdf": "lifting_science_dataset_hypertrophy/volume/Pelland-etal-2025-volume.pdf",
-      "categories": ["volume", "frequency"],
+      "categories": [
+        "volume",
+        "frequency"
+      ],
       "study_type": "meta-analysis",
       "outcome": "both",
       "population": "mixed",
       "year": 2025,
       "publication": "journal",
-      "merged_from": ["pelland-etal-2025-volume", "pelland-etal-2025-frequency"]
+      "merged_from": [
+        "pelland-etal-2025-volume",
+        "pelland-etal-2025-frequency"
+      ]
+    },
+    {
+      "source": "plotkin-etal-2022-load-vs-reps-progression",
+      "citation": "Plotkin et al. 2022",
+      "pdf": "lifting_science_dataset_hypertrophy/progression/Plotkin-etal-2022-load-vs-reps-progression.pdf",
+      "categories": [
+        "progression"
+      ],
+      "study_type": "randomized-trial",
+      "outcome": "both",
+      "population": "trained",
+      "year": 2022,
+      "publication": "journal"
     },
     {
       "source": "refalo-etal-2023-proximity-failure-meta",
       "citation": "Refalo et al. 2023",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Refalo-et-al-2023.pdf",
-      "categories": ["intensity"],
+      "categories": [
+        "intensity"
+      ],
       "study_type": "meta-analysis",
       "outcome": "hypertrophy",
       "population": "mixed",
@@ -94,7 +299,9 @@
       "source": "refalo-etal-2024-failure-vs-rir",
       "citation": "Refalo et al. 2024",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Refalo-et-al-2024.pdf",
-      "categories": ["intensity"],
+      "categories": [
+        "intensity"
+      ],
       "study_type": "randomized-trial",
       "outcome": "hypertrophy",
       "population": "trained",
@@ -105,19 +312,27 @@
       "source": "remmert-etal-2025-per-session-volume",
       "citation": "Remmert et al. 2025",
       "pdf": "lifting_science_dataset_hypertrophy/volume/Remmert-etal-2025-per-session-volume.pdf",
-      "categories": ["volume", "frequency"],
+      "categories": [
+        "volume",
+        "frequency"
+      ],
       "study_type": "meta-analysis",
       "outcome": "both",
       "population": "mixed",
       "year": 2025,
       "publication": "preprint",
-      "merged_from": ["remmert-etal-2025-per-session-volume", "remmert-etal-2025-per-session-volume-frequency"]
+      "merged_from": [
+        "remmert-etal-2025-per-session-volume",
+        "remmert-etal-2025-per-session-volume-frequency"
+      ]
     },
     {
       "source": "robinson-etal-2024-proximity-to-failure",
       "citation": "Robinson et al. 2024",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/proximity_to_failure/Exploring the Dose–Response Relationship Between Estimated.pdf",
-      "categories": ["intensity"],
+      "categories": [
+        "intensity"
+      ],
       "study_type": "meta-analysis",
       "outcome": "both",
       "population": "mixed",
@@ -125,10 +340,69 @@
       "publication": "journal"
     },
     {
+      "source": "schoenfeld-etal-2016-frequency-hypertrophy-meta",
+      "citation": "Schoenfeld et al. 2016",
+      "pdf": "lifting_science_dataset_hypertrophy/frequency/Schoenfeld-etal-2016-frequency-hypertrophy-meta.pdf",
+      "categories": [
+        "frequency"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "hypertrophy",
+      "population": "mixed",
+      "year": 2016,
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "P B ",
+          "replace": "P ≤ ",
+          "min_count": 2
+        },
+        {
+          "find": "\\ P",
+          "replace": "< P"
+        },
+        {
+          "find": "\\*(\\d+ %)",
+          "replace": "~\\1",
+          "regex": true,
+          "min_count": 2
+        }
+      ],
+      "evidence_note": "superseded: later meta-analyses (Schoenfeld et al. 2019; Pelland et al. 2025) found no meaningful effect of frequency on hypertrophy when weekly volume is equated"
+    },
+    {
+      "source": "schoenfeld-etal-2017-low-vs-high-load",
+      "citation": "Schoenfeld et al. 2017",
+      "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Schoenfeld-etal-2017-low-vs-high-load.pdf",
+      "categories": [
+        "intensity"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2017,
+      "publication": "journal"
+    },
+    {
+      "source": "schoenfeld-etal-2017-volume-dose-response",
+      "citation": "Schoenfeld et al. 2017 (volume)",
+      "pdf": "lifting_science_dataset_hypertrophy/volume/Schoenfeld-etal-2017-volume-dose-response.pdf",
+      "categories": [
+        "volume"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "hypertrophy",
+      "population": "mixed",
+      "year": 2017,
+      "publication": "journal"
+    },
+    {
       "source": "schoenfeld-etal-2021",
       "citation": "Schoenfeld et al. 2021",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/Schoenfeld-etal-2021.pdf",
-      "categories": ["intensity"],
+      "categories": [
+        "intensity"
+      ],
       "study_type": "review",
       "outcome": "both",
       "population": "mixed",
@@ -139,7 +413,9 @@
       "source": "weekly-sets-dose-response",
       "citation": "Pelland et al. (preprint)",
       "pdf": "lifting_science_dataset_hypertrophy/volume/The+Resistance+Training+Dose-Response.pdf",
-      "categories": ["volume"],
+      "categories": [
+        "volume"
+      ],
       "study_type": "meta-analysis",
       "outcome": "both",
       "population": "mixed",
@@ -150,7 +426,9 @@
       "source": "zhang-etal-2026",
       "citation": "Zhang et al. 2026",
       "pdf": "lifting_science_dataset_strength/progression/zhang-etal-2026.pdf",
-      "categories": ["progression"],
+      "categories": [
+        "progression"
+      ],
       "study_type": "meta-analysis",
       "outcome": "strength",
       "population": "mixed",

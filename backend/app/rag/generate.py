@@ -140,6 +140,10 @@ _CATEGORY_KEYWORDS = {
     "recovery": re.compile(
         r"\b(damage|soreness|doms|recover\w*|fatigue\w*|deload\w*|rest days?|overtrain\w*|sleep)\b", re.I,
     ),
+    "exercise-selection": re.compile(
+        r"\b(exercise (selection|variation|variety|choice)|vary(ing)? (my )?exercises|rotat\w* exercises|regional)\b",
+        re.I,
+    ),
 }
 # Journal-style entries ("2023;12(2):29-36") and DOIs: three or more in one
 # chunk means it's a bibliography, which lists papers rather than findings.
