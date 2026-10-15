@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { runBlockGeneration } from "./blockGeneration";
+import GenerationProgress from "./GenerationProgress";
+import { Book, ChevronRight, Close, Sparkles } from "./Icons";
 import { RuleSources } from "./RuleSources";
 import {
   VOLUME_LABELS,
@@ -10,11 +12,19 @@ import {
   type ProgramSummary,
   type VolumePreference,
 } from "./types";
+import { Field, Notice, Segmented, Switch } from "./ui";
 import { useApi } from "./useApi";
 
 type SplitOption = { key: string; label: string; allowed_days: number[]; day_types: string[] };
 
-const GOALS = ["hypertrophy", "strength"];
+// A fixed list rather than free text: goal feeds every retrieval query, the
+// corpus is organized around these two goals, and progression generation is
+// gated on goal === "strength" exactly.
+type Goal = "hypertrophy" | "strength";
+const GOALS: { value: Goal; label: string }[] = [
+  { value: "hypertrophy", label: "Hypertrophy" },
+  { value: "strength", label: "Strength" },
+];
 
 // Each muscle sits in one of a split's day types, so training days divided
 // by day types is how many times a week each muscle is trained.
@@ -33,23 +43,121 @@ function daysForFrequency(split: SplitOption, frequency: number) {
   );
 }
 
-const selectClass = "border rounded px-3 py-2 bg-white dark:bg-zinc-900";
+type Rule = { label: string; text: string; ruleKeys: [string] | [string, string]; secondHeading?: string };
 
-// Generates a whole program from four choices: the structure (days, rest
+// The cited rules behind the numbers this program will get, for the
+// chosen goal (and, for strength, training status).
+function rulesFor(goal: Goal, trained: boolean): Rule[] {
+  if (goal === "hypertrophy") {
+    return [
+      {
+        label: "Volume",
+        text: "Pelland et al. 2025's efficiency tiers (5-10 sets higher efficiency, 11-18 intermediate).",
+        ruleKeys: ["volume_efficiency_tiers"],
+      },
+      {
+        label: "Frequency",
+        text:
+          "With weekly sets matched, studies show no significant growth difference between training a muscle 2x " +
+          "and 3x a week. More sessions still help at higher volumes, since gains within one session diminish past ~11 sets.",
+        ruleKeys: ["frequency_matched_volume", "per_session_diminishing_returns"],
+        secondHeading: "Why more sessions help at higher volume",
+      },
+    ];
+  }
+  return [
+    {
+      label: "Volume",
+      text:
+        "Pelland et al. 2025's strength efficiency tiers (1 set minimum effective dose, 2 higher efficiency, 3-4 " +
+        "intermediate; more doesn't consistently add strength).",
+      ruleKeys: ["strength_volume_efficiency_tiers"],
+    },
+    {
+      label: "Loads",
+      text:
+        "Estimated from each exercise's reps and RIR using Nuzzo et al. 2024's table of reps to failure at each " +
+        "%1RM, so they fit together. People differ by about 2.5 reps at 80% 1RM, so treat the % as a starting " +
+        "weight and adjust it until sets end at the prescribed RIR.",
+      ruleKeys: ["reps_at_percent_1rm"],
+    },
+    {
+      label: "Frequency",
+      text: "Strength gains rise with how often a lift is trained, with diminishing returns at higher frequencies.",
+      ruleKeys: ["strength_frequency"],
+    },
+    ...(trained
+      ? [
+          {
+            label: "Progression: daily undulating",
+            text:
+              "Each compound lift's sessions in the week rotate 8, 6 and 4 reps, heaviest last (Rhea et al. 2002's " +
+              "protocol), with each day's load set from its reps and RIR; the weight rises as you get stronger. " +
+              "Undulating periodization has produced larger 1RM gains than linear in trained lifters.",
+            ruleKeys: ["periodization_by_training_status", "daily_undulating_protocol"] as [string, string],
+            secondHeading: "The protocol the program follows",
+          },
+          {
+            label: "Why daily, not weekly",
+            text: "Undulating week to week hasn't beaten linear progression in trials.",
+            ruleKeys: ["weekly_undulation_not_better"] as [string],
+          },
+          {
+            label: "Session order",
+            text:
+              "The heaviest session comes last, not straight after the highest-volume one, and the exact rep " +
+              "numbers matter less than the volume - Rhea's 8/6/4 is one tested option.",
+            ruleKeys: ["dup_session_order", "dup_rep_scheme"] as [string, string],
+            secondHeading: "Why the exact reps matter less",
+          },
+        ]
+      : [
+          {
+            label: "Progression: linear",
+            text:
+              "Compound lifts move through phases of 8, then 6, then 4 reps across the block (the linear arms of " +
+              "Rhea et al. 2002 and Buford et al. 2007), each week's load set from its reps and RIR. Undulating " +
+              "periodization's advantage over linear has been seen in trained lifters, not untrained.",
+            ruleKeys: ["periodization_by_training_status", "linear_periodization_protocol"] as [string, string],
+            secondHeading: "The protocol the program follows",
+          },
+        ]),
+    {
+      label: "Accessories",
+      text:
+        "Single-joint exercises stay at 8-12 reps every week, as in the strength trials, which periodized only the main lifts.",
+      ruleKeys: ["strength_accessory_reps"],
+    },
+    {
+      label: "Deload",
+      text:
+        "Off by default: in trained lifters, a week off partway through a 9-week program had minimal impact on muscle " +
+        "growth, and lower-body strength gains were modestly smaller than with continuous training. The deload's size " +
+        "here (60% of peak load) is common practice.",
+      ruleKeys: ["deload_week"],
+    },
+  ];
+}
+
+// Generates a whole program from a few choices: the structure (days, rest
 // spacing, AI-picked exercises) in one request, then every number through
 // the same per-exercise generation + citation verification as the builder.
+// "Start empty" creates a blank program with the chosen goal instead.
 export default function ProgramWizard({
   onCreated,
   onRefresh,
   onRunningChange,
+  onClose,
 }: {
   onCreated: (program: ProgramSummary) => void;
   onRefresh: () => void;
   onRunningChange: (running: boolean) => void;
+  // Shown when there are programs to go back to.
+  onClose?: () => void;
 }) {
   const api = useApi();
   const [splits, setSplits] = useState<SplitOption[]>([]);
-  const [goal, setGoal] = useState(GOALS[0]);
+  const [goal, setGoal] = useState<Goal>("hypertrophy");
   const [splitKey, setSplitKey] = useState("");
   const [days, setDays] = useState(0);
   const [weeks, setWeeks] = useState("6");
@@ -57,6 +165,7 @@ export default function ProgramWizard({
   const [trained, setTrained] = useState(false);
   const [includeDeload, setIncludeDeload] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
+  const [creatingEmpty, setCreatingEmpty] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const cancelled = useRef(false);
@@ -126,206 +235,153 @@ export default function ProgramWizard({
     }
   }
 
+  async function handleCreateEmpty() {
+    setError(null);
+    setNotice(null);
+    setCreatingEmpty(true);
+    try {
+      onCreated(await api<ProgramSummary>("/programs/", { method: "POST", body: { goal } }));
+      onClose?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreatingEmpty(false);
+    }
+  }
+
   const running = progress !== null;
+  const rules = rulesFor(goal, trained);
 
   return (
-    <form onSubmit={handleGenerate} className="flex flex-col gap-3 w-full border rounded p-4">
-      <p className="font-medium">Generate a program</p>
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <select value={goal} onChange={(e) => setGoal(e.target.value)} className={selectClass} disabled={running}>
-          {GOALS.map((g) => (
-            <option key={g} value={g}>
-              {g}
-            </option>
-          ))}
-        </select>
-        <select
-          value={splitKey}
-          onChange={(e) => chooseSplit(e.target.value)}
-          className={`${selectClass} flex-1`}
-          disabled={running}
-        >
-          {splits.map((s) => (
-            <option key={s.key} value={s.key}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+    <form onSubmit={handleGenerate} className="card animate-in flex flex-col">
+      <div className="flex items-start gap-3.5 px-5 pt-5 sm:px-6 sm:pt-6">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-accent to-accent-2 text-white shadow-[0_8px_20px_-8px_var(--accent-ring)]">
+          <Sparkles className="size-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-lg font-semibold tracking-tight">Generate a program</h2>
+          <p className="mt-0.5 text-sm text-fg-muted">
+            Exercises are picked by AI. Every sets, reps, load, frequency and progression number is research-cited.
+          </p>
+        </div>
+        {onClose && !running && (
+          <button type="button" onClick={onClose} className="icon-btn -me-1.5 -mt-1" aria-label="Close the generator">
+            <Close className="size-4" />
+          </button>
+        )}
+      </div>
+
+      <fieldset disabled={running} className="grid grid-cols-1 gap-4 px-5 pt-5 sm:grid-cols-6 sm:px-6">
+        <div className="flex flex-col gap-1.5 sm:col-span-6">
+          <span className="text-[13px] font-medium text-fg-muted">Goal</span>
+          <Segmented label="Goal" options={GOALS} value={goal} onChange={setGoal} disabled={running} />
+        </div>
+        <Field className="sm:col-span-3" label="Split" hint={split ? `Rotates ${split.day_types.join(" / ")}` : undefined}>
+          <select value={splitKey} onChange={(e) => chooseSplit(e.target.value)} className="input">
+            {splits.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </Field>
         {/* Frequency per muscle and days per week map one-to-one within a
             split (each muscle sits in one day type), so picking a frequency
             picks the days. */}
-        <select
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-          className={selectClass}
-          disabled={running}
-          title="How many times a week each muscle is trained. With weekly sets matched, research shows no significant growth difference between 2x and 3x; more sessions help spread higher volume."
-        >
-          {(split?.allowed_days ?? []).map((d) => (
-            <option key={d} value={d}>
-              {frequencyLabel(split!, d)}
-            </option>
-          ))}
-        </select>
-        <input
-          type="number"
-          min={2}
-          max={12}
-          value={weeks}
-          onChange={(e) => setWeeks(e.target.value)}
-          className={`${selectClass} w-20`}
-          disabled={running}
-          required
-        />
-        <span className="text-zinc-500">weeks</span>
-        <select
-          value={volume}
-          onChange={(e) => setVolume(e.target.value as VolumePreference)}
-          className={selectClass}
-          disabled={running}
-          title="Hypertrophy: weekly sets per muscle within the research's most efficient range (Pelland et al. 2025's tiers, secondary work counted as half). Minimal pairs fewer sets with sets taken closer to failure."
-        >
-          {(Object.keys(VOLUME_LABELS) as VolumePreference[]).map((v) => (
-            <option key={v} value={v}>
-              {volumeLabel(v, goal)}
-            </option>
-          ))}
-        </select>
-      </div>
-      {goal === "strength" && (
-        <>
-          <RuleSources
-            text="Volume ranges: Pelland et al. 2025's strength efficiency tiers (1 set minimum effective dose, 2 higher efficiency, 3-4 intermediate; more doesn't consistently add strength)."
-            ruleKeys={["strength_volume_efficiency_tiers"]}
-          />
-          <RuleSources
-            text={
-              "Loads: estimated from each exercise's reps and RIR using Nuzzo et al. 2024's table of reps to " +
-              "failure at each %1RM, so they fit together. People differ by about 2.5 reps at 80% 1RM, so treat " +
-              "the % as a starting weight and adjust it until sets end at the prescribed RIR."
-            }
-            ruleKeys={["reps_at_percent_1rm"]}
-          />
-          <RuleSources
-            text="Frequency: strength gains rise with how often a lift is trained, with diminishing returns at higher frequencies."
-            ruleKeys={["strength_frequency"]}
-          />
-          <label className="flex items-center gap-2 text-sm">
+        <Field className="sm:col-span-3" label="Frequency" hint="How often each muscle is trained per week">
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="input">
+            {(split?.allowed_days ?? []).map((d) => (
+              <option key={d} value={d}>
+                {frequencyLabel(split!, d)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field className="sm:col-span-4" label="Weekly volume" hint="Weekly sets per muscle; secondary work counts as half">
+          <select value={volume} onChange={(e) => setVolume(e.target.value as VolumePreference)} className="input">
+            {(Object.keys(VOLUME_LABELS) as VolumePreference[]).map((v) => (
+              <option key={v} value={v}>
+                {volumeLabel(v, goal)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field className="sm:col-span-2" label="Length">
+          <span className="relative block">
             <input
-              type="checkbox"
-              checked={trained}
-              onChange={(e) => setTrained(e.target.checked)}
-              disabled={running}
+              type="number"
+              min={2}
+              max={12}
+              value={weeks}
+              onChange={(e) => setWeeks(e.target.value)}
+              className="input pe-16 tabular-nums"
+              required
             />
-            I&apos;ve lifted consistently for 1+ year
-          </label>
-          {trained ? (
-            <>
-              <RuleSources
-                text={
-                  "Progression: daily undulating. Each compound lift's sessions in the week rotate 8, 6 and 4 reps, " +
-                  "heaviest last (Rhea et al. 2002's protocol), with each day's load set from its reps and RIR; the " +
-                  "weight rises as you get stronger. Undulating periodization has produced larger 1RM gains than " +
-                  "linear in trained lifters."
-                }
-                ruleKeys={["periodization_by_training_status", "daily_undulating_protocol"]}
-                secondHeading="The protocol the program follows"
-              />
-              <RuleSources
-                text="Why daily, not weekly: undulating week to week hasn't beaten linear progression in trials."
-                ruleKeys={["weekly_undulation_not_better"]}
-              />
-              <RuleSources
-                text={
-                  "The heaviest session comes last, not straight after the highest-volume one, and the exact rep " +
-                  "numbers matter less than the volume - Rhea's 8/6/4 is one tested option."
-                }
-                ruleKeys={["dup_session_order", "dup_rep_scheme"]}
-                secondHeading="Why the exact reps matter less"
-              />
-            </>
-          ) : (
-            <RuleSources
-              text={
-                "Progression: linear. Compound lifts move through phases of 8, then 6, then 4 reps across the " +
-                "block (the linear arms of Rhea et al. 2002 and Buford et al. 2007), each week's load set from " +
-                "its reps and RIR. Undulating periodization's advantage over linear has been seen in trained " +
-                "lifters, not untrained."
-              }
-              ruleKeys={["periodization_by_training_status", "linear_periodization_protocol"]}
-              secondHeading="The protocol the program follows"
-            />
-          )}
-          <RuleSources
-            text={
-              "Accessory lifts (single-joint exercises) stay at 8-12 reps every week, as in the strength " +
-              "trials, which periodized only the main lifts."
-            }
-            ruleKeys={["strength_accessory_reps"]}
-          />
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={includeDeload}
-              onChange={(e) => setIncludeDeload(e.target.checked)}
-              disabled={running}
-            />
-            Include a deload week (lighter final week)
-          </label>
-          <RuleSources
-            text={
-              "Off by default: in trained lifters, a week off partway through a 9-week program had minimal impact on " +
-              "muscle growth, and lower-body strength gains were modestly smaller than with continuous training. " +
-              "The deload's size here (60% of peak load) is common practice."
-            }
-            ruleKeys={["deload_week"]}
-          />
-        </>
-      )}
-      {goal === "hypertrophy" && (
-        <>
-          <RuleSources
-            text="Volume ranges: Pelland et al. 2025's efficiency tiers (5-10 sets higher efficiency, 11-18 intermediate)."
-            ruleKeys={["volume_efficiency_tiers"]}
-          />
-          <RuleSources
-            text={
-              "Frequency: with weekly sets matched, studies show no significant growth difference between " +
-              "training a muscle 2x and 3x a week. More sessions still help at higher volumes, since gains " +
-              "within one session diminish past ~11 sets."
-            }
-            ruleKeys={["frequency_matched_volume", "per_session_diminishing_returns"]}
-            secondHeading="Why more sessions help at higher volume"
-          />
-        </>
-      )}
-      {split && (
-        <p className="text-xs text-zinc-500">
-          {split.label} rotates {split.day_types.join(" / ")}. Exercises are picked by AI and aren&apos;t
-          research-cited; every sets, load, frequency and progression number is.
-        </p>
-      )}
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={running || !split}
-          className="rounded bg-black text-white px-4 py-2 text-sm disabled:opacity-50 dark:bg-white dark:text-black"
-        >
-          {running ? "Generating..." : "Generate program"}
-        </button>
-        {running && (
-          <>
-            <span className="text-indigo-600 dark:text-indigo-400 text-xs">
-              {progress}... keep this tab open until it finishes
+            <span className="pointer-events-none absolute inset-y-0 end-3 flex items-center text-sm text-fg-subtle">
+              weeks
             </span>
-            <button type="button" onClick={() => (cancelled.current = true)} className="text-xs underline">
-              cancel
-            </button>
-          </>
+          </span>
+        </Field>
+
+        {goal === "strength" && (
+          <div className="animate-in flex flex-col gap-4 rounded-xl border border-line bg-surface-2/50 p-4 sm:col-span-6">
+            <Switch
+              checked={trained}
+              onChange={setTrained}
+              disabled={running}
+              label="I've lifted consistently for 1+ year"
+              description={trained ? "Daily undulating progression (8/6/4 reps across the week)." : "Linear progression (phases of 8, 6, then 4 reps)."}
+            />
+            <div className="h-px bg-line" />
+            <Switch
+              checked={includeDeload}
+              onChange={setIncludeDeload}
+              disabled={running}
+              label="Include a deload week"
+              description="A lighter final week. Off by default - see Deload below."
+            />
+          </div>
         )}
+      </fieldset>
+
+      <details className="group mx-5 mt-5 rounded-xl border border-line sm:mx-6">
+        <summary className="flex cursor-pointer items-center gap-2.5 px-4 py-3 text-sm select-none">
+          <Book className="size-4 text-evidence" />
+          <span className="flex-1 font-medium">How this program is built</span>
+          <span className="chip">{rules.length} cited rules</span>
+          <ChevronRight className="size-4 text-fg-subtle transition-transform duration-200 group-open:rotate-90" />
+        </summary>
+        <ul className="animate-in flex flex-col gap-3.5 border-t border-line px-4 py-4">
+          {rules.map((rule) => (
+            <li key={rule.label}>
+              <RuleSources label={rule.label} text={rule.text} ruleKeys={rule.ruleKeys} secondHeading={rule.secondHeading} />
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      <div className="flex flex-col gap-3 px-5 pb-5 pt-5 sm:px-6 sm:pb-6">
+        {running ? (
+          <GenerationProgress
+            progress={progress}
+            strength={goal === "strength"}
+            includeExercises
+            onCancel={() => (cancelled.current = true)}
+          />
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="submit" disabled={!split} className="btn btn-primary h-10 px-5">
+              <Sparkles className="size-4" />
+              Generate program
+            </button>
+            <button type="button" onClick={handleCreateEmpty} disabled={creatingEmpty} className="btn btn-ghost h-10">
+              {creatingEmpty ? "Creating..." : "Start an empty one instead"}
+            </button>
+          </div>
+        )}
+        {notice && <Notice tone="success">{notice}</Notice>}
+        {error && <Notice tone="error">{error}</Notice>}
       </div>
-      {notice && <p className="text-green-700 dark:text-green-500 text-xs">{notice}</p>}
-      {error && <p className="text-red-600 text-xs whitespace-pre-line">{error}</p>}
     </form>
   );
 }

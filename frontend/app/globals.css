@@ -1,26 +1,335 @@
 @import "tailwindcss";
 
+/* Design tokens. Every colour in the app comes from here (as Tailwind
+   colours: bg-surface, text-fg-muted, border-line, bg-accent...), with a
+   light and a dark value. Semantic roles are fixed: accent = actions and
+   the anchored value, evidence = verified sources, warn = caveats and
+   fit notes, danger = destructive actions and errors. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  color-scheme: light;
+  --bg: #f6f6f8;
+  --bg-glow: rgba(91, 79, 245, 0.09);
+  --surface: #ffffff;
+  --surface-2: #f3f3f6;
+  --surface-3: #e9e9ee;
+  --line: rgba(17, 17, 34, 0.09);
+  --line-strong: rgba(17, 17, 34, 0.17);
+  --fg: #0c0c12;
+  --fg-muted: #4b4b58;
+  --fg-subtle: #686876;
+  --accent: #5b4ff5;
+  --accent-hover: #4b3fe6;
+  --accent-2: #8b5cf6;
+  --accent-fg: #ffffff;
+  --accent-text: #4b3fe0;
+  --accent-soft: rgba(91, 79, 245, 0.09);
+  --accent-ring: rgba(91, 79, 245, 0.4);
+  --evidence: #047857;
+  --evidence-soft: rgba(4, 120, 87, 0.09);
+  --warn: #9a5806;
+  --warn-soft: rgba(217, 119, 6, 0.11);
+  --danger: #c81e1e;
+  --danger-soft: rgba(220, 38, 38, 0.08);
+  --danger-solid: #d42c32;
+  --shadow-card: 0 1px 2px rgba(16, 16, 40, 0.04), 0 8px 24px -12px rgba(16, 16, 40, 0.12);
+  --shadow-pop: 0 1px 2px rgba(16, 16, 40, 0.06), 0 16px 40px -8px rgba(16, 16, 40, 0.22);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    color-scheme: dark;
+    --bg: #08080b;
+    --bg-glow: rgba(109, 98, 255, 0.16);
+    --surface: #111116;
+    --surface-2: #18181e;
+    --surface-3: #222229;
+    --line: rgba(255, 255, 255, 0.075);
+    --line-strong: rgba(255, 255, 255, 0.14);
+    --fg: #f3f3f6;
+    --fg-muted: #a6a6b3;
+    --fg-subtle: #878796;
+    --accent: #5b4ff5;
+    --accent-hover: #6a5ffa;
+    --accent-2: #9b6bff;
+    --accent-fg: #ffffff;
+    --accent-text: #a8a1ff;
+    --accent-soft: rgba(109, 98, 255, 0.15);
+    --accent-ring: rgba(139, 130, 255, 0.55);
+    --evidence: #43d99a;
+    --evidence-soft: rgba(67, 217, 154, 0.12);
+    --warn: #f4b649;
+    --warn-soft: rgba(244, 182, 73, 0.12);
+    --danger: #ff7272;
+    --danger-soft: rgba(255, 114, 114, 0.12);
+    --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 32px -16px rgba(0, 0, 0, 0.7);
+    --shadow-pop: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 20px 48px -12px rgba(0, 0, 0, 0.8);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-2: var(--accent-2);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+  --color-evidence: var(--evidence);
+  --color-evidence-soft: var(--evidence-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-solid: var(--danger-solid);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+}
+
+@layer base {
+  /* Tailwind 4 borders default to currentColor - in dark mode that made
+     every box a bright white outline. Hairlines come from the token. */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--line);
+  }
+
+  body {
+    background:
+      radial-gradient(1100px 520px at 15% -12%, var(--bg-glow), transparent 65%),
+      radial-gradient(800px 420px at 100% 0%, var(--bg-glow), transparent 60%),
+      var(--bg);
+    background-repeat: no-repeat;
+    color: var(--fg);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: "ss01", "cv11";
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent-ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+  }
+
+  summary {
+    list-style: none;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-surface shadow-card;
+  }
+
+  /* Buttons: one primary per view, secondary for other actions, ghost
+     for low-emphasis ones. All press down slightly (feedback). */
+  .btn {
+    @apply inline-flex shrink-0 items-center justify-center gap-2 h-9 px-3.5 rounded-lg text-sm font-medium whitespace-nowrap select-none;
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      box-shadow 150ms ease,
+      transform 160ms var(--ease-out);
+  }
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .btn:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+  .btn-sm {
+    @apply h-8 px-3 text-[13px];
+  }
+  .btn-primary {
+    @apply bg-accent text-accent-fg;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.18) inset,
+      0 6px 16px -6px var(--accent-ring);
+  }
+  .btn-secondary {
+    @apply border border-line-strong bg-surface-2 text-fg;
+  }
+  .btn-ghost {
+    @apply text-fg-muted;
+  }
+  .btn-danger {
+    @apply bg-danger-solid text-white;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-primary:hover:not(:disabled) {
+      @apply bg-accent-hover;
+    }
+    .btn-secondary:hover:not(:disabled) {
+      @apply bg-surface-3;
+    }
+    .btn-ghost:hover:not(:disabled) {
+      @apply bg-surface-2 text-fg;
+    }
+    .btn-danger:hover:not(:disabled) {
+      filter: brightness(1.08);
+    }
+  }
+
+  /* Icon-only buttons; the ::after widens the hit area to 44px. */
+  .icon-btn {
+    @apply relative inline-grid shrink-0 place-items-center size-8 rounded-lg text-fg-subtle;
+    transition:
+      background-color 150ms ease,
+      color 150ms ease,
+      transform 160ms var(--ease-out);
+  }
+  .icon-btn::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+  .icon-btn:active:not(:disabled) {
+    transform: scale(0.94);
+  }
+  .icon-btn:disabled {
+    @apply opacity-40 cursor-not-allowed;
+  }
+  .icon-btn[aria-expanded="true"] {
+    @apply bg-surface-3 text-fg;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .icon-btn:hover:not(:disabled) {
+      @apply bg-surface-3 text-fg;
+    }
+  }
+
+  .input {
+    @apply h-10 w-full min-w-0 rounded-lg border border-line bg-surface-2 px-3 text-sm text-fg placeholder:text-fg-subtle;
+    transition:
+      border-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+  .input:focus {
+    @apply border-accent outline-none;
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .input:disabled {
+    @apply opacity-60;
+  }
+  select.input {
+    @apply appearance-none pe-9 cursor-pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23888896' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.7rem center;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 h-6 px-2 rounded-full border border-line bg-surface-2 text-xs text-fg-muted whitespace-nowrap;
+  }
+
+  .eyebrow {
+    @apply text-xs font-medium uppercase tracking-[0.08em] text-fg-subtle;
+  }
+
+  /* Short entrance for content that appears on a click (expanded days,
+     source panels, menus): fast, ease-out, no scale from zero. */
+  .animate-in {
+    animation: rise-in 180ms var(--ease-out);
+  }
+  .animate-pop {
+    animation: pop-in 140ms var(--ease-out);
+    transform-origin: top right;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  dialog.dialog {
+    @apply m-auto w-[min(32rem,calc(100vw-2rem))] rounded-2xl border border-line-strong bg-surface p-0 text-fg shadow-pop;
+  }
+  dialog.dialog[open] {
+    animation: dialog-in 200ms var(--ease-out);
+  }
+  dialog.dialog::backdrop {
+    background: rgba(5, 5, 10, 0.55);
+    backdrop-filter: blur(2px);
+    animation: fade-in 200ms ease;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes typing {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .animate-pop,
+  dialog.dialog[open] {
+    animation: fade-in 150ms ease;
+  }
+  .btn:active:not(:disabled),
+  .icon-btn:active:not(:disabled) {
+    transform: none;
+  }
+}
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
 }

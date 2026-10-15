@@ -1,10 +1,14 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { API_URL } from "./apiUrl";
+import { CaveatNote } from "./Citations";
+import { useDialogs } from "./Dialogs";
+import { ArrowUp, Book, Check, ChevronRight, Close, Message, Sparkles, Trash, Undo } from "./Icons";
 import { swapSummary, type SwapResult } from "./ProgramTree";
 import type { WeeklyPrescription } from "./types";
+import { Spinner } from "./ui";
 
 type Citation = { title: string; snippet: string; field: "sets" | "reps" | "load" | "rir" | null };
 
@@ -121,6 +125,9 @@ function toHistory(turns: ChatTurn[]): HistoryTurn[] {
     .map((t) => ({ ...t, content: t.content.slice(0, MAX_TURN_CHARS) }));
 }
 
+// The composer grows with its text up to this height, then scrolls.
+const COMPOSER_MAX_HEIGHT = 200;
+
 export default function ChatWindow({
   fieldId,
   anchorLabel,
@@ -130,10 +137,9 @@ export default function ChatWindow({
   onPrescriptionUpdated,
 }: {
   // Structural context (phase6_chat_routing_concepts.txt section 2): set by
-  // clicking "ask about this" on a rendered prescription in ProgramTree, not
-  // typed in by hand - the parent workspace owns this so the anchor survives
-  // across messages in the same thread and can show a real label, not just
-  // a bare id.
+  // clicking "Ask" on a rendered prescription in ProgramTree, not typed in
+  // by hand - the parent workspace owns this so the anchor survives across
+  // messages in the same thread and can show a real label, not a bare id.
   fieldId: number | null;
   anchorLabel: string | null;
   // For suggested prompts: the anchored value has a %1RM load, and the
@@ -145,10 +151,11 @@ export default function ChatWindow({
   onPrescriptionUpdated?: () => void;
 }) {
   const { getToken } = useAuth();
+  const dialogs = useDialogs();
   const [message, setMessage] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [sending, setSending] = useState(false);
-  const messageInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
   // Saved history, loaded once on open (each change with its current state,
@@ -213,7 +220,13 @@ export default function ChatWindow({
   }
 
   async function clearHistory() {
-    if (!window.confirm("Clear the saved chat history? Changes you made stay in your programs.")) return;
+    const ok = await dialogs.confirm({
+      title: "Clear the chat history?",
+      body: "The saved conversation is deleted. Changes you made stay in your programs.",
+      confirmLabel: "Clear history",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await call("/chat/history", "DELETE");
       setTurns([]);
@@ -232,9 +245,27 @@ export default function ChatWindow({
     if (fieldId !== null) messageInputRef.current?.focus();
   }, [fieldId]);
 
+  // Grow the composer with its text (also shrinks it back after sending);
+  // past the max height it scrolls instead.
+  useLayoutEffect(() => {
+    const box = messageInputRef.current;
+    if (!box) return;
+    box.style.height = "auto";
+    box.style.height = `${Math.min(box.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
+    box.style.overflowY = box.scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+  }, [message]);
+
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
     await send(message);
+  }
+
+  // Enter sends, Shift+Enter adds a line (not while an IME is composing).
+  function handleComposerKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      void send(message);
+    }
   }
 
   async function send(text: string) {
@@ -303,52 +334,58 @@ export default function ChatWindow({
   }
 
   return (
-    <div className="flex flex-col gap-4 w-full h-full">
-      {fieldId !== null ? (
-        <div className="flex items-center justify-between gap-2 border rounded px-3 py-2 text-sm bg-indigo-50 dark:bg-indigo-950">
-          <span>
-            Asking about: <span className="font-medium">{anchorLabel ?? `prescription #${fieldId}`}</span>
-          </span>
-          <button type="button" onClick={onClearAnchor} className="text-xs underline shrink-0">
-            clear
-          </button>
+    <section className="card flex h-full flex-col overflow-hidden" aria-label="Research chat">
+      <header className="flex items-center gap-3 border-b border-line px-4 py-3.5">
+        <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-accent to-accent-2 text-white">
+          <Message className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-semibold">Research chat</h2>
+          <p className="truncate text-xs text-fg-subtle">Answers and changes cite the papers</p>
         </div>
-      ) : (
-        <p className="text-xs text-zinc-500">
-          Not anchored to a specific exercise - click &quot;ask / adjust&quot; on a
-          prescription above to ask about it or change it, or just ask a general
-          research question below.
-        </p>
-      )}
+        {turns.length > 0 && (
+          <button type="button" onClick={clearHistory} className="icon-btn" aria-label="Clear chat history" title="Clear chat history">
+            <Trash className="size-4" />
+          </button>
+        )}
+      </header>
 
-      {/* Stacked (narrow): a fixed-height box. Side panel (wide): fills the
-          panel's remaining height, so only the messages scroll. */}
       <div
         ref={messagesRef}
-        className="flex flex-col gap-3 min-h-40 max-h-[28rem] lg:max-h-none lg:flex-1 overflow-y-auto border rounded p-4 bg-zinc-50 dark:bg-zinc-900"
+        className="scroll-thin flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4"
+        aria-live="polite"
       >
-        {turns.length === 0 && (
-          <p className="text-sm text-zinc-500">
-            Click &quot;ask / adjust&quot; on a prescription above, then ask about
-            it (&quot;why this load?&quot;) or change it (&quot;make it 4 sets&quot;,
-            &quot;add more volume&quot;, &quot;go lighter&quot;). Or ask a general
-            research question.
-          </p>
+        {turns.length === 0 && !sending && (
+          <div className="m-auto flex max-w-xs flex-col items-center gap-3 py-6 text-center">
+            <span className="grid size-11 place-items-center rounded-2xl bg-accent-soft text-accent-text">
+              <Sparkles className="size-5" />
+            </span>
+            <p className="font-medium">Ask the research</p>
+            <p className="text-sm leading-relaxed text-fg-muted">
+              Press <span className="font-medium text-fg">Ask</span>{" "}on any prescription to question or change it
+              (&quot;why this load?&quot;, &quot;make it 4 sets&quot;), or ask a general question below.
+            </p>
+          </div>
         )}
         {turns.map((turn, i) => {
           if (turn.role === "user") {
             return (
-              <div
-                key={i}
-                className="self-end bg-black text-white dark:bg-white dark:text-black rounded px-3 py-2 max-w-[85%] text-sm"
-              >
-                {turn.text}
+              <div key={i} className="flex max-w-[85%] flex-col items-end gap-1 self-end">
+                {turn.anchor && (
+                  <span className="flex items-center gap-1 text-[11px] text-fg-subtle">
+                    <Message className="size-3" />
+                    {turn.anchor}
+                  </span>
+                )}
+                <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-accent px-3.5 py-2 text-sm text-accent-fg">
+                  {turn.text}
+                </div>
               </div>
             );
           }
           if (turn.role === "error") {
             return (
-              <div key={i} className="self-start text-red-600 text-sm">
+              <div key={i} className="max-w-[92%] self-start rounded-2xl bg-danger-soft px-3.5 py-2.5 text-sm text-danger">
                 {turn.text}
               </div>
             );
@@ -365,44 +402,76 @@ export default function ChatWindow({
             />
           );
         })}
+        {sending && (
+          <div className="flex items-center gap-2.5 self-start rounded-2xl rounded-bl-md bg-surface-2 px-3.5 py-2.5 text-sm text-fg-muted">
+            <span className="flex gap-1" aria-hidden="true">
+              {[0, 1, 2].map((d) => (
+                <span
+                  key={d}
+                  className="size-1.5 rounded-full bg-fg-muted animate-[typing_1.2s_ease-in-out_infinite]"
+                  style={{ animationDelay: `${d * 160}ms` }}
+                />
+              ))}
+            </span>
+            Reading the research...
+          </div>
+        )}
       </div>
 
-      {turns.length > 0 && (
-        <button type="button" onClick={clearHistory} className="self-end text-xs text-zinc-500 underline -mt-2">
-          clear history
-        </button>
-      )}
+      <div className="flex flex-col gap-2.5 border-t border-line bg-surface px-3 pb-3 pt-3">
+        {fieldId !== null && (
+          <div className="animate-in flex items-center gap-2 rounded-xl bg-accent-soft py-1.5 pe-1.5 ps-3 text-sm">
+            <Message className="size-3.5 shrink-0 text-accent-text" />
+            <span className="min-w-0 flex-1 truncate">
+              <span className="text-fg-muted">Asking about </span>
+              <span className="font-medium text-fg">{anchorLabel ?? `prescription #${fieldId}`}</span>
+            </span>
+            <button type="button" onClick={onClearAnchor} className="icon-btn size-7" aria-label="Stop asking about this exercise">
+              <Close className="size-3.5" />
+            </button>
+          </div>
+        )}
 
-      <SuggestedPrompts
-        anchored={fieldId !== null}
-        hasPercentLoad={anchorHasPercentLoad}
-        goal={goal}
-        disabled={sending}
-        onPick={send}
-      />
-
-      <form onSubmit={handleSend} className="flex gap-2">
-        <input
-          ref={messageInputRef}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder={
-            fieldId !== null
-              ? 'e.g. "make it 10-12 reps", "take it closer to failure", "why 3 sets?"'
-              : "Ask a general research question..."
-          }
-          className="border rounded px-3 py-2 flex-1"
-          required
-        />
-        <button
-          type="submit"
+        <SuggestedPrompts
+          anchored={fieldId !== null}
+          hasPercentLoad={anchorHasPercentLoad}
+          goal={goal}
           disabled={sending}
-          className="rounded bg-black text-white px-4 py-2 disabled:opacity-50 dark:bg-white dark:text-black"
+          onPick={send}
+        />
+
+        <form
+          onSubmit={handleSend}
+          className="flex items-end gap-2 rounded-2xl border border-line-strong bg-surface-2 p-1.5 ps-3.5 transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
         >
-          {sending ? "Sending..." : "Send"}
-        </button>
-      </form>
-    </div>
+          <textarea
+            ref={messageInputRef}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={handleComposerKey}
+            rows={1}
+            aria-label="Message"
+            placeholder={
+              fieldId !== null
+                ? 'e.g. "make it 10-12 reps" or "why 3 sets?"'
+                : "Ask a research question..."
+            }
+            className="scroll-thin min-h-9 flex-1 resize-none bg-transparent py-2 text-sm leading-5 text-fg outline-none placeholder:text-fg-subtle"
+          />
+          <button
+            type="submit"
+            disabled={sending || !message.trim()}
+            aria-label="Send"
+            className="btn btn-primary size-9 shrink-0 rounded-xl p-0"
+          >
+            {sending ? <Spinner className="size-4" /> : <ArrowUp className="size-4" />}
+          </button>
+        </form>
+        <p className="hidden px-1 text-[11px] text-fg-subtle sm:block">
+          Enter to send · Shift+Enter for a new line
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -421,19 +490,28 @@ function SuggestedPrompts({
 }) {
   const groups: [string, string[]][] = anchored
     ? Object.entries(anchoredPrompts(hasPercentLoad)).map(([k, v]) => [k === "ask" ? "Ask" : "Change", v])
-    : [["Ask the research", GENERAL_PROMPTS[goal ?? ""] ?? GENERAL_PROMPTS.hypertrophy]];
+    : [["Try", GENERAL_PROMPTS[goal ?? ""] ?? GENERAL_PROMPTS.hypertrophy]];
   return (
-    <div className="flex flex-col gap-1 text-xs">
+    // One scrolling row per group; the fade at the trailing edge shows
+    // there's more to scroll to.
+    <div className="flex flex-col gap-1.5">
       {groups.map(([label, prompts]) => (
-        <div key={label} className="flex flex-wrap items-center gap-1">
-          <span className="text-zinc-500 mr-1">{label}:</span>
+        <div
+          key={label}
+          onWheel={(e) => {
+            // A vertical wheel scrolls the row sideways (mouse users).
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY;
+          }}
+          className="no-scrollbar flex items-center gap-1.5 overflow-x-auto pe-6 [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]"
+        >
+          <span className="w-12 shrink-0 text-[11px] font-medium uppercase tracking-wide text-fg-subtle">{label}</span>
           {prompts.map((p) => (
             <button
               key={p}
               type="button"
               disabled={disabled}
               onClick={() => onPick(p)}
-              className="border rounded-full px-2 py-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+              className="h-7 shrink-0 whitespace-nowrap rounded-full border border-line bg-surface-2 px-2.5 text-xs text-fg-muted transition-[background-color,border-color,color,transform] duration-150 hover:border-line-strong hover:bg-surface-3 hover:text-fg active:scale-[0.97] disabled:opacity-50"
             >
               {p}
             </button>
@@ -458,14 +536,14 @@ function ChangeControls({ status, onChange }: { status: ChangeStatus | null; onC
       setBusy(false);
     }
   };
-  const button = "border rounded px-2 py-1 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-50";
   if (status === "pending") {
     return (
-      <div className="flex gap-2 mt-2">
-        <button type="button" disabled={busy} onClick={() => act("confirm")} className={button}>
+      <div className="mt-3 flex gap-2">
+        <button type="button" disabled={busy} onClick={() => act("confirm")} className="btn btn-primary btn-sm">
+          <Check className="size-3.5" />
           Confirm swap
         </button>
-        <button type="button" disabled={busy} onClick={() => act("cancel")} className="text-xs underline disabled:opacity-50">
+        <button type="button" disabled={busy} onClick={() => act("cancel")} className="btn btn-ghost btn-sm">
           Cancel
         </button>
       </div>
@@ -473,13 +551,32 @@ function ChangeControls({ status, onChange }: { status: ChangeStatus | null; onC
   }
   if (status === "applied") {
     return (
-      <button type="button" disabled={busy} onClick={() => act("undo")} className={`${button} mt-2`}>
+      <button type="button" disabled={busy} onClick={() => act("undo")} className="btn btn-secondary btn-sm mt-3">
+        <Undo className="size-3.5" />
         Undo
       </button>
     );
   }
-  return <p className="text-xs text-zinc-500 mt-2">{status === "undone" ? "Undone." : "Cancelled - nothing changed."}</p>;
+  return (
+    <p className="mt-2.5 text-xs text-fg-subtle">{status === "undone" ? "Undone." : "Cancelled - nothing changed."}</p>
+  );
 }
+
+// The prescription's values as compact chips.
+function ValueChips({ p }: { p: WeeklyPrescription }) {
+  const values = [`${p.sets} sets`, `${p.reps || "n/a"} reps`, ...(p.load ? [p.load] : []), p.rir || "effort n/a"];
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {values.map((v) => (
+        <span key={v} className="rounded-md border border-line bg-surface px-1.5 py-0.5 text-xs font-medium tabular-nums text-fg">
+          {v}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+const assistantBubble = "self-start max-w-[94%] rounded-2xl rounded-bl-md bg-surface-2 px-3.5 py-3 text-sm leading-relaxed";
 
 function ChatTurnResult({
   response,
@@ -500,24 +597,30 @@ function ChatTurnResult({
     const others = changes.filter((c) => !c.includes(" - the new exercise:"));
     const own = changes.filter((c) => c.includes(" - the new exercise:"));
     return (
-      <div className="self-start bg-white dark:bg-zinc-800 border rounded px-3 py-2 max-w-[90%] text-sm">
+      <div className={assistantBubble}>
         <p className="font-medium">
-          {preview ? `Swap ${old_name} for ${new_name}?` : `Swapped ${old_name} for ${new_name}`}
+          <span className="text-fg-subtle">{preview ? "Swap " : "Swapped "}</span>
+          {old_name}
+          <span className="text-fg-subtle"> → </span>
+          {new_name}
+          {preview && "?"}
         </p>
         {own.length > 0 && (
-          <ul className="text-xs text-zinc-500 mt-1 list-disc list-inside">
+          <ul className="mt-1.5 flex flex-col gap-0.5 text-xs text-fg-muted">
             {own.map((c) => <li key={c}>{c.replace(/^.* - the new exercise: /, "")}</li>)}
           </ul>
         )}
-        <p className="text-xs mt-2 font-medium">
-          {others.length > 0
-            ? preview ? "This would also change:" : "Also changed:"
-            : preview ? "Nothing else in the block would change." : "Nothing else in the block changed."}
-        </p>
-        {others.length > 0 && (
-          <ul className="text-xs text-amber-700 dark:text-amber-500 list-disc list-inside">
-            {others.map((c) => <li key={c}>{c}</li>)}
-          </ul>
+        {others.length > 0 ? (
+          <div className="mt-2.5 rounded-xl bg-warn-soft px-3 py-2 text-xs text-warn">
+            <p className="mb-1 font-medium">{preview ? "This would also change" : "Also changed"}</p>
+            <ul className="flex list-disc flex-col gap-0.5 ps-4">
+              {others.map((c) => <li key={c}>{c}</li>)}
+            </ul>
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-fg-subtle">
+            {preview ? "Nothing else in the block would change." : "Nothing else in the block changed."}
+          </p>
         )}
         <ChangeControls status={status} onChange={onChange} />
       </div>
@@ -527,18 +630,26 @@ function ChatTurnResult({
   if (response.mode === "adjust_prescription" && response.prescription) {
     const p = response.prescription;
     return (
-      <div className="self-start bg-white dark:bg-zinc-800 border rounded px-3 py-2 max-w-[90%] text-sm">
+      <div className={assistantBubble}>
         {/* An answer on an adjust means the requested direction couldn't be
             honored and the value was kept - see chat.py _handle_adjust. */}
-        <p className="font-medium">{response.answer ? "Kept as is" : "Updated"}</p>
-        {response.answer && <p>{response.answer}</p>}
-        <p className={response.answer ? "text-zinc-500 text-xs mt-1" : ""}>
-          {describe(p)}
+        <p className="mb-2 flex items-center gap-1.5 font-medium">
+          {response.answer ? (
+            "Kept as is"
+          ) : (
+            <>
+              <Check className="size-4 text-evidence" />
+              Updated
+            </>
+          )}
         </p>
+        {response.answer && <p className="mb-2 text-fg-muted">{response.answer}</p>}
+        <ValueChips p={p} />
         {response.answer ? null : response.grounding_note ? (
-          <p className="text-amber-600 text-xs mt-1">{response.grounding_note}</p>
+          <CaveatNote className="mt-2 text-xs">{response.grounding_note}</CaveatNote>
         ) : (
-          <p className="text-green-700 dark:text-green-500 text-xs mt-1">
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-evidence">
+            <Book className="size-3.5" />
             Fully supported by cited research.
           </p>
         )}
@@ -553,25 +664,22 @@ function ChatTurnResult({
   if (response.mode === "discuss_prescription" && response.prescription) {
     const p = response.prescription;
     return (
-      <div className="self-start bg-white dark:bg-zinc-800 border rounded px-3 py-2 max-w-[90%] text-sm">
+      <div className={assistantBubble}>
         <p>{response.answer}</p>
-        <p className="text-zinc-500 text-xs mt-2">
-          Current: {describe(p)}.
-        </p>
-        {response.grounding_note && (
-          <p className="text-amber-600 text-xs mt-1">{response.grounding_note}</p>
-        )}
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-fg-subtle">Current</span>
+          <ValueChips p={p} />
+        </div>
+        {response.grounding_note && <CaveatNote className="mt-2 text-xs">{response.grounding_note}</CaveatNote>}
         <CitationList citations={response.citations} />
       </div>
     );
   }
 
   return (
-    <div className="self-start bg-white dark:bg-zinc-800 border rounded px-3 py-2 max-w-[90%] text-sm">
+    <div className={assistantBubble}>
       <AnswerText answer={response.answer ?? ""} />
-      {response.grounding_note && (
-        <p className="text-amber-600 text-xs mt-1">{response.grounding_note}</p>
-      )}
+      {response.grounding_note && <CaveatNote className="mt-2 text-xs">{response.grounding_note}</CaveatNote>}
       <CitationList citations={response.citations} />
     </div>
   );
@@ -619,30 +727,32 @@ function RebalancePrompt({
   }
 
   return (
-    <div className="mt-2 border-t pt-2 text-xs">
-      <p className="text-amber-600">{rebalance.message}</p>
+    <div className="mt-3 rounded-xl border border-line bg-surface p-3 text-xs">
+      <CaveatNote>{rebalance.message}</CaveatNote>
       {state.kind === "done" ? (
-        <p className="mt-1 text-green-700 dark:text-green-500">
-          Rebalanced: {state.text}.{" "}
-          <button type="button" onClick={() => undo(state.changeId)} className="underline">
-            undo
+        <p className="mt-2 flex flex-wrap items-center gap-2 text-evidence">
+          <Check className="size-3.5" />
+          Rebalanced: {state.text}.
+          <button type="button" onClick={() => undo(state.changeId)} className="btn btn-secondary btn-sm h-7">
+            <Undo className="size-3.5" />
+            Undo
           </button>
         </p>
       ) : state.kind === "undone" ? (
-        <p className="mt-1 text-zinc-500">Rebalance undone.</p>
+        <p className="mt-2 text-fg-subtle">Rebalance undone.</p>
       ) : state.kind === "kept" ? (
-        <p className="mt-1 text-zinc-500">Kept as is.</p>
+        <p className="mt-2 text-fg-subtle">Kept as is.</p>
       ) : (
         <>
-          <p className="mt-1 font-medium">Rebalance?</p>
-          <div className="flex flex-wrap gap-2 mt-1">
+          <p className="mb-1.5 mt-2.5 font-medium text-fg">Rebalance?</p>
+          <div className="flex flex-wrap gap-1.5">
             {rebalance.options.map((o) => (
               <button
                 key={o.field}
                 type="button"
                 disabled={state.kind === "busy"}
                 onClick={() => choose(o.field)}
-                className="border rounded px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-50"
+                className="btn btn-secondary btn-sm h-7"
               >
                 {o.label}
               </button>
@@ -651,12 +761,12 @@ function RebalancePrompt({
               type="button"
               disabled={state.kind === "busy"}
               onClick={() => setState({ kind: "kept" })}
-              className="underline disabled:opacity-50"
+              className="btn btn-ghost btn-sm h-7"
             >
               Keep as is
             </button>
           </div>
-          {state.kind === "error" && <p className="text-red-600 mt-1">{state.text}</p>}
+          {state.kind === "error" && <p className="mt-1.5 text-danger">{state.text}</p>}
         </>
       )}
     </div>
@@ -667,13 +777,18 @@ function RebalancePrompt({
 // findings behind it follow after a blank line and start folded away.
 function AnswerText({ answer }: { answer: string }) {
   const split = answer.indexOf("\n\n");
-  if (split === -1) return <p>{answer}</p>;
+  if (split === -1) return <p className="whitespace-pre-line">{answer}</p>;
   return (
     <>
-      <p>{answer.slice(0, split)}</p>
-      <details className="mt-2">
-        <summary className="cursor-pointer text-xs text-zinc-500">Show the evidence</summary>
-        <p className="mt-1">{answer.slice(split + 2)}</p>
+      <p className="whitespace-pre-line">{answer.slice(0, split)}</p>
+      <details className="group mt-2.5">
+        <summary className="inline-flex cursor-pointer items-center gap-1 text-xs font-medium text-accent-text select-none">
+          <ChevronRight className="size-3.5 transition-transform duration-200 group-open:rotate-90" />
+          Show the evidence
+        </summary>
+        <p className="animate-in mt-2 whitespace-pre-line border-s-2 border-line-strong ps-3 text-fg-muted">
+          {answer.slice(split + 2)}
+        </p>
       </details>
     </>
   );
@@ -682,13 +797,26 @@ function AnswerText({ answer }: { answer: string }) {
 function CitationList({ citations }: { citations: Citation[] }) {
   if (citations.length === 0) return null;
   return (
-    <ul className="mt-2 text-xs text-zinc-500 list-disc list-inside">
-      {citations.map((c, i) => (
-        <li key={i} title={c.snippet}>
-          {c.title}
-          {c.field && <span className="text-zinc-400"> (backs {c.field === "rir" ? "effort (RIR)" : c.field})</span>}
-        </li>
-      ))}
-    </ul>
+    <div className="mt-3 border-t border-line pt-2.5">
+      <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+        <Book className="size-3 text-evidence" />
+        {citations.length} source{citations.length === 1 ? "" : "s"}
+      </p>
+      <ol className="flex flex-col gap-1.5">
+        {citations.map((c, i) => (
+          <li key={i} title={c.snippet} className="flex gap-2 text-xs text-fg-muted">
+            <span className="font-mono text-fg-subtle">{i + 1}</span>
+            <span className="min-w-0">
+              {c.title}
+              {c.field && (
+                <span className="ms-1.5 rounded bg-surface-3 px-1 py-px text-[11px] text-fg-subtle">
+                  {c.field === "rir" ? "effort" : c.field}
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }

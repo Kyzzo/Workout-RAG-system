@@ -2,19 +2,23 @@
 
 import { useEffect, useRef, useState } from "react";
 import { runBlockGeneration } from "./blockGeneration";
+import { CaveatNote, SourcesBadge, SourcesPanel } from "./Citations";
+import { useDialogs } from "./Dialogs";
+import GenerationProgress from "./GenerationProgress";
+import { Alert, ChevronRight, Layers, Message, Pencil, Refresh, Swap, Trash, Undo, Zap } from "./Icons";
 import ProgressionGuide from "./ProgressionGuide";
-import { SourcesBadge, SourcesPanel } from "./Citations";
 import { RuleSources } from "./RuleSources";
 import { AddDayForm, AddExerciseForm, AddMesocycleForm } from "./StructureForms";
 import {
-  volumeLabel,
   type DayTemplate,
   type ExerciseSlot,
   type Mesocycle,
   type Program,
   type RuleJustification,
+  type SupportingCitation,
   type WeeklyPrescription,
 } from "./types";
+import { Menu, Notice, Spinner } from "./ui";
 import { useApi } from "./useApi";
 
 type FrequencyResult = {
@@ -41,9 +45,9 @@ export function swapSummary(result: { old_name: string; new_name: string; change
 // "constant": a muscle with only accessory lifts - the trials periodized
 // their main lifts only, so nothing is scheduled.
 function schemeLabel(scheme: string): string {
-  if (scheme === "constant") return "no scheduled progression (accessories only)";
-  if (scheme === "undulating") return "daily undulating progression";
-  return `${scheme} progression`;
+  if (scheme === "constant") return "none scheduled (accessories only)";
+  if (scheme === "undulating") return "daily undulating";
+  return scheme;
 }
 
 type ProgressionResult = {
@@ -51,7 +55,7 @@ type ProgressionResult = {
   updated_prescriptions: unknown[];
 };
 
-const actionClass = "text-xs underline disabled:opacity-40 disabled:no-underline shrink-0";
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // sets=0 with an empty load is the backend's "not generated yet" placeholder
 // state (see create_exercise_slot / _clone_day_for_muscle_group).
@@ -63,11 +67,11 @@ function generatedCount(slots: ExerciseSlot[]) {
   return slots.flatMap((s) => s.weekly_prescriptions).filter((wp) => !isPlaceholder(wp)).length;
 }
 
-function deleteWarning(what: string, slots: ExerciseSlot[]) {
+function deleteWarning(slots: ExerciseSlot[]) {
   const generated = generatedCount(slots);
   return generated > 0
-    ? `Delete ${what}? This also deletes ${generated} generated week${generated === 1 ? "" : "s"} of values and their citations. This can't be undone.`
-    : `Delete ${what}? This can't be undone.`;
+    ? `This also deletes ${generated} generated week${generated === 1 ? "" : "s"} of values and their citations. This can't be undone.`
+    : "This can't be undone.";
 }
 
 // How many of the block's weekly sessions train this muscle group - what
@@ -110,6 +114,36 @@ function muscleGroupsIn(mesocycle: Mesocycle) {
   return [...groups].sort();
 }
 
+// What a swap would change besides the exercise itself, for its preview.
+function SwapPreview({ changes }: { changes: string[] }) {
+  const own = changes.filter((c) => c.includes(" - the new exercise:"));
+  const others = changes.filter((c) => !c.includes(" - the new exercise:"));
+  return (
+    <div className="flex flex-col gap-3">
+      {own.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {own.map((c) => (
+            <li key={c}>{c.replace(/^.* - the new exercise: /, "The new exercise: ")}</li>
+          ))}
+        </ul>
+      )}
+      {others.length > 0 ? (
+        <div className="rounded-xl bg-warn-soft p-3 text-warn">
+          <p className="mb-1.5 font-medium">This also changes</p>
+          <ul className="flex list-disc flex-col gap-1 ps-4">
+            {others.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p>Nothing else in the block changes.</p>
+      )}
+      <p className="text-xs text-fg-subtle">You can undo it afterwards.</p>
+    </div>
+  );
+}
+
 export default function ProgramTree({
   program,
   anchoredFieldId,
@@ -126,6 +160,7 @@ export default function ProgramTree({
   externalBusy?: boolean;
 }) {
   const api = useApi();
+  const dialogs = useDialogs();
   // One generation at a time: each call is several seconds of retrieval +
   // generation + citation verification, and running two against the same
   // muscle group at once would race on the sibling-volume context.
@@ -200,7 +235,7 @@ export default function ProgramTree({
       });
       const added = result.days_added.length;
       return (
-        `${muscleGroup}: ${result.frequency.frequency}x/week` +
+        `${capitalize(muscleGroup)}: ${result.frequency.frequency}x/week` +
         (added > 0 ? ` - added ${added} day${added === 1 ? "" : "s"} to reach it.` : " - no days needed adding.") +
         (result.frequency.grounding_note ? ` (${result.frequency.grounding_note})` : "")
       );
@@ -215,7 +250,7 @@ export default function ProgramTree({
       });
       const updated = result.updated_prescriptions.length;
       return (
-        `${muscleGroup}: ${schemeLabel(result.scheme.scheme)} - ${updated} week value${updated === 1 ? "" : "s"} updated.` +
+        `${capitalize(muscleGroup)}: ${schemeLabel(result.scheme.scheme)} progression - ${updated} week value${updated === 1 ? "" : "s"} updated.` +
         (result.scheme.grounding_note ? ` (${result.scheme.grounding_note})` : "")
       );
     });
@@ -241,10 +276,10 @@ export default function ProgramTree({
       const { weekly_sets } = result.volume;
       const added = result.exercises_added;
       return (
-        `${muscleGroup}: research suggests ${weekly_sets} sets/week; split across its exercises the plan gives ` +
+        `${capitalize(muscleGroup)}: research suggests ${weekly_sets} sets/week; split across its exercises the plan gives ` +
         `${result.delivered_weekly_sets}.` +
         (added.length > 0
-          ? ` Added ${added.join(", ")} so the sets are spread across exercises - use "generate reps & effort" on ${added.length === 1 ? "it" : "them"}.`
+          ? ` Added ${added.join(", ")} so the sets are spread across exercises - use "Generate reps & effort" on ${added.length === 1 ? "it" : "them"}.`
           : "") +
         (result.delivered_weekly_sets < weekly_sets ? " Add an exercise or a day to get closer." : "")
       );
@@ -253,16 +288,27 @@ export default function ProgramTree({
 
   async function generateBlock(mesocycle: Mesocycle) {
     const strength = program.goal === "strength";
-    const confirmed = window.confirm(
-      `Generate every number in "${mesocycle.name}"?\n\n` +
-        "1. Research frequency for each muscle group, shown next to how often you actually train it (no days are added).\n" +
-        "2. Weekly volume for each muscle group (cited), split across its exercises - at most " +
-        `${strength ? 5 : 3} sets per exercise` +
-        (strength ? ".\n" : "; exercises are added where a muscle needs more than that.\n") +
-        `3. Reps, effort (RIR)${strength ? " and load (%1RM)" : ""} for every exercise, applied to all weeks.\n` +
-        (strength ? "4. Progression for each muscle group.\n" : "") +
-        "\nExisting generated values in this block are replaced. This can take a few minutes.",
-    );
+    const confirmed = await dialogs.confirm({
+      title: `Generate every number in "${mesocycle.name}"?`,
+      body: (
+        <div className="flex flex-col gap-3">
+          <ol className="flex list-decimal flex-col gap-1.5 ps-5">
+            <li>
+              Research frequency for each muscle group, shown next to how often you actually train it (no days are
+              added).
+            </li>
+            <li>
+              Weekly volume for each muscle group (cited), split across its exercises - at most {strength ? 5 : 3} sets
+              per exercise{strength ? "." : "; exercises are added where a muscle needs more than that."}
+            </li>
+            <li>Reps, effort (RIR){strength ? " and load (%1RM)" : ""} for every exercise, applied to all weeks.</li>
+            {strength && <li>Progression for each muscle group.</li>}
+          </ol>
+          <p>Existing generated values in this block are replaced. This can take a few minutes.</p>
+        </div>
+      ),
+      confirmLabel: "Generate block",
+    });
     if (!confirmed) return;
 
     setBusyKey(`block-${mesocycle.id}`);
@@ -286,16 +332,22 @@ export default function ProgramTree({
     }
   }
 
-  function deleteDay(day: DayTemplate) {
-    if (!window.confirm(deleteWarning(`day "${day.name}" and its ${day.exercise_slots.length} exercise(s)`, day.exercise_slots))) return;
+  async function deleteDay(day: DayTemplate) {
+    const ok = await dialogs.confirm({
+      title: `Delete "${day.name}"?`,
+      body: `Its ${day.exercise_slots.length} exercise${day.exercise_slots.length === 1 ? "" : "s"} go with it. ${deleteWarning(day.exercise_slots)}`,
+      confirmLabel: "Delete day",
+      danger: true,
+    });
+    if (!ok) return;
     return runAction(`delete-day-${day.id}`, async () => {
       await api(`/day-templates/${day.id}`, { method: "DELETE" });
       return `Deleted day "${day.name}".`;
     });
   }
 
-  function rename(path: string, what: string, current: string) {
-    const name = window.prompt(`New name for this ${what}:`, current);
+  async function rename(path: string, what: string, current: string) {
+    const name = await dialogs.prompt({ title: `Rename ${what}`, label: "Name", defaultValue: current });
     if (name === null || !name.trim() || name.trim() === current) return;
     return runAction(`rename-${path}`, async () => {
       await api(path, { method: "PATCH", body: { name } });
@@ -306,21 +358,25 @@ export default function ProgramTree({
   // Same target muscle; blank asks for a suggestion. Previewed first: the
   // confirm dialog lists everything it would change elsewhere (rotation on
   // other days, other muscles' sets); nothing is applied unless confirmed.
-  function swapExercise(slot: ExerciseSlot) {
-    const name = window.prompt(
-      `Swap "${slot.exercise_name}" for which ${slot.muscle_group} exercise?\nLeave blank to have one suggested.`,
-      "",
-    );
+  async function swapExercise(slot: ExerciseSlot) {
+    const name = await dialogs.prompt({
+      title: `Swap ${slot.exercise_name}`,
+      body: `Pick another ${slot.muscle_group} exercise, or leave it blank to have one suggested. You'll see everything the swap changes before anything is applied.`,
+      label: "Replacement (optional)",
+      placeholder: "e.g. Dumbbell Bench Press",
+      confirmLabel: "Preview swap",
+      allowEmpty: true,
+    });
     if (name === null) return;
     return runAction(`swap-${slot.id}`, async () => {
       const preview = await api<SwapResult>(`/exercise-slots/${slot.id}/swap`, {
         method: "POST", body: { exercise_name: name.trim() || null },
       });
-      const others = preview.changes.filter((c) => !c.includes(" - the new exercise:"));
-      const ok = window.confirm(
-        `Swap "${preview.old_name}" for "${preview.new_name}"?\n\n` +
-          (others.length > 0 ? `This also changes:\n- ${others.join("\n- ")}` : "Nothing else in the block changes."),
-      );
+      const ok = await dialogs.confirm({
+        title: `Swap ${preview.old_name} for ${preview.new_name}?`,
+        body: <SwapPreview changes={preview.changes} />,
+        confirmLabel: "Confirm swap",
+      });
       if (!ok) {
         await api(`/changes/${preview.change_id}`, { method: "DELETE" });
         return "Swap cancelled - nothing changed.";
@@ -336,12 +392,19 @@ export default function ProgramTree({
     const target = undoable;
     return runAction("undo", async () => {
       await api(`/changes/${target.id}/undo`, { method: "POST" });
+      setUndoable(null);
       return `Undid the ${target.label}.`;
     });
   }
 
-  function deleteExercise(slot: ExerciseSlot) {
-    if (!window.confirm(deleteWarning(`"${slot.exercise_name}"`, [slot]))) return;
+  async function deleteExercise(slot: ExerciseSlot) {
+    const ok = await dialogs.confirm({
+      title: `Delete ${slot.exercise_name}?`,
+      body: deleteWarning([slot]),
+      confirmLabel: "Delete exercise",
+      danger: true,
+    });
+    if (!ok) return;
     return runAction(`delete-exercise-${slot.id}`, async () => {
       await api(`/exercise-slots/${slot.id}`, { method: "DELETE" });
       return `Deleted "${slot.exercise_name}".`;
@@ -353,438 +416,634 @@ export default function ProgramTree({
   const strength = program.goal === "strength";
 
   return (
-    <div className="flex flex-col gap-4 w-full text-sm">
-      <p className="text-zinc-500">
-        Program #{program.id} - goal: {program.goal} · {volumeLabel(program.volume_preference, program.goal)}
-        {strength && ` · ${program.trained ? "lifting 1+ year" : "lifting under a year"}`}
-        {strength && program.include_deload && " · deload week"}
-      </p>
+    <div className="flex w-full flex-col gap-5">
       {/* Strength progression is built into the loads (a cited scheme chosen
           by training status); hypertrophy progression is a principle applied
           session to session. */}
       {!strength && program.mesocycles.length > 0 && <ProgressionGuide />}
 
-      {busy && !blockProgress && (
-        <p className="text-indigo-600 dark:text-indigo-400 text-xs">Generating - this can take a little while...</p>
-      )}
-      {blockProgress && (
-        <div className="flex items-center gap-3 text-indigo-600 dark:text-indigo-400 text-xs">
-          <span>{blockProgress}... keep this tab open until it finishes</span>
-          <button type="button" onClick={() => (cancelBlock.current = true)} className={actionClass}>
-            cancel
-          </button>
-        </div>
+      {busy && !blockProgress && !externalBusy && (
+        <Notice tone="info">
+          <span className="flex items-center gap-2">
+            Working on it - generation can take a little while.
+            <Spinner className="size-3.5" />
+          </span>
+        </Notice>
       )}
       {notice && (
-        <p className="text-green-700 dark:text-green-500 text-xs">
+        <Notice
+          tone="success"
+          action={
+            undoable && notice.startsWith("Swapped") ? (
+              <button type="button" disabled={busy} onClick={undoLast} className="btn btn-secondary btn-sm">
+                <Undo className="size-3.5" />
+                Undo
+              </button>
+            ) : undefined
+          }
+        >
           {notice}
-          {undoable && notice.startsWith("Swapped") && (
-            <button type="button" disabled={busy} onClick={undoLast} className="underline ml-2">
-              undo
-            </button>
-          )}
-        </p>
+        </Notice>
       )}
-      {error && <p className="text-red-600 text-xs whitespace-pre-line">{error}</p>}
+      {error && <Notice tone="error">{error}</Notice>}
 
       {program.mesocycles.length === 0 && (
-        <p className="text-zinc-500 text-xs">
-          No training blocks yet. Add one below, then add days and exercises to it.
-        </p>
+        <div className="card flex flex-col items-center gap-2 px-6 py-10 text-center">
+          <span className="grid size-10 place-items-center rounded-xl bg-surface-3 text-fg-muted">
+            <Layers className="size-5" />
+          </span>
+          <p className="font-medium">No training blocks yet</p>
+          <p className="max-w-sm text-sm text-fg-muted">Add a block below, then add days and exercises to it.</p>
+        </div>
       )}
 
       {program.mesocycles.map((mesocycle) => {
         const muscleGroups = muscleGroupsIn(mesocycle);
+        const slots = mesocycle.day_templates.flatMap((d) => d.exercise_slots);
+        const ungenerated = slots.some((s) => s.weekly_prescriptions.some(isPlaceholder));
         return (
-          <div key={mesocycle.id} className="border rounded p-3 flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="font-medium">
-                {mesocycle.name} (weeks {mesocycle.start_week}-{mesocycle.end_week})
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => rename(`/mesocycles/${mesocycle.id}`, "block", mesocycle.name)}
-                  className={`${actionClass} ml-2 font-normal`}
-                >
-                  rename
-                </button>
-              </p>
+          <section key={mesocycle.id} className="card flex flex-col">
+            <header className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-line px-5 py-4">
+              <div className="min-w-0 flex-1">
+                <p className="eyebrow">
+                  Weeks {mesocycle.start_week}–{mesocycle.end_week}
+                </p>
+                <div className="mt-0.5 flex items-center gap-1">
+                  <h3 className="truncate text-lg font-semibold tracking-tight">{mesocycle.name}</h3>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => rename(`/mesocycles/${mesocycle.id}`, "block", mesocycle.name)}
+                    className="icon-btn size-7"
+                    aria-label={`Rename block ${mesocycle.name}`}
+                    title="Rename block"
+                  >
+                    <Pencil className="size-3.5" />
+                  </button>
+                </div>
+              </div>
               {muscleGroups.length > 0 && (
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => generateBlock(mesocycle)}
-                  className="rounded bg-black text-white px-3 py-1 text-xs disabled:opacity-50 dark:bg-white dark:text-black shrink-0"
+                  className={`btn ${ungenerated ? "btn-primary" : "btn-secondary"}`}
                 >
-                  {busyKey === `block-${mesocycle.id}` ? "Generating block..." : "Generate whole block"}
+                  {busyKey === `block-${mesocycle.id}` ? (
+                    <Spinner className="size-4" />
+                  ) : ungenerated ? (
+                    <Zap className="size-4" />
+                  ) : (
+                    <Refresh className="size-4" />
+                  )}
+                  {busyKey === `block-${mesocycle.id}`
+                    ? "Generating..."
+                    : ungenerated
+                      ? "Generate block"
+                      : "Regenerate block"}
                 </button>
               )}
-            </div>
+            </header>
 
-            {muscleGroups.length > 0 && (
-              <details className="text-xs border rounded px-3 py-2">
-                <summary className="cursor-pointer text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Per muscle dosing
-                  <span className="text-zinc-500 font-normal text-xs ml-2">
-                    {"·"} volume, frequency{strength ? " and progression" : ""} for {muscleGroups.length} muscle
-                    {muscleGroups.length === 1 ? "" : "s"}
-                  </span>
-                </summary>
-                <div className="flex flex-col mt-2">
-                  {/* Hypertrophy frequency isn't a generated number: with weekly
-                      sets matched it doesn't change growth detectably, so the
-                      cited finding is shown once and each muscle shows its
-                      plan's frequency and per-session load instead. */}
-                  {!strength && (
-                    <div className="pb-2 border-b">
-                      <RuleSources
-                        text={
-                          "Frequency: with weekly sets matched, studies show no significant growth difference " +
-                          "between training a muscle 2x and 3x a week. More sessions help at higher volumes, " +
-                          "since gains within one session diminish past ~11 sets."
-                        }
-                        ruleKeys={["frequency_matched_volume", "per_session_diminishing_returns"]}
-                        secondHeading="Why more sessions help at higher volume"
-                      />
-                    </div>
-                  )}
-                  {muscleGroups.map((group) => {
-                    const frequency = mesocycle.muscle_group_frequencies.find((f) => f.muscle_group === group);
-                    const volume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group);
-                    const scheme = mesocycle.progression_schemes.find((p) => p.muscle_group === group);
-                    const freqKey = `freq-${frequency?.id}`;
-                    const volumeKey = `volume-${volume?.id}`;
-                    const schemeKey = `scheme-${scheme?.id}`;
-                    const delivered = deliveredSets(mesocycle, group);
-                    return (
-                      <div key={group} className="py-1.5 border-b last:border-b-0">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span className="w-24">{group}</span>
-                          <span className="text-zinc-500">
-                            you train it {daysTraining(mesocycle, group)}x/week
-                            {!strength && daysTraining(mesocycle, group) > 0 && (
-                              <> · ~{Math.round(delivered / daysTraining(mesocycle, group))} sets per session</>
-                            )}
-                          </span>
-                          {volume && (
-                            <span>
-                              {volume.weekly_sets} sets/week suggested
-                              <SourcesBadge
-                                citations={volume.supporting_citations}
-                                note={volume.grounding_note}
-                                open={openSources === volumeKey}
-                                onToggle={() => toggleSources(volumeKey)}
-                              />
-                              <span className={delivered < volume.weekly_sets ? "text-amber-600" : "text-zinc-500"}>
-                                {" "}
-                                · plan gives {delivered}
-                                {delivered < volume.weekly_sets && " (add an exercise or a day)"}
-                              </span>
-                            </span>
-                          )}
-                          {strength && frequency && (
-                            <span>
-                              research suggests {frequency.frequency}x/week
-                              <SourcesBadge
-                                citations={frequency.supporting_citations}
-                                note={frequency.grounding_note}
-                                open={openSources === freqKey}
-                                onToggle={() => toggleSources(freqKey)}
-                              />
-                            </span>
-                          )}
-                          {scheme && (
-                            <span>
-                              {schemeLabel(scheme.scheme)}
-                              <SourcesBadge
-                                citations={scheme.supporting_citations}
-                                note={scheme.grounding_note}
-                                open={openSources === schemeKey}
-                                onToggle={() => toggleSources(schemeKey)}
-                              />
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => generateVolume(mesocycle, group)}
-                            className={actionClass}
-                          >
-                            {busyKey === `volume-${mesocycle.id}-${group}` ? "generating..." : "generate volume"}
-                          </button>
-                          {strength && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => generateFrequency(mesocycle, group)}
-                              className={actionClass}
-                            >
-                              {busyKey === `frequency-${mesocycle.id}-${group}` ? "generating..." : "generate frequency"}
-                            </button>
-                          )}
-                          {program.goal === "strength" && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => generateProgression(mesocycle, group)}
-                              className={actionClass}
-                            >
-                              {busyKey === `progression-${mesocycle.id}-${group}` ? "generating..." : "generate progression"}
-                            </button>
-                          )}
-                        </div>
-                        {volume && openSources === volumeKey && (
-                          <SourcesPanel
-                            heading={`Why research suggests ${volume.weekly_sets} weekly sets for ${group}`}
-                            citations={volume.supporting_citations}
-                            note={volume.grounding_note}
-                          />
-                        )}
-                        {strength && frequency && openSources === freqKey && (
-                          <SourcesPanel
-                            heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
-                            citations={frequency.supporting_citations}
-                            note={frequency.grounding_note}
-                          />
-                        )}
-                        {scheme && openSources === schemeKey && (
-                          <SourcesPanel
-                            heading={
-                              scheme.scheme === "constant"
-                                ? `Why ${group} has no scheduled progression`
-                                : `Why ${schemeLabel(scheme.scheme)}: ` +
-                                  (program.trained ? "you've lifted consistently for 1+ year" : "you're newer to lifting")
-                            }
-                            citations={scheme.supporting_citations}
-                            note={scheme.grounding_note}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </details>
-            )}
+            <div className="flex flex-col gap-4 p-4 sm:p-5">
+              {blockProgress && busyKey === `block-${mesocycle.id}` && (
+                <GenerationProgress
+                  progress={blockProgress}
+                  strength={strength}
+                  includeExercises={false}
+                  onCancel={() => (cancelBlock.current = true)}
+                />
+              )}
 
-            {mesocycle.day_templates.map((day, dayIndex) => (
-              <div key={day.id} className="pl-3 border-l flex flex-col gap-2">
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleDay(day.id)}
-                    aria-expanded={openDays.has(day.id)}
-                    className="font-medium text-zinc-700 dark:text-zinc-300 text-left"
-                  >
-                    <span className="inline-block w-4">{openDays.has(day.id) ? "▾" : "▸"}</span>
-                    Day {dayIndex + 1}: {day.name}
-                    {day.rest_days_before !== null && (
-                      <span className="text-zinc-500 font-normal text-xs ml-2">
-                        ({day.rest_days_before} rest day{day.rest_days_before === 1 ? "" : "s"} before)
-                      </span>
-                    )}
-                    <span className="text-zinc-500 font-normal text-xs ml-2">
-                      {"·"} {day.exercise_slots.length} exercise{day.exercise_slots.length === 1 ? "" : "s"}
+              {muscleGroups.length > 0 && (
+                <details className="group rounded-xl border border-line">
+                  <summary className="flex cursor-pointer items-center gap-2.5 px-4 py-3 select-none">
+                    <Layers className="size-4 text-fg-subtle" />
+                    <span className="text-sm font-medium">Per-muscle dosing</span>
+                    <span className="hidden flex-1 truncate text-xs text-fg-subtle sm:block">
+                      Volume, frequency{strength ? " and progression" : ""} for {muscleGroups.length} muscle
+                      {muscleGroups.length === 1 ? "" : "s"}
                     </span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => rename(`/day-templates/${day.id}`, "day", day.name)}
-                    className={actionClass}
-                  >
-                    rename
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => deleteDay(day)}
-                    className={`${actionClass} text-red-600`}
-                  >
-                    {busyKey === `delete-day-${day.id}` ? "deleting..." : "delete day"}
-                  </button>
-                </div>
-                {openDays.has(day.id) && (
-                  <>
-                    {day.exercise_slots.map((slot) => (
-                      <div key={slot.id} className="pl-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-zinc-600 dark:text-zinc-400">
-                            {slot.exercise_name} ({slot.muscle_group}
-                            {slot.secondary_muscle_groups.length > 0 && (
-                              <span className="text-zinc-400"> · also {slot.secondary_muscle_groups.join(", ")}</span>
-                            )}
-                            )
-                          </p>
-                          <span className="flex gap-3">
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => generateExercise(slot)}
-                              className={actionClass}
-                            >
-                              {busyKey === `exercise-${slot.id}` ? "generating..." : "generate reps & effort"}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => swapExercise(slot)}
-                              className={actionClass}
-                            >
-                              {busyKey === `swap-${slot.id}` ? "swapping..." : "swap exercise"}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => deleteExercise(slot)}
-                              className={`${actionClass} text-red-600`}
-                            >
-                              {busyKey === `delete-exercise-${slot.id}` ? "deleting..." : "delete exercise"}
-                            </button>
-                          </span>
-                        </div>
-                        <ul className="flex flex-col gap-1 mt-1">
-                          {rowsToShow(slot, strength).map(({ wp, everyWeek }) => {
-                            const label = everyWeek ? slot.exercise_name : `${slot.exercise_name}, week ${wp.week_number}`;
-                            const isAnchored = anchoredFieldId === wp.id;
-                            // Split sets carry no per-exercise citations; their
-                            // evidence is the muscle's cited weekly volume.
-                            const muscleVolume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === slot.muscle_group);
-                            const setsCitations =
-                              wp.sets_citations.length > 0 ? wp.sets_citations : (muscleVolume?.supporting_citations ?? []);
-                            // Each value with its own sources: sets (a share of the
-                            // muscle's cited weekly volume), reps, load (%1RM,
-                            // strength only) and effort (RIR).
-                            const values = [
-                              {
-                                field: "sets",
-                                text: wp.sets > 0 ? `${wp.sets} sets` : "sets n/a",
-                                citations: setsCitations,
-                                note: wp.sets_grounding_note,
-                                heading: `Why ${wp.sets} sets`,
-                              },
-                              {
-                                field: "reps",
-                                text: wp.reps ? `${wp.reps} reps` : "reps n/a",
-                                citations: wp.reps_citations,
-                                note: wp.reps_grounding_note,
-                                heading: `Why ${wp.reps} reps`,
-                              },
-                              ...(strength || wp.load
-                                ? [{
-                                    field: "load",
-                                    text: wp.load ? `@ ${wp.load}` : "load n/a",
-                                    citations: wp.load_citations,
-                                    note: wp.load_grounding_note,
-                                    heading: `Why ${wp.load}`,
-                                  }]
-                                : []),
-                              {
-                                field: "rir",
-                                text: wp.rir || "effort n/a",
-                                citations: wp.rir_citations,
-                                note: wp.rir_grounding_note,
-                                heading: `Why ${wp.rir}`,
-                              },
-                            ];
-                            const open = values.find((v) => openSources === `wp-${wp.id}-${v.field}`);
-                            return (
-                              <li
-                                key={wp.id}
-                                className={`flex flex-col rounded px-2 py-1 ${
-                                  isAnchored ? "bg-indigo-100 dark:bg-indigo-950" : ""
-                                }`}
-                              >
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span>
-                                    {everyWeek ? "every week" : `week ${wp.week_number}`}:{" "}
-                                    {isPlaceholder(wp) ? (
-                                      <span className="text-zinc-400">not generated yet</span>
-                                    ) : (
-                                      values.map((v, i) => (
-                                        <span key={v.field}>
-                                          {i > 0 && " · "}
-                                          {v.text}
-                                          <SourcesBadge
-                                            citations={v.citations}
-                                            note={v.note}
-                                            open={openSources === `wp-${wp.id}-${v.field}`}
-                                            onToggle={() => toggleSources(`wp-${wp.id}-${v.field}`)}
-                                          />
-                                        </span>
-                                      ))
-                                    )}
-                                  </span>
-                                  <span className="flex gap-3">
-                                    {/* Regenerating one week's sets only makes sense
-                                        when weeks are listed separately. */}
-                                    {!everyWeek && (
-                                      <button
-                                        type="button"
-                                        disabled={busy}
-                                        onClick={() => generatePrescription(wp, "volume")}
-                                        className={actionClass}
-                                      >
-                                        {busyKey === `volume-${wp.id}` ? "generating..." : "gen sets"}
-                                      </button>
-                                    )}
-                                    {strength && (
-                                      <button
-                                        type="button"
-                                        disabled={busy}
-                                        onClick={() => generatePrescription(wp, "intensity")}
-                                        className={actionClass}
-                                      >
-                                        {busyKey === `intensity-${wp.id}` ? "generating..." : "gen load"}
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() => onAskAbout(wp, label)}
-                                      className={`${actionClass} text-indigo-600 dark:text-indigo-400`}
-                                    >
-                                      {isAnchored ? "anchored" : "ask / adjust"}
-                                    </button>
-                                  </span>
-                                </div>
-                                {wp.load_fit_note && !isPlaceholder(wp) && (
-                                  <p className="text-amber-600 text-xs">{wp.load_fit_note}</p>
-                                )}
-                                {open && (
-                                  <SourcesPanel
-                                    heading={open.heading}
-                                    citations={open.citations}
-                                    note={open.note}
-                                    rule={
-                                      open.field === "sets" && splitRule && wp.sets_grounding_note?.startsWith("Share of")
-                                        ? { heading: "Why the sets are spread evenly across sessions", justification: splitRule }
-                                        : null
-                                    }
-                                  />
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
+                    <span className="flex-1 sm:hidden" />
+                    <ChevronRight className="size-4 text-fg-subtle transition-transform duration-200 group-open:rotate-90" />
+                  </summary>
+                  <div className="animate-in border-t border-line">
+                    {/* Hypertrophy frequency isn't a generated number: with weekly
+                        sets matched it doesn't change growth detectably, so the
+                        cited finding is shown once and each muscle shows its
+                        plan's frequency and per-session load instead. */}
+                    {!strength && (
+                      <div className="border-b border-line px-4 py-3">
+                        <RuleSources
+                          label="Frequency"
+                          text={
+                            "With weekly sets matched, studies show no significant growth difference " +
+                            "between training a muscle 2x and 3x a week. More sessions help at higher volumes, " +
+                            "since gains within one session diminish past ~11 sets."
+                          }
+                          ruleKeys={["frequency_matched_volume", "per_session_diminishing_returns"]}
+                          secondHeading="Why more sessions help at higher volume"
+                        />
                       </div>
-                    ))}
-                    <div className="pl-3">
-                      <AddExerciseForm dayTemplateId={day.id} onAdded={onChanged} />
+                    )}
+                    <div className="scroll-thin overflow-x-auto">
+                      <table className="w-full min-w-[34rem] text-sm">
+                        <thead>
+                          <tr className="text-start text-xs text-fg-subtle">
+                            <th className="px-4 py-2.5 text-start font-medium">Muscle</th>
+                            <th className="px-3 py-2.5 text-end font-medium">You train it</th>
+                            {strength && <th className="px-3 py-2.5 text-end font-medium">Research</th>}
+                            <th className="px-3 py-2.5 text-end font-medium">Suggested sets/wk</th>
+                            <th className="px-3 py-2.5 text-end font-medium">Plan gives</th>
+                            {!strength && <th className="px-3 py-2.5 text-end font-medium">Per session</th>}
+                            {strength && <th className="px-3 py-2.5 text-start font-medium">Progression</th>}
+                            <th className="w-12 px-2 py-2.5">
+                              <span className="sr-only">Actions</span>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {muscleGroups.map((group) => {
+                            const frequency = mesocycle.muscle_group_frequencies.find((f) => f.muscle_group === group);
+                            const volume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group);
+                            const scheme = mesocycle.progression_schemes.find((p) => p.muscle_group === group);
+                            const freqKey = `freq-${frequency?.id}`;
+                            const volumeKey = `volume-${volume?.id}`;
+                            const schemeKey = `scheme-${scheme?.id}`;
+                            const delivered = deliveredSets(mesocycle, group);
+                            const trainedDays = daysTraining(mesocycle, group);
+                            const short = volume !== undefined && delivered < volume.weekly_sets;
+                            const rowBusy = [
+                              `volume-${mesocycle.id}-${group}`,
+                              `frequency-${mesocycle.id}-${group}`,
+                              `progression-${mesocycle.id}-${group}`,
+                            ].includes(busyKey ?? "");
+                            const panel =
+                              volume && openSources === volumeKey ? (
+                                <SourcesPanel
+                                  heading={`Why research suggests ${volume.weekly_sets} weekly sets for ${group}`}
+                                  citations={volume.supporting_citations}
+                                  note={volume.grounding_note}
+                                />
+                              ) : strength && frequency && openSources === freqKey ? (
+                                <SourcesPanel
+                                  heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
+                                  citations={frequency.supporting_citations}
+                                  note={frequency.grounding_note}
+                                />
+                              ) : scheme && openSources === schemeKey ? (
+                                <SourcesPanel
+                                  heading={
+                                    scheme.scheme === "constant"
+                                      ? `Why ${group} has no scheduled progression`
+                                      : `Why ${schemeLabel(scheme.scheme)} progression: ` +
+                                        (program.trained ? "you've lifted consistently for 1+ year" : "you're newer to lifting")
+                                  }
+                                  citations={scheme.supporting_citations}
+                                  note={scheme.grounding_note}
+                                />
+                              ) : null;
+                            return [
+                              <tr key={group} className="border-t border-line">
+                                <td className="px-4 py-2.5 font-medium">
+                                  <span className="flex items-center gap-2">
+                                    {capitalize(group)}
+                                    {rowBusy && <Spinner className="size-3.5 text-accent-text" />}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-end tabular-nums text-fg-muted">
+                                  {trainedDays}x/wk
+                                </td>
+                                {strength && (
+                                  <td className="px-3 py-2.5 text-end tabular-nums">
+                                    {frequency ? (
+                                      <span className="inline-flex items-center gap-1.5">
+                                        {frequency.frequency}x/wk
+                                        <SourcesBadge
+                                          what={`${group} frequency`}
+                                          citations={frequency.supporting_citations}
+                                          note={frequency.grounding_note}
+                                          open={openSources === freqKey}
+                                          onToggle={() => toggleSources(freqKey)}
+                                        />
+                                      </span>
+                                    ) : (
+                                      <span className="text-fg-subtle">—</span>
+                                    )}
+                                  </td>
+                                )}
+                                <td className="px-3 py-2.5 text-end tabular-nums">
+                                  {volume ? (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      {volume.weekly_sets}
+                                      <SourcesBadge
+                                        what={`${group} weekly sets`}
+                                        citations={volume.supporting_citations}
+                                        note={volume.grounding_note}
+                                        open={openSources === volumeKey}
+                                        onToggle={() => toggleSources(volumeKey)}
+                                      />
+                                    </span>
+                                  ) : (
+                                    <span className="text-fg-subtle">—</span>
+                                  )}
+                                </td>
+                                <td className={`px-3 py-2.5 text-end tabular-nums ${short ? "text-warn" : "text-fg-muted"}`}>
+                                  <span
+                                    className="inline-flex items-center gap-1"
+                                    title={short ? "Below the suggestion - add an exercise or a day" : undefined}
+                                  >
+                                    {short && <Alert className="size-3.5" />}
+                                    {delivered}
+                                    {short && <span className="sr-only"> (below the suggestion - add an exercise or a day)</span>}
+                                  </span>
+                                </td>
+                                {!strength && (
+                                  <td className="px-3 py-2.5 text-end tabular-nums text-fg-muted">
+                                    {trainedDays > 0 ? `~${Math.round(delivered / trainedDays)}` : "—"}
+                                  </td>
+                                )}
+                                {strength && (
+                                  <td className="px-3 py-2.5">
+                                    {scheme ? (
+                                      <span className="inline-flex items-center gap-1.5">
+                                        <span className="capitalize">{schemeLabel(scheme.scheme)}</span>
+                                        <SourcesBadge
+                                          what={`${group} progression`}
+                                          citations={scheme.supporting_citations}
+                                          note={scheme.grounding_note}
+                                          open={openSources === schemeKey}
+                                          onToggle={() => toggleSources(schemeKey)}
+                                        />
+                                      </span>
+                                    ) : (
+                                      <span className="text-fg-subtle">—</span>
+                                    )}
+                                  </td>
+                                )}
+                                <td className="px-2 py-1.5 text-end">
+                                  <Menu
+                                    label={`Actions for ${group}`}
+                                    disabled={busy}
+                                    items={[
+                                      {
+                                        label: "Generate weekly volume",
+                                        icon: <Zap className="size-4" />,
+                                        onSelect: () => generateVolume(mesocycle, group),
+                                      },
+                                      ...(strength
+                                        ? [
+                                            {
+                                              label: "Generate frequency",
+                                              icon: <Zap className="size-4" />,
+                                              onSelect: () => generateFrequency(mesocycle, group),
+                                            },
+                                            {
+                                              label: "Generate progression",
+                                              icon: <Zap className="size-4" />,
+                                              onSelect: () => generateProgression(mesocycle, group),
+                                            },
+                                          ]
+                                        : []),
+                                    ]}
+                                  />
+                                </td>
+                              </tr>,
+                              panel && (
+                                <tr key={`${group}-sources`}>
+                                  <td colSpan={8} className="px-4 pb-3">
+                                    {panel}
+                                  </td>
+                                </tr>
+                              ),
+                            ];
+                          })}
+                        </tbody>
+                      </table>
                     </div>
-                  </>
-                )}
-              </div>
-            ))}
+                  </div>
+                </details>
+              )}
 
-            <div className="pl-3">
+              <div className="flex flex-col gap-2.5">
+                {mesocycle.day_templates.map((day, dayIndex) => {
+                  const open = openDays.has(day.id);
+                  const dayBusy = busyKey === `delete-day-${day.id}`;
+                  return (
+                    <div
+                      key={day.id}
+                      className={`rounded-xl border transition-colors duration-150 ${
+                        open ? "border-line-strong bg-surface-2/40" : "border-line hover:border-line-strong"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1 pe-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleDay(day.id)}
+                          aria-expanded={open}
+                          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-3 text-start"
+                        >
+                          <ChevronRight
+                            className={`size-4 shrink-0 text-fg-subtle transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+                          />
+                          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-surface-3 font-mono text-xs font-medium text-fg-muted">
+                            D{dayIndex + 1}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium">{day.name}</span>
+                            <span className="block text-xs text-fg-subtle">
+                              {day.exercise_slots.length} exercise{day.exercise_slots.length === 1 ? "" : "s"}
+                              {day.rest_days_before !== null && (
+                                <>
+                                  {" · "}
+                                  {day.rest_days_before} rest day{day.rest_days_before === 1 ? "" : "s"} before
+                                </>
+                              )}
+                            </span>
+                          </span>
+                          {dayBusy && <Spinner className="size-4 text-fg-subtle" />}
+                        </button>
+                        <Menu
+                          label={`Actions for ${day.name}`}
+                          disabled={busy}
+                          items={[
+                            {
+                              label: "Rename day",
+                              icon: <Pencil className="size-4" />,
+                              onSelect: () => rename(`/day-templates/${day.id}`, "day", day.name),
+                            },
+                            {
+                              label: "Delete day",
+                              icon: <Trash className="size-4" />,
+                              danger: true,
+                              onSelect: () => deleteDay(day),
+                            },
+                          ]}
+                        />
+                      </div>
+                      {open && (
+                        <div className="animate-in flex flex-col border-t border-line px-3 pb-3 sm:px-4">
+                          {day.exercise_slots.length === 0 && (
+                            <p className="py-4 text-sm text-fg-subtle">No exercises yet.</p>
+                          )}
+                          <div className="flex flex-col divide-y divide-line">
+                            {day.exercise_slots.map((slot) => (
+                              <ExerciseBlock
+                                key={slot.id}
+                                slot={slot}
+                                mesocycle={mesocycle}
+                                strength={strength}
+                                busy={busy}
+                                busyKey={busyKey}
+                                anchoredFieldId={anchoredFieldId}
+                                openSources={openSources}
+                                toggleSources={toggleSources}
+                                splitRule={splitRule}
+                                onAskAbout={onAskAbout}
+                                onGenerate={() => generateExercise(slot)}
+                                onSwap={() => swapExercise(slot)}
+                                onDelete={() => deleteExercise(slot)}
+                                onGeneratePrescription={generatePrescription}
+                              />
+                            ))}
+                          </div>
+                          <div className="pt-2">
+                            <AddExerciseForm dayTemplateId={day.id} onAdded={onChanged} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
               <AddDayForm mesocycleId={mesocycle.id} onAdded={onChanged} />
             </div>
-          </div>
+          </section>
         );
       })}
 
-      <div className="border rounded p-3 border-dashed">
-        <AddMesocycleForm programId={program.id} onAdded={onChanged} />
+      <AddMesocycleForm programId={program.id} onAdded={onChanged} />
+    </div>
+  );
+}
+
+function ExerciseBlock({
+  slot,
+  mesocycle,
+  strength,
+  busy,
+  busyKey,
+  anchoredFieldId,
+  openSources,
+  toggleSources,
+  splitRule,
+  onAskAbout,
+  onGenerate,
+  onSwap,
+  onDelete,
+  onGeneratePrescription,
+}: {
+  slot: ExerciseSlot;
+  mesocycle: Mesocycle;
+  strength: boolean;
+  busy: boolean;
+  busyKey: string | null;
+  anchoredFieldId: number | null;
+  openSources: string | null;
+  toggleSources: (key: string) => void;
+  splitRule: RuleJustification | null;
+  onAskAbout: (prescription: WeeklyPrescription, label: string) => void;
+  onGenerate: () => void;
+  onSwap: () => void;
+  onDelete: () => void;
+  onGeneratePrescription: (wp: WeeklyPrescription, field: "volume" | "intensity") => void;
+}) {
+  const working =
+    busyKey === `exercise-${slot.id}`
+      ? "Generating..."
+      : busyKey === `swap-${slot.id}`
+        ? "Swapping..."
+        : busyKey === `delete-exercise-${slot.id}`
+          ? "Deleting..."
+          : null;
+  const rows = rowsToShow(slot, strength);
+  const showLoad = strength || slot.weekly_prescriptions.some((wp) => wp.load);
+  // Week label, then sets / reps / (load) / effort, then actions. Every row
+  // of an exercise shares it, so the weeks line up as columns (from sm up;
+  // narrower, each row wraps as a line).
+  const columns = `4.25rem minmax(0,0.8fr) minmax(0,1fr) ${showLoad ? "minmax(0,1.35fr) " : ""}minmax(0,1.1fr) auto`;
+  // Split sets carry no per-exercise citations; their evidence is the
+  // muscle's cited weekly volume.
+  const muscleVolume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === slot.muscle_group);
+
+  return (
+    <div className="flex flex-col gap-2 py-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-medium leading-snug text-fg">{slot.exercise_name}</p>
+          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-fg-subtle">
+            <span className="chip h-5 border-transparent bg-accent-soft px-1.5 text-accent-text">{slot.muscle_group}</span>
+            {slot.secondary_muscle_groups.length > 0 && <span>also {slot.secondary_muscle_groups.join(", ")}</span>}
+            {working && (
+              <span className="inline-flex items-center gap-1.5 text-accent-text">
+                <Spinner className="size-3" />
+                {working}
+              </span>
+            )}
+          </p>
+        </div>
+        <Menu
+          label={`Actions for ${slot.exercise_name}`}
+          disabled={busy}
+          items={[
+            { label: "Generate reps & effort", icon: <Zap className="size-4" />, onSelect: onGenerate },
+            { label: "Swap exercise", icon: <Swap className="size-4" />, onSelect: onSwap },
+            { label: "Delete exercise", icon: <Trash className="size-4" />, danger: true, onSelect: onDelete },
+          ]}
+        />
       </div>
+
+      <ul className="flex flex-col gap-0.5">
+        {rows.map(({ wp, everyWeek }) => {
+          const label = everyWeek ? slot.exercise_name : `${slot.exercise_name}, week ${wp.week_number}`;
+          const isAnchored = anchoredFieldId === wp.id;
+          const setsCitations: SupportingCitation[] =
+            wp.sets_citations.length > 0 ? wp.sets_citations : (muscleVolume?.supporting_citations ?? []);
+          // Each value with its own sources: sets (a share of the muscle's
+          // cited weekly volume), reps, load (%1RM) and effort (RIR).
+          const values = [
+            {
+              field: "sets",
+              value: wp.sets > 0 ? String(wp.sets) : "—",
+              unit: wp.sets === 1 ? "set" : "sets",
+              citations: setsCitations,
+              note: wp.sets_grounding_note,
+              heading: `Why ${wp.sets} sets`,
+            },
+            {
+              field: "reps",
+              value: wp.reps || "—",
+              unit: "reps",
+              citations: wp.reps_citations,
+              note: wp.reps_grounding_note,
+              heading: `Why ${wp.reps} reps`,
+            },
+            ...(showLoad
+              ? [
+                  {
+                    field: "load",
+                    value: wp.load || "—",
+                    unit: "",
+                    citations: wp.load_citations,
+                    note: wp.load_grounding_note,
+                    heading: `Why ${wp.load}`,
+                  },
+                ]
+              : []),
+            {
+              field: "rir",
+              value: wp.rir || "—",
+              unit: "",
+              citations: wp.rir_citations,
+              note: wp.rir_grounding_note,
+              heading: `Why ${wp.rir}`,
+            },
+          ];
+          const open = values.find((v) => openSources === `wp-${wp.id}-${v.field}`);
+          const regenerate = [
+            // Regenerating one week's sets only makes sense when weeks are
+            // listed separately.
+            ...(!everyWeek
+              ? [{ label: "Regenerate sets", icon: <Refresh className="size-4" />, onSelect: () => onGeneratePrescription(wp, "volume") }]
+              : []),
+            ...(strength
+              ? [{ label: "Regenerate load", icon: <Refresh className="size-4" />, onSelect: () => onGeneratePrescription(wp, "intensity") }]
+              : []),
+          ];
+          const rowWorking = busyKey === `volume-${wp.id}` || busyKey === `intensity-${wp.id}`;
+          return (
+            <li
+              key={wp.id}
+              className={`rounded-lg transition-colors duration-150 ${
+                isAnchored ? "bg-accent-soft ring-1 ring-accent/50" : "hover:bg-surface-3/40"
+              }`}
+            >
+              {/* Narrow: week label and actions on a slim top line, values in
+                  a 2x2 grid below. From sm up the values wrapper dissolves
+                  (display: contents) so each value takes its own column of the
+                  shared template and the row is one line. */}
+              <div
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-2 py-2 sm:grid-cols-[var(--cols)] sm:gap-y-0 sm:py-1.5"
+                style={{ "--cols": columns, "--span": values.length } as React.CSSProperties}
+              >
+                <span className="font-mono text-xs text-fg-subtle">
+                  {everyWeek ? "Weekly" : `Wk ${wp.week_number}`}
+                </span>
+                <div className="col-span-2 grid grid-cols-2 gap-x-3 gap-y-1 sm:contents">
+                  {isPlaceholder(wp) ? (
+                    <span className="col-span-2 text-sm italic text-fg-subtle sm:[grid-column:span_var(--span)]">
+                      Not generated yet
+                    </span>
+                  ) : (
+                    values.map((v) => (
+                      <span key={v.field} className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+                        <span className="text-sm font-medium tabular-nums text-fg">
+                          {v.value}
+                          {v.unit && v.value !== "—" && <span className="ms-1 text-xs font-normal text-fg-subtle">{v.unit}</span>}
+                        </span>
+                        <SourcesBadge
+                          what={v.field === "rir" ? "effort" : v.field}
+                          citations={v.citations}
+                          note={v.note}
+                          open={openSources === `wp-${wp.id}-${v.field}`}
+                          onToggle={() => toggleSources(`wp-${wp.id}-${v.field}`)}
+                        />
+                      </span>
+                    ))
+                  )}
+                </div>
+                <span className="col-start-2 row-start-1 flex items-center justify-end gap-0.5 sm:col-start-auto sm:row-start-auto">
+                  {rowWorking && <Spinner className="me-1 size-3.5 text-accent-text" />}
+                  <button
+                    type="button"
+                    onClick={() => onAskAbout(wp, label)}
+                    aria-pressed={isAnchored}
+                    aria-label={`Ask about or adjust ${label}`}
+                    title="Ask about or adjust this in the chat"
+                    className={`btn btn-sm h-7 gap-1.5 px-2 ${
+                      isAnchored ? "bg-accent text-accent-fg" : "btn-ghost text-accent-text"
+                    }`}
+                  >
+                    <Message className="size-3.5" />
+                    <span className="hidden sm:inline">{isAnchored ? "Asking" : "Ask"}</span>
+                  </button>
+                  {regenerate.length > 0 && (
+                    <Menu label={`More for ${label}`} disabled={busy} items={regenerate} quiet />
+                  )}
+                </span>
+              </div>
+              {wp.load_fit_note && !isPlaceholder(wp) && (
+                <CaveatNote className="px-2 pb-2 text-xs">{wp.load_fit_note}</CaveatNote>
+              )}
+              {open && (
+                <div className="px-2 pb-2">
+                  <SourcesPanel
+                    heading={open.heading}
+                    citations={open.citations}
+                    note={open.note}
+                    rule={
+                      open.field === "sets" && splitRule && wp.sets_grounding_note?.startsWith("Share of")
+                        ? { heading: "Why the sets are spread evenly across sessions", justification: splitRule }
+                        : null
+                    }
+                  />
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

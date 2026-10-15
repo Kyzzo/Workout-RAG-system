@@ -2,21 +2,34 @@
 
 import { useCallback, useEffect, useState } from "react";
 import ChatWindow from "./ChatWindow";
-import ProgramForm from "./ProgramForm";
+import { DialogProvider, useDialogs } from "./Dialogs";
+import { Pencil, Plus, Trash } from "./Icons";
 import ProgramTree from "./ProgramTree";
 import ProgramWizard from "./ProgramWizard";
-import { programLabel, type Program, type ProgramSummary, type WeeklyPrescription } from "./types";
+import { programLabel, volumeLabel, type Program, type ProgramSummary, type WeeklyPrescription } from "./types";
+import { Menu, Notice, Skeleton } from "./ui";
 import { useApi } from "./useApi";
 
 export default function ProgramWorkspace() {
+  return (
+    <DialogProvider>
+      <Workspace />
+    </DialogProvider>
+  );
+}
+
+function Workspace() {
   const api = useApi();
-  const [programs, setPrograms] = useState<ProgramSummary[]>([]);
+  const dialogs = useDialogs();
+  const [programs, setPrograms] = useState<ProgramSummary[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [program, setProgram] = useState<Program | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [wizardRunning, setWizardRunning] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  // The generator is the whole screen for a new user; with programs it
+  // opens on demand ("New program") so the program itself leads.
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const [anchoredFieldId, setAnchoredFieldId] = useState<number | null>(null);
   const [anchorLabel, setAnchorLabel] = useState<string | null>(null);
@@ -75,15 +88,16 @@ export default function ProgramWorkspace() {
   }
 
   async function handleDelete() {
-    const target = programs.find((p) => p.id === selectedId);
-    if (!target) return;
-    const confirmed = window.confirm(
-      `Delete program #${target.id} (${target.goal})?\n\n` +
-        "This deletes all of its blocks, days, exercises, generated values and their citations. This can't be undone.",
-    );
+    const target = programs?.find((p) => p.id === selectedId);
+    if (!programs || !target) return;
+    const confirmed = await dialogs.confirm({
+      title: `Delete ${programLabel(target)}?`,
+      body: "This deletes all of its blocks, days, exercises, generated values and their citations. This can't be undone.",
+      confirmLabel: "Delete program",
+      danger: true,
+    });
     if (!confirmed) return;
 
-    setDeleting(true);
     setError(null);
     try {
       await api(`/programs/${target.id}`, { method: "DELETE" });
@@ -94,19 +108,22 @@ export default function ProgramWorkspace() {
       setSelectedId(remaining[0]?.id ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setDeleting(false);
     }
   }
 
   async function handleRename() {
-    const target = programs.find((p) => p.id === selectedId);
+    const target = programs?.find((p) => p.id === selectedId);
     if (!target) return;
-    const name = window.prompt(`Name for program #${target.id}:`, target.name ?? "");
+    const name = await dialogs.prompt({
+      title: "Rename program",
+      label: "Name",
+      defaultValue: target.name ?? "",
+      placeholder: "e.g. Summer strength block",
+    });
     if (name === null || !name.trim()) return;
     try {
       const renamed = await api<ProgramSummary>(`/programs/${target.id}`, { method: "PATCH", body: { name } });
-      setPrograms((prev) => prev.map((p) => (p.id === renamed.id ? { ...p, name: renamed.name } : p)));
+      setPrograms((prev) => prev?.map((p) => (p.id === renamed.id ? { ...p, name: renamed.name } : p)) ?? null);
       reloadProgram();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -114,7 +131,7 @@ export default function ProgramWorkspace() {
   }
 
   function handleCreated(created: ProgramSummary) {
-    setPrograms((prev) => [created, ...prev]);
+    setPrograms((prev) => [created, ...(prev ?? [])]);
     handleSelect(created.id);
   }
 
@@ -132,21 +149,25 @@ export default function ProgramWorkspace() {
     setAnchorLabel(label);
   }
 
+  const hasPrograms = programs !== null && programs.length > 0;
+  const showWizard = programs !== null && (!hasPrograms || wizardOpen || wizardRunning);
+  const strength = program?.goal === "strength";
+
   return (
     // Wide screens: program on the left, chat as a sticky panel on the right
     // so it stays in view while the program scrolls. Narrow screens stack.
-    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_26rem] gap-8 p-8 w-full max-w-7xl">
-      <div className="flex flex-col gap-6 min-w-0">
-        <ProgramWizard onCreated={handleCreated} onRefresh={reloadProgram} onRunningChange={setWizardRunning} />
-        <ProgramForm onCreated={handleCreated} />
-
-        {programs.length > 0 && (
-          <div className="flex items-center gap-2 w-full">
-            <label className="text-sm text-zinc-500">Program:</label>
+    <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_25rem] lg:gap-8 lg:px-8 lg:py-8 xl:grid-cols-[minmax(0,1fr)_27rem]">
+      <main className="flex min-w-0 flex-col gap-5">
+        {hasPrograms && (
+          <div className="flex items-center gap-2">
+            <label htmlFor="program-select" className="sr-only">
+              Program
+            </label>
             <select
+              id="program-select"
               value={selectedId ?? ""}
               onChange={(e) => handleSelect(Number(e.target.value))}
-              className="border rounded px-3 py-2 flex-1 bg-white dark:bg-zinc-900"
+              className="input h-10 flex-1 bg-surface font-medium shadow-card"
             >
               {programs.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -156,39 +177,76 @@ export default function ProgramWorkspace() {
             </select>
             <button
               type="button"
-              onClick={handleRename}
-              disabled={wizardRunning || selectedId === null}
-              className="text-sm underline disabled:opacity-40 disabled:no-underline shrink-0"
+              onClick={() => setWizardOpen(true)}
+              disabled={showWizard}
+              className="btn btn-secondary h-10"
             >
-              Rename
-            </button>
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting || wizardRunning || selectedId === null}
-              className="text-sm text-red-600 underline disabled:opacity-40 disabled:no-underline shrink-0"
-            >
-              {deleting ? "Deleting..." : "Delete program"}
+              <Plus className="size-4" />
+              <span className="hidden sm:inline">New program</span>
+              <span className="sm:hidden">New</span>
             </button>
           </div>
         )}
 
-        {error && <p className="text-red-600 text-sm w-full">{error}</p>}
-        {selectedId !== null && program === null && !error && (
-          <p className="text-zinc-500 text-sm w-full">Loading program...</p>
-        )}
-        {program && (
-          <ProgramTree
-            program={program}
-            anchoredFieldId={anchoredFieldId}
-            onAskAbout={handleAskAbout}
-            onChanged={reloadProgram}
-            externalBusy={wizardRunning}
+        {showWizard && (
+          <ProgramWizard
+            onCreated={handleCreated}
+            onRefresh={reloadProgram}
+            onRunningChange={setWizardRunning}
+            onClose={hasPrograms ? () => setWizardOpen(false) : undefined}
           />
         )}
-      </div>
 
-      <aside className="lg:sticky lg:top-6 lg:self-start lg:h-[calc(100vh-10rem)] lg:max-h-[44rem]">
+        {error && <Notice tone="error">{error}</Notice>}
+
+        {selectedId !== null && program === null && !error && (
+          <div className="card flex flex-col gap-4 p-6" aria-busy="true" aria-label="Loading program">
+            <Skeleton className="h-7 w-1/3" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        )}
+
+        {program && (
+          <>
+            <header className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="eyebrow">Program #{program.id}</p>
+                <h1 className="mt-1 truncate text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
+                  {program.name || `${program.goal === "strength" ? "Strength" : "Hypertrophy"} program`}
+                </h1>
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  <span className="chip border-transparent bg-accent-soft font-medium capitalize text-accent-text">
+                    {program.goal}
+                  </span>
+                  <span className="chip">{volumeLabel(program.volume_preference, program.goal)}</span>
+                  {strength && <span className="chip">{program.trained ? "Lifting 1+ year" : "Lifting under a year"}</span>}
+                  {strength && program.include_deload && <span className="chip">Deload week</span>}
+                </div>
+              </div>
+              <Menu
+                label="Program actions"
+                disabled={wizardRunning}
+                items={[
+                  { label: "Rename program", icon: <Pencil className="size-4" />, onSelect: handleRename },
+                  { label: "Delete program", icon: <Trash className="size-4" />, danger: true, onSelect: handleDelete },
+                ]}
+              />
+            </header>
+            <ProgramTree
+              program={program}
+              anchoredFieldId={anchoredFieldId}
+              onAskAbout={handleAskAbout}
+              onChanged={reloadProgram}
+              externalBusy={wizardRunning}
+            />
+          </>
+        )}
+      </main>
+
+      <aside className="h-[36rem] lg:sticky lg:top-[5.25rem] lg:h-[calc(100dvh-6.75rem)] lg:self-start">
         <ChatWindow
           fieldId={anchoredFieldId}
           anchorLabel={anchorLabel}
