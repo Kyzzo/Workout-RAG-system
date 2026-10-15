@@ -11,6 +11,7 @@
 # optional field instead - pressing and hinging usually train them as a
 # secondary. Picks also name secondary muscles (half a set each toward
 # weekly volume).
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
@@ -26,6 +27,23 @@ client = OpenAI()
 
 MIN_EXERCISES, MAX_EXERCISES = 4, 8
 MAX_EXTRAS = 3
+
+# Every prescription is in repetitions (and RIR), so a timed hold can't be
+# prescribed: a smoke test got "Plank: 8-12 reps". The research behind the
+# numbers doesn't cover hold times either.
+_ISOMETRIC_HOLD = re.compile(
+    r"plank|wall sit|hollow (?:body )?hold|dead hang|l-sit|isometric|static hold|bridge hold|farmer",
+    re.IGNORECASE,
+)
+_NO_HOLDS = (
+    " Every exercise is prescribed in repetitions, so choose repetition-based exercises - no isometric "
+    "holds or carries (planks, wall sits, dead hangs, farmer's walks); for abs, use e.g. cable crunches "
+    "or hanging leg raises."
+)
+
+
+def is_isometric_hold(exercise_name: str) -> bool:
+    return bool(_ISOMETRIC_HOLD.search(exercise_name))
 
 _SYSTEM_PROMPT = (
     "You design the exercise selection for a resistance-training program, "
@@ -44,7 +62,7 @@ _SYSTEM_PROMPT = (
     "common names (e.g. 'Barbell Back Squat', 'Lat Pulldown'). When the same "
     "day type repeats in a week (e.g. 'Push A' and 'Push B'), vary the "
     "exercise choices between them rather than repeating the same list."
-)
+) + _NO_HOLDS
 
 
 class ExerciseSelectionError(Exception):
@@ -137,6 +155,9 @@ def _problems(days: list[PlannedDay], selection) -> list[str]:
             problems.append(f"{day.name} has no exercise for {', '.join(sorted(missing))}")
         if not MIN_EXERCISES <= len(picks) <= MAX_EXERCISES:
             problems.append(f"{day.name} has {len(picks)} exercises")
+        holds = [p[0] for p in picks if is_isometric_hold(p[0])]
+        if holds:
+            problems.append(f"{day.name} has isometric holds ({', '.join(holds)}) - use repetition-based exercises")
     return problems
 
 
@@ -220,7 +241,7 @@ _ADD_PROMPT = (
     "flat bench press; pullovers or a pulldown variation next to pull-ups). In "
     "secondary_muscle_groups list up to 3 other muscles it meaningfully trains, "
     "or none for isolation work. Use common names."
-)
+) + _NO_HOLDS
 
 
 def select_additional_exercises(
@@ -255,6 +276,7 @@ def select_additional_exercises(
         (p.exercise_name.strip(), _clean_secondaries(muscle_group, p.secondary_muscle_groups), p.is_compound)
         for p in message.parsed.exercises
         if p.exercise_name.strip().lower() not in existing_lower  # never duplicate what's there
+        and not is_isometric_hold(p.exercise_name)
     ]
     return picks[:count]
 

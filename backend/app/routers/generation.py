@@ -33,7 +33,7 @@ from ..database import get_db
 from ..citations import get_or_create_citation
 from ..ownership import get_owned_exercise_slot, get_owned_prescription
 from ..rep_max import (
-    MAX_PERCENT, MIN_PERCENT, fit_note, is_bodyweight, parse_percent, percent_for_reps,
+    MAX_PERCENT, MIN_PERCENT, fit_note, is_bodyweight, min_reps_within_table, parse_percent, percent_for_reps,
     rebalance_options, reps_to_failure, rir_midpoint, table_name, top_of_range,
 )
 from ..rag.exercise_selection import ExerciseSelectionError, classify_compound, select_additional_exercises
@@ -69,6 +69,26 @@ _DUP_REPS_NOTE = (
     "Session {position} of {sessions} this week for this lift: {reps} reps, from Rhea et al. 2002's daily "
     "undulating protocol (8, 6 and 4 repetitions across the week's three sessions, heaviest last)."
 )
+_REPS_RAISED_NOTE = (
+    " Raised from {planned} to {reps}: on this exercise even 95% 1RM (the heaviest load Nuzzo et al. 2024's "
+    "table covers) leaves about {to_failure:.0f} reps to failure, so fewer reps couldn't end at {rir}."
+)
+
+
+def _reachable_reps(reps: int, rir: str, exercise_name: str) -> tuple[int, str]:
+    """A phase's or session's reps, raised if the reps table can't reach them
+    at this RIR (the leg press at 4 reps); returns (reps, extra note)."""
+    mid = rir_midpoint(rir)
+    if mid is None or is_bodyweight(exercise_name):
+        return reps, ""
+    floor = min_reps_within_table(exercise_name, mid)
+    if reps >= floor:
+        return reps, ""
+    return floor, _REPS_RAISED_NOTE.format(
+        planned=reps, reps=floor, to_failure=reps_to_failure(MAX_PERCENT, exercise_name), rir=rir,
+    )
+
+
 _DUP_ADAPTED_NOTE = (
     " Rhea tested three sessions a week; with {sessions}, the rotation is adapted (the first and last "
     "of its days for two, repeated for more) - a convention."
@@ -91,7 +111,11 @@ _LOAD_ESTIMATE_NOTE = (
     "adjust it until your sets end at the prescribed RIR. The table comes from fresh first sets: with "
     "several sets at the same weight, later sets will end closer to failure."
 )
-_BODYWEIGHT_NOTE = "Bodyweight exercise - no %1RM; effort is set by the reps and RIR."
+_BODYWEIGHT_NOTE = (
+    "Bodyweight exercise - no %1RM; effort is set by the reps and RIR. If your bodyweight leaves more "
+    "reps in reserve than prescribed at the target reps, add weight (a dip belt or weighted vest) until "
+    "it doesn't; if you can't reach the target reps, use an assisted variation."
+)
 _NO_LOAD_NOTE = "No load estimate: the reps or RIR for this exercise couldn't be read."
 _DELOAD_RIR_NOTE = (
     "How far from failure the deload's lighter load leaves the same reps, from Nuzzo et al. 2024's table "
@@ -834,9 +858,10 @@ def _apply_linear_periodization(
             rir = weeks[0].rir
             for wp in weeks:
                 index = min(wp.week_number - mesocycle.start_week, len(phases) - 1)
-                reps = phases[index]
-                phase = _LINEAR_PHASES.index(reps) + 1
-                note = _LINEAR_REPS_NOTE.format(phase=phase, reps=reps) + adapted
+                planned = phases[index]
+                phase = _LINEAR_PHASES.index(planned) + 1
+                reps, raised = _reachable_reps(planned, rir, slot.exercise_name)
+                note = _LINEAR_REPS_NOTE.format(phase=phase, reps=planned) + adapted + raised
                 _set_from_rule(wp, "reps", str(reps), note, linear_rule)
                 wp.rir = rir
                 _estimate_load(wp, slot.exercise_name, reps_rule)
@@ -921,9 +946,10 @@ def _apply_daily_undulation(
             if not weeks:
                 continue
             rir = weeks[0].rir
-            reps_note = _DUP_REPS_NOTE.format(position=position, sessions=len(days), reps=reps) + adapted
+            slot_reps, raised = _reachable_reps(reps, rir, slot.exercise_name)
+            reps_note = _DUP_REPS_NOTE.format(position=position, sessions=len(days), reps=reps) + adapted + raised
             for wp in weeks:
-                _set_from_rule(wp, "reps", str(reps), reps_note, dup_rule)
+                _set_from_rule(wp, "reps", str(slot_reps), reps_note, dup_rule)
                 wp.rir = rir
                 _estimate_load(wp, slot.exercise_name, reps_rule)
                 if _LOAD_PERCENT_PATTERN.match(wp.load):

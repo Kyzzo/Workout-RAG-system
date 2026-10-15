@@ -13,6 +13,7 @@
 # 8.8 and 14.1 on the bench press and 13.1 and 19.0 on the leg press at 80%
 # and 70%), which these rows match. Values between the 5% rows are
 # interpolated linearly - a convention, not the paper's model.
+import math
 import re
 
 _MAIN = {
@@ -82,6 +83,14 @@ def percent_for_reps(reps: float, exercise_name: str) -> float:
             percent = p_heavy - (reps - r_heavy) / (r_light - r_heavy) * (p_heavy - p_light)
             return round(percent * 2) / 2
     raise AssertionError("unreachable")
+
+
+def min_reps_within_table(exercise_name: str, rir: float) -> int:
+    """The fewest reps that can end at `rir` reps in reserve at the table's
+    heaviest load (95% 1RM). On the leg press ~7 reps to failure remain even
+    at 95%, so a 4-rep target at 1-2 RIR is impossible to estimate a load for;
+    elsewhere it's 1-2 reps and never binds."""
+    return max(1, math.ceil(reps_to_failure(MAX_PERCENT, exercise_name) - rir))
 
 
 def top_of_range(reps: str) -> int | None:

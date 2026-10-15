@@ -619,3 +619,20 @@ def test_undulating_deload_also_lightens_accessories(db_session, strength_owner_
     fly_weeks = {wp.week_number: wp for wp in result.updated_prescriptions if wp.exercise_slot_id == fly.id}
     assert list(fly_weeks) == [4]  # only the deload week changes for an accessory
     assert fly_weeks[4].load == "52% 1RM"  # 60% of its 86.5%
+
+
+def test_leg_press_reps_are_raised_to_what_the_table_can_reach(db_session, strength_owner_and_prescription):
+    # Even 95% 1RM leaves ~7 reps to failure on the leg press (Nuzzo), so the
+    # last linear phase's 4 reps at 1-2 RIR is raised to 6 - otherwise the
+    # load is capped at 95% and the three values don't fit.
+    user, mesocycle = strength_owner_and_prescription
+    slot = mesocycle.day_templates[0].exercise_slots[0]
+    slot.exercise_name, slot.muscle_group = "Leg Press", "chest"  # muscle kept so _progress's request matches
+
+    result = _progress(db_session, user, mesocycle)
+
+    weeks = _weeks(result)
+    assert weeks[4][1] == "6"  # phase 3's 4 reps, raised
+    week4 = next(wp for wp in result.updated_prescriptions if wp.week_number == 4)
+    assert "Raised from 4 to 6" in week4.reps_grounding_note
+    assert all(wp.load_fit_note is None for wp in result.updated_prescriptions)

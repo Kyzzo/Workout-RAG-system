@@ -337,3 +337,18 @@ def test_unhandled_errors_reach_the_browser_with_cors_headers():
     assert response.status_code == 500
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert "RuntimeError" in response.json()["detail"]
+
+
+def test_selection_retries_when_it_picks_an_isometric_hold():
+    # Every prescription is in repetitions: a smoke test got "Plank: 8-12 reps".
+    days = _push_days()
+    good = _picks_covering(days)
+    bad = [list(good[0]), good[1]]
+    bad[0][-1] = ("Plank",) + tuple(bad[0][-1][1:])
+    parse = MagicMock(side_effect=[_completion(_parsed(days, bad)), _completion(_parsed(days, good))])
+
+    with patch("app.rag.exercise_selection.client.chat.completions.parse", parse):
+        _select_group(days, "strength", "Push/Pull/Legs, 6 days per week")
+
+    retry_prompt = parse.call_args_list[1].kwargs["messages"][-1]["content"]
+    assert "isometric holds (Plank)" in retry_prompt
