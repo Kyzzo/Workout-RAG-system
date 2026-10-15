@@ -11,6 +11,7 @@ from typing import Literal
 
 import pydantic
 
+from .excerpt_kinds import KIND_NOTES
 from .types import Category
 
 MANIFEST_PATH = Path(__file__).resolve().parents[2] / "corpus" / "papers.json"
@@ -99,13 +100,22 @@ def evidence_label(chunk: dict) -> str:
     return " · ".join(p for p in parts if p)
 
 
+def context_label(chunk: dict) -> str:
+    """evidence_label plus, for an excerpt that reports no result, what it
+    is instead (rag/excerpt_kinds.py) - for the models that read excerpts
+    only. Users see evidence_label as the citation's title."""
+    note = KIND_NOTES.get(chunk.get("kind"))
+    return " · ".join(p for p in (evidence_label(chunk), note) if p)
+
+
 def evidence_text(chunk: dict) -> str:
     """An excerpt as the judge sees it: labeled with what kind of evidence
     it is, so 'don't generalize a finding beyond its population or outcome'
     can be checked against the paper's tags, not guessed from the text."""
-    if not chunk.get("study_type"):
+    label = context_label(chunk)
+    if not label or label == chunk.get("source"):
         return chunk["text"]
-    return f"Source: {evidence_label(chunk)}\n\n{chunk['text']}"
+    return f"Source: {label}\n\n{chunk['text']}"
 
 
 @lru_cache(maxsize=1)

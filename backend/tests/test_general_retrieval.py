@@ -30,11 +30,22 @@ class _FakeStorage:
         self.per_source = list(per_source)
         self.outcome_filters = []
 
+    @staticmethod
+    def _excluded(chunk, query_filter):
+        # must_not on kind, as Qdrant applies it: an excerpt without a kind passes.
+        for condition in (query_filter.must_not or []) if query_filter else []:
+            if condition.key == "kind" and chunk.get("kind") in condition.match.any:
+                return True
+        return False
+
     def search_per_source(self, vector, per_source, sources, query_filter=None):
-        return list(self.per_source)
+        return [c for c in self.per_source if not self._excluded(c, query_filter)]
 
     def search(self, vector, top_k=5, query_filter=None):
-        conditions = {c.key: c.match for c in (query_filter.must if query_filter else [])}
+        return [c for c in self._search(top_k, query_filter) if not self._excluded(c, query_filter)]
+
+    def _search(self, top_k, query_filter):
+        conditions = {c.key: c.match for c in ((query_filter.must or []) if query_filter else [])}
         if "outcome" in conditions:
             self.outcome_filters.append(sorted(conditions["outcome"].any))
         if "categories" not in conditions:
@@ -237,6 +248,50 @@ def test_excerpts_are_labeled_with_their_evidence_type():
         "Pelland et al. 2025 · meta-analysis · hypertrophy and strength · mixed training status"
     )
     assert evidence_label({"source": "untagged-paper"}) == "untagged-paper"
+
+
+def test_value_generation_leaves_out_excerpts_that_report_no_result():
+    # Schoenfeld 2021's introduction states '8-12 reps optimizes hypertrophy'
+    # as the theory the paper goes on to challenge; it was cited as direct
+    # support for 8-12 reps.
+    excerpts = [
+        {**_chunk("theory", "schoenfeld", 0.9, category="intensity"), "kind": "described_view"},
+        {**_chunk("methods", "lopez", 0.85, category="intensity"), "kind": "methods"},
+        {**_chunk("result", "lopez", 0.8, category="intensity"), "kind": "own_finding"},
+        {**_chunk("cited", "remmert", 0.7, category="intensity"), "kind": "cited_finding"},
+        _chunk("unlabeled", "refalo", 0.6, category="intensity"),  # not yet labeled: kept
+    ]
+
+    with patch.object(generate, "embed_texts", return_value=[[0.0]]), \
+         patch.object(generate, "QdrantStorage", return_value=_FakeStorage({"intensity": excerpts}, [])):
+        generated = generate._retrieve_chunks("reps for hypertrophy", "intensity", findings_only=True)
+        rule = generate._retrieve_chunks("a trial's protocol", "intensity")  # rules keep methods
+
+    assert [c["id"] for c in generated] == ["result", "cited", "unlabeled"]
+    assert [c["id"] for c in rule] == ["theory", "methods", "result", "cited", "unlabeled"]
+
+
+def test_chat_keeps_excerpts_describing_a_theory():
+    # A question ABOUT the theory needs the excerpt that describes it.
+    theory = {**_chunk("theory", "schoenfeld", 0.9, category="intensity"), "kind": "described_view"}
+
+    chunks = _retrieve("what is the repetition continuum?", _FakeStorage({}, [theory]))
+
+    assert [c["id"] for c in chunks] == ["theory"]
+
+
+def test_models_are_told_an_excerpt_reports_no_result_but_users_never_see_it():
+    from app.rag.corpus import context_label, evidence_label, evidence_text
+
+    chunk = {"source": "schoenfeld-etal-2021", "citation": "Schoenfeld et al. 2021", "study_type": "review",
+             "outcome": "both", "population": "mixed", "publication": "journal", "kind": "described_view",
+             "text": "The repetition continuum proposes..."}
+
+    assert evidence_label(chunk) == "Schoenfeld et al. 2021 · review · hypertrophy and strength · mixed training status"
+    assert context_label(chunk) == evidence_label(chunk) + " · describes a theory or convention, reports no result"
+    assert evidence_text(chunk).startswith(f"Source: {context_label(chunk)}\n\n")
+    # A finding gets no note.
+    assert context_label({**chunk, "kind": "own_finding"}) == evidence_label(chunk)
 
 
 def test_generation_searches_with_a_short_topic_but_reranks_with_the_full_question():

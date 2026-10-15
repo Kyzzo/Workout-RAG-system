@@ -24,19 +24,21 @@ ENVIRONMENT = os.getenv("RAILWAY_ENVIRONMENT_NAME", "local")
 # unless it has an index — each collection needs the fields its retrieval
 # filtering actually depends on: "literature" filters by research
 # categories, outcome, paper (source) and section (to leave bibliographies
-# out); "user_context" (users' own documents) by environment + owner (the
-# privacy boundary: owner is the Clerk user id) and document (to delete
-# one document's excerpts).
+# out) and kind (value generation retrieves only excerpts reporting a
+# result - rag/excerpt_kinds.py); "user_context" (users' own documents) by
+# environment + owner (the privacy boundary: owner is the Clerk user id) and
+# document (to delete one document's excerpts).
 REQUIRED_PAYLOAD_INDEXES = {
-    "literature": ("categories", "outcome", "source", "section"),
+    "literature": ("categories", "outcome", "source", "section", "kind"),
     "user_context": ("environment", "owner", "document_id"),
 }
 
 # Paper-level tags stored on every excerpt (corpus/papers.json), plus the
-# excerpt's section ('body' or 'references', set at ingestion).
+# excerpt's section ('body' or 'references') and kind (rag/excerpt_kinds.py),
+# both set at ingestion.
 _TAG_FIELDS = (
     "categories", "citation", "study_type", "outcome", "population", "year", "publication", "evidence_note",
-    "section",
+    "section", "kind",
 )
 
 # Reference lists name the very topics a question asks about, so they match

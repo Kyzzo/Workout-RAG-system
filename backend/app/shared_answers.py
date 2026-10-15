@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .citations import get_or_create_citation
 
-ANSWER_VERSION = "2026-10-04b"  # b: strength volume bands, double-judged answers
+ANSWER_VERSION = "2026-10-15c"  # c: statement judge at low effort
 
 
 @dataclass

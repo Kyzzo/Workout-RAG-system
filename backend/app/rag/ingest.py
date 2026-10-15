@@ -5,6 +5,7 @@ import inngest
 
 from .corpus import paper
 from .data_loader import embed_texts, load_and_chunk_pdf
+from .excerpt_kinds import add_kinds
 from .qdrant_storage import QdrantStorage, chunk_point_id
 from .types import ChunksAndMeta, UpsertResult
 
@@ -34,8 +35,10 @@ async def ingest_literature_pdf(ctx: inngest.Context):
     def _upsert(data: ChunksAndMeta) -> UpsertResult:
         vecs = embed_texts(data.chunks)
         ids = [chunk_point_id(data.source_id, i, text) for i, text in enumerate(data.chunks)]
-        tags = paper(data.source_id).payload()
+        entry = paper(data.source_id)
+        tags = entry.payload()
         payloads = [{**tags, "text": text, "section": section} for text, section in zip(data.chunks, data.sections)]
+        add_kinds(entry.citation, payloads)
         QdrantStorage(collection="literature").upsert(ids, vecs, payloads)
         return UpsertResult(ingested=len(data.chunks))
 

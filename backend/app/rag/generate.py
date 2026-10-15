@@ -10,8 +10,9 @@ from openai import OpenAI
 from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
 
 from ..progress import report
-from .corpus import evidence_label
+from .corpus import context_label
 from .data_loader import embed_texts
+from .excerpt_kinds import NON_FINDING_KINDS
 from .qdrant_storage import QdrantStorage
 
 load_dotenv()
@@ -185,13 +186,24 @@ _OUTCOME_KEYWORDS = {
 }
 
 
-def _build_filter(category: str | None, outcome: str | None) -> Filter | None:
+# Excerpts that report no result (rag/excerpt_kinds.py): an introduction
+# describing the repetition continuum states '8-12 reps optimizes
+# hypertrophy' word for word, but as the theory the paper goes on to
+# challenge. Left out of value generation's search; chat keeps them, since a
+# question about the theory itself needs them. must_not, so an excerpt not
+# yet labeled is kept.
+_REPORTS_NO_RESULT = FieldCondition(key="kind", match=MatchAny(any=list(NON_FINDING_KINDS)))
+
+
+def _build_filter(category: str | None, outcome: str | None, findings_only: bool = False) -> Filter | None:
     conditions = []
     if category is not None:
         conditions.append(_category_condition(category))
     if outcome is not None:
         conditions.append(FieldCondition(key="outcome", match=MatchAny(any=[outcome, "both"])))
-    return Filter(must=conditions) if conditions else None
+    if not conditions and not findings_only:
+        return None
+    return Filter(must=conditions or None, must_not=[_REPORTS_NO_RESULT] if findings_only else None)
 
 
 def _outcome_of(question: str) -> str | None:
@@ -292,7 +304,7 @@ def _score_batch(question: str, batch: list[dict]) -> list[int]:
         "ExcerptScores", **{f"excerpt_{i}": (int, ...) for i in range(len(batch))},
     )
     numbered = "\n\n".join(
-        f"[{i}] ({evidence_label(c)}) {' '.join(c['text'].split())[:1500]}" for i, c in enumerate(batch)
+        f"[{i}] ({context_label(c)}) {' '.join(c['text'].split())[:1500]}" for i, c in enumerate(batch)
     )
     model, effort = RERANK_MODEL
     completion = client.chat.completions.parse(
@@ -377,18 +389,20 @@ def search_text(field_name: str, goal: str | None) -> str | None:
 
 def _retrieve_chunks(
     query: str, category: str | None, outcome: str | None = None, search: str | None = None,
-    rerank: bool = True,
+    rerank: bool = True, findings_only: bool = False,
 ) -> list[dict]:
     """A generated field's (or rule's) evidence: its category's excerpts
     (category=None searches the whole corpus), limited to papers on the
     program's outcome when enough exist, then reranked and diversified.
     `search`, when given, is what the similarity search embeds instead of
-    the full question; reranking always uses the question."""
+    the full question; reranking always uses the question. `findings_only`
+    leaves out excerpts that report no result (generated values; a rule
+    about a trial's protocol needs its methods)."""
     query_vector = embed_texts([search or query])[0]
     storage = QdrantStorage(collection="literature")
 
     def gather(outcome_filter):
-        query_filter = _build_filter(category, outcome_filter)
+        query_filter = _build_filter(category, outcome_filter, findings_only)
         found = storage.search(query_vector, top_k=GENERATION_CANDIDATES, query_filter=query_filter)
         return found + storage.search_per_source(
             query_vector, per_source=CANDIDATES_PER_PAPER, sources=MAX_PAPERS, query_filter=query_filter,
@@ -451,9 +465,9 @@ def _generate_field(
     guidance: str | None = None,
     outcome: str | None = None,
 ) -> tuple[pydantic.BaseModel, list[dict]]:
-    chunks = _retrieve_chunks(query, category, outcome, search=search_text(field_name, outcome))
+    chunks = _retrieve_chunks(query, category, outcome, search=search_text(field_name, outcome), findings_only=True)
 
-    context_block = "\n\n".join(f"[{c['id']}] ({evidence_label(c)}) {c['text']}" for c in chunks)
+    context_block = "\n\n".join(f"[{c['id']}] ({context_label(c)}) {c['text']}" for c in chunks)
     locked_type = adjustment.locked_type() if adjustment else None
     response_schema = _build_response_schema(
         field_name, locked_type or field_type, field_description, [c["id"] for c in chunks]
@@ -789,7 +803,11 @@ _STATEMENT_RULES = (
     "strength when asked about hypertrophy) only if it's directly useful, "
     "and labeled as that outcome. A statement about what proportion of a dataset used "
     "some method describes the STUDIES INCLUDED, not whether the method "
-    "works. Do not invent IDs. Set grounding to 'fully_grounded' if the "
+    "works. An excerpt labeled 'describes a theory or convention' reports "
+    "what a view holds, not evidence that it's true: cite it only for a "
+    "statement that presents it as that view (e.g. 'The traditional "
+    "repetition continuum holds that...'), never for a finding or a "
+    "recommendation. Do not invent IDs. Set grounding to 'fully_grounded' if the "
     "cited excerpts fully account for the answer, 'blended' if you combined "
     "them with general knowledge, or 'general_knowledge' if no excerpt "
     "meaningfully supports an answer (then return no statements)."
@@ -893,7 +911,7 @@ def answer_general_question(topic: str) -> tuple[pydantic.BaseModel, list[dict]]
     report("Searching the papers")
     chunks = _retrieve_general_chunks(topic)
     report("Writing the answer")
-    context_block = "\n\n".join(f"[{c['id']}] ({evidence_label(c)}) {c['text']}" for c in chunks)
+    context_block = "\n\n".join(f"[{c['id']}] ({context_label(c)}) {c['text']}" for c in chunks)
     parsed = _answer_in_statements(
         _QA_SYSTEM_PROMPT, f"Context:\n{context_block}\n\nQuestion: {topic}", [c["id"] for c in chunks],
         with_summary=True,

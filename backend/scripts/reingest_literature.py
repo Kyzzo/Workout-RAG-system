@@ -19,6 +19,7 @@ from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchVa
 
 from app.rag.corpus import paper
 from app.rag.data_loader import embed_texts, load_and_chunk_pdf
+from app.rag.excerpt_kinds import add_kinds
 from app.rag.qdrant_storage import REQUIRED_PAYLOAD_INDEXES, QdrantStorage, chunk_point_id
 
 _EMBED_BATCH = 64
@@ -50,7 +51,9 @@ def main():
     storage.client.delete(storage.collection, points_selector=FilterSelector(filter=source_filter), wait=True)
     ids = [chunk_point_id(entry.source, i, text) for i, text in enumerate(chunks)]
     tags = entry.payload()
-    storage.upsert(ids, vectors, [{**tags, "text": text, "section": section} for text, section in sectioned])
+    payloads = [{**tags, "text": text, "section": section} for text, section in sectioned]
+    add_kinds(entry.citation, payloads)
+    storage.upsert(ids, vectors, payloads)
     after = storage.client.count(storage.collection, count_filter=source_filter, exact=True).count
     print(f"{entry.source}: replaced {before} chunks with {after}")
     print("Next: scripts.clear_shared_answers and scripts.refresh_rule_justifications (local and production).")

@@ -22,7 +22,7 @@ nothing about accuracy. Exits non-zero unless everything passes.
 Usage (from backend/):
     uv run python -m scripts.eval_judge                 # judge + generation
     uv run python -m scripts.eval_judge --judge-only    # cheaper: judge cases only
-    uv run python -m scripts.eval_judge --chat          # also the chat answer case (~45s/run)
+    uv run python -m scripts.eval_judge --chat          # also the chat answer cases (~45s/run each)
     uv run python -m scripts.eval_judge --repeats 5 --list
 """
 
@@ -43,6 +43,9 @@ from app.rag.verification import STATEMENT_JUDGE, Judge, judge_citation
 EXCERPTS = json.loads((Path(__file__).parent / "eval_fixtures" / "judge_excerpts.json").read_text(encoding="utf-8"))
 SUPPORTED = {"primary_support", "contextual_support"}
 CHAT_QUESTION = "What is the optimal number of weekly sets per muscle for hypertrophy?"
+# A question ABOUT a theory: the excerpt describing it is the right source,
+# so value generation's findings-only retrieval must never reach chat.
+THEORY_QUESTION = "What is the repetition continuum?"
 
 
 @dataclass(frozen=True)
@@ -126,6 +129,17 @@ JUDGE_CASES = [
     JudgeCase("8-12 reps vs a load-only excerpt (borderline)", "schoenfeld_loading",
               build_reps_query("chest", "hypertrophy", "Barbell Bench Press"), "8-12", "generation", "not_direct",
               "the excerpt discusses load, not reps - related or rejected are both fine, 'states this directly' isn't"),
+    JudgeCase("8-12 reps from a theory the paper re-examines", "schoenfeld_continuum_intro",
+              build_reps_query("chest", "hypertrophy", "Barbell Bench Press"), "8-12", "generation", "rejected",
+              "the intro describes what the repetition continuum proposes - a belief the paper goes on to "
+              "challenge, not a finding - though it states 8-12 word for word"),
+    JudgeCase("theory presented as the theory", "schoenfeld_continuum_intro", THEORY_QUESTION,
+              "The traditional repetition continuum holds that a moderate repetition scheme of 8 to 12 "
+              "repetitions per set at 60% to 80% of 1RM optimizes muscle hypertrophy.", "statement", "supported",
+              "describing the view as a view is exactly what the excerpt supports - chat needs this"),
+    JudgeCase("theory presented as fact", "schoenfeld_continuum_intro", "What rep range is best for hypertrophy?",
+              "8 to 12 repetitions per set at 60% to 80% of 1RM is optimal for muscle hypertrophy.",
+              "statement", "rejected", "the view's claim stated as a finding"),
 ]
 
 # (muscle, goal, preference): the value must land in its goal and
@@ -165,18 +179,33 @@ def _run_generation_case(case) -> tuple[bool, str]:
     return in_band and any_supported, f"{result.weekly_sets}/wk, {'verified' if any_supported else 'UNVERIFIED'} ({papers} papers)"
 
 
-def _run_chat_case(_) -> tuple[bool, str]:
-    from app.routers.chat import _handle_general_question
-
-    try:
-        answer = _handle_general_question(SimpleNamespace(topic=CHAT_QUESTION), CHAT_QUESTION).answer
-    except Exception as e:
-        return False, f"error: {type(e).__name__}"
+def _check_volume_answer(response) -> tuple[bool, str]:
+    answer = response.answer
     merged = re.search(r"\b18\s*(?:-|–|to)\s*31\b", answer)
     # every sentence that mentions 31 sets must keep 'fractional'
     bare_31 = [s for s in re.split(r"(?<=[.!?])\s+", answer) if re.search(r"\b31\b", s) and "fractional" not in s]
     ok = not merged and not bare_31
     return ok, "ok" if ok else ("merged 18-31 range" if merged else "31 without 'fractional'")
+
+
+def _check_theory_answer(response) -> tuple[bool, str]:
+    cited = any("Schoenfeld et al. 2021" in c.title for c in response.citations)
+    return cited, "cites Schoenfeld 2021" if cited else "Schoenfeld 2021 not cited"
+
+
+# (question, check of the response)
+CHAT_CASES = [(CHAT_QUESTION, _check_volume_answer), (THEORY_QUESTION, _check_theory_answer)]
+
+
+def _run_chat_case(case) -> tuple[bool, str]:
+    from app.routers.chat import _handle_general_question
+
+    question, check = case
+    try:
+        response = _handle_general_question(SimpleNamespace(topic=question), question)
+    except Exception as e:
+        return False, f"error: {type(e).__name__}"
+    return check(response)
 
 
 def _report(label: str, cases, runner, repeats: int, describe) -> bool:
@@ -230,6 +259,7 @@ def main():
         for case in GENERATION_CASES:
             print("generation ", describe_gen(case))
         print("chat        no merged 18-31 range; 31 always with 'fractional' (--chat)")
+        print(f"chat        {THEORY_QUESTION!r} cites Schoenfeld 2021 (--chat)")
         return 0
 
     logging.disable(logging.INFO)
@@ -239,7 +269,7 @@ def main():
     if not args.judge_only:
         ok &= _report("GENERATION CASES", GENERATION_CASES, _run_generation_case, args.repeats, describe_gen)
     if args.chat:
-        ok &= _report("CHAT CASE", [CHAT_QUESTION], _run_chat_case, args.repeats, lambda q: f"chat: {q}")
+        ok &= _report("CHAT CASES", CHAT_CASES, _run_chat_case, args.repeats, lambda c: f"chat: {c[0]}")
     print("\nALL PASS" if ok else "\nSOME CASES DID NOT PASS - see FAIL/FLAKY above")
     return 0 if ok else 1
 

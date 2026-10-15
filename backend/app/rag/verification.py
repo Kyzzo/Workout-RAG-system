@@ -4,6 +4,8 @@ import pydantic
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from .excerpt_kinds import KIND_DEFINITIONS, ExcerptKind
+
 load_dotenv()
 
 # Judge calls run in parallel (a chat answer's statements, a block's
@@ -12,15 +14,28 @@ load_dotenv()
 client = OpenAI(max_retries=6)
 
 class JudgeVerdict(pydantic.BaseModel):
+    # Fields are generated in order, so the judge says what the excerpt
+    # claims and what kind of statement it is BEFORE deciding: matching
+    # '8-12' in a passage that only describes a theory was the failure this
+    # guards against. Not stored or shown - a working note for the verdict.
+    asserts: str
+    kind: ExcerptKind
     outcome: Literal["primary_support", "contextual_support", "contradicted"]
-    reasoning: str
 
 
-_JUDGE_SYSTEM_PROMPT = """You are verifying whether a specific research excerpt \
+_JUDGE_SYSTEM_PROMPT = f"""You are verifying whether a specific research excerpt \
 supports a specific generated answer. You will be given a question, a generated \
 answer (a number, a range, or a specific category/recommendation), and one \
-excerpt that was cited as a source for that answer. Classify the relationship \
-as exactly one of:
+excerpt that was cited as a source for that answer.
+
+First, write `asserts`: what the excerpt itself \
+claims, in one or two sentences, saying whose claim it is (this paper's \
+result, an earlier study's result, or a view it describes). Then choose its \
+`kind`:
+
+{KIND_DEFINITIONS}
+
+Then classify the relationship as `outcome`, exactly one of:
 
 - primary_support: the excerpt's own stated content directly and substantially \
 accounts for the generated answer - it states the same value/range, or makes \
@@ -49,6 +64,21 @@ excerpt is structurally a reference list (look for the repeated \
 author/title/journal/year/DOI pattern), classify it as contradicted even \
 if it takes up the whole excerpt and even if several entry titles look \
 highly relevant.
+
+Tell a reported finding from a reported belief. An excerpt that describes a \
+theory, model, hypothesis, convention or common recommendation - what a view \
+'proposes', 'postulates' or holds, what is 'typically prescribed', \
+'traditionally recommended' or 'commonly accepted', or what an author \
+'proposed' - reports that the view exists, not evidence that it is true. It \
+supports nothing but an answer that itself presents it as that view (e.g. \
+'the traditional repetition continuum holds that 8-12 reps per set optimizes \
+hypertrophy'). An answer stating the view's claim as a fact, a finding or a \
+recommended value is contradicted, even when the excerpt states its exact \
+value (e.g. 'the repetition continuum proposes that 8-12 repetitions \
+optimizes hypertrophy' does not support 8-12 reps). Papers often lay out \
+such a view only to re-examine or challenge it. A result the excerpt reports \
+from a cited study - what that study measured, found or reported - is a \
+finding, and is judged like any other.
 
 The answer must also keep the excerpt's qualifiers. Classify as contradicted \
 if the answer states something the excerpt doesn't because it changed any of: \
@@ -88,9 +118,7 @@ also reports X inside a range it presents as effective. A value that only \
 sits below such a point, or near a single figure the excerpt doesn't present \
 as an effective range, is at most contextual_support. A figure for a different outcome (a strength result for \
 a hypertrophy question) or a different unit (sets per session for a weekly \
-value) never supports it.
-
-Give brief reasoning for your classification."""
+value) never supports it."""
 
 
 class Judge(NamedTuple):
@@ -102,8 +130,8 @@ class Judge(NamedTuple):
 # sets read as total sets, 'no detectable superiority beyond X' read as a
 # ceiling, 12-24 narrowed to 18-24): gpt-4o-mini accepted every one, gpt-5
 # caught all of them. Chat statements and rule claims are prose with
-# qualifiers to keep and are few per answer, so they get full reasoning
-# (slower per check, run in parallel). Generated values are bare numbers
+# qualifiers to keep (see STATEMENT_JUDGE for why low effort is enough
+# there). Generated values are bare numbers
 # checked in bulk, so they get minimal reasoning (~2s per check); its one
 # miss was a hedged prose overstatement, which a bare value can't contain.
 # gpt-4.1 scored the same but this account's 30k tokens/min limit on it
@@ -114,7 +142,17 @@ class Judge(NamedTuple):
 GENERATION_JUDGE = Judge("gpt-5", reasoning_effort="low")
 # Changing a judge or its prompt? Run scripts/eval_judge.py first, and bump
 # shared_answers.ANSWER_VERSION so stored answers are re-judged.
-STATEMENT_JUDGE = Judge("gpt-5")
+# Low, not default (medium), effort since Oct 15, 2026, measured with the
+# structured verdict (asserts/kind before outcome) and the theory-vs-finding
+# rule: 76/76 on the known-trap cases, including 10/10 'hedged ceiling',
+# which medium failed 1 in 3. Against stored rule verdicts it agreed on
+# 158/175: 6 differences come from the theory rule, 11 (~6%) are borderline
+# related-evidence calls in both directions, and none is a false 'states
+# this directly'. Median check 4.0s vs 9.0s, $0.0045 vs $0.0098.
+# Not measured at low: verify_summary (chat's lead summary, which defaults
+# to this judge) and the citation-summary check - the eval has no case for
+# either.
+STATEMENT_JUDGE = Judge("gpt-5", reasoning_effort="low")
 
 
 def judge_citation(query: str, value: int | str, chunk_text: str, judge: Judge | None = None) -> JudgeVerdict:
