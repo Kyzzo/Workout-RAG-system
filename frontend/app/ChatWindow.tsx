@@ -3,6 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { useEffect, useRef, useState } from "react";
 import { API_URL } from "./apiUrl";
+import { swapSummary } from "./ProgramTree";
 import type { WeeklyPrescription } from "./types";
 
 type Citation = { title: string; snippet: string; field: "sets" | "reps" | "load" | "rir" | null };
@@ -25,6 +26,8 @@ type ChatResponse = {
   citations: Citation[];
   grounding_note: string | null;
   rebalance: Rebalance | null;
+  // A swap: the old and new exercise and everything else it changed.
+  swap: { old_name: string; new_name: string; changes: string[] } | null;
 };
 
 type ChatTurn =
@@ -75,6 +78,7 @@ function anchoredPrompts(hasPercentLoad: boolean): { ask: string[]; change: stri
       "Take it closer to failure",
       "Leave more reps in reserve",
       ...(hasPercentLoad ? ["Make it heavier", "Make it lighter"] : []),
+      "Swap this exercise",
     ],
   };
 }
@@ -86,6 +90,7 @@ function describe(p: WeeklyPrescription): string {
 function summarizeResponse(r: ChatResponse): string {
   const p = r.prescription;
   const values = p ? describe(p) : "";
+  if (r.mode === "adjust_prescription" && r.swap) return swapSummary(r.swap);
   if (r.mode === "adjust_prescription") {
     return r.answer ? `Kept as is: ${r.answer}` : `Updated it to ${values}.${r.grounding_note ? ` ${r.grounding_note}` : ""}`;
   }
@@ -348,6 +353,31 @@ function ChatTurnResult({
   response: ChatResponse;
   onApplyRebalance: (rebalance: Rebalance, field: RebalanceField) => Promise<WeeklyPrescription>;
 }) {
+  if (response.mode === "adjust_prescription" && response.swap) {
+    const { old_name, new_name, changes } = response.swap;
+    const others = changes.filter((c) => !c.includes(" - the new exercise:"));
+    const own = changes.filter((c) => c.includes(" - the new exercise:"));
+    return (
+      <div className="self-start bg-white dark:bg-zinc-800 border rounded px-3 py-2 max-w-[90%] text-sm">
+        <p className="font-medium">
+          Swapped {old_name} for {new_name}
+        </p>
+        {response.prescription && <p>{describe(response.prescription)}</p>}
+        {own.length > 0 && (
+          <ul className="text-xs text-zinc-500 mt-1 list-disc list-inside">
+            {own.map((c) => <li key={c}>{c.replace(/^.* - the new exercise: /, "")}</li>)}
+          </ul>
+        )}
+        <p className="text-xs mt-2 font-medium">{others.length > 0 ? "Also changed:" : "Nothing else in the block changed."}</p>
+        {others.length > 0 && (
+          <ul className="text-xs text-amber-700 dark:text-amber-500 list-disc list-inside">
+            {others.map((c) => <li key={c}>{c}</li>)}
+          </ul>
+        )}
+      </div>
+    );
+  }
+
   if (response.mode === "adjust_prescription" && response.prescription) {
     const p = response.prescription;
     return (

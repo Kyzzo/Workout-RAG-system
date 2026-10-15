@@ -1,6 +1,7 @@
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
 from ..rag.generate import (
     build_movement_query,
@@ -36,7 +37,9 @@ from ..rep_max import (
     MAX_PERCENT, MIN_PERCENT, fit_note, is_bodyweight, min_reps_within_table, parse_percent, percent_for_reps,
     rebalance_options, reps_to_failure, rir_midpoint, table_name, top_of_range,
 )
-from ..rag.exercise_selection import ExerciseSelectionError, classify_compound, select_additional_exercises
+from ..rag.exercise_selection import (
+    ExerciseSelectionError, classify_compound, classify_exercise, is_isometric_hold, select_additional_exercises,
+)
 from ..shared_answers import Answer, GeneratedAnswer, get_or_generate, shared_key
 
 router = APIRouter(prefix="/weekly-prescriptions", tags=["generation"])
@@ -616,39 +619,57 @@ def generate_exercise(
     # generated here: they come from the muscle's cited weekly volume
     # (generate-weekly-volume). Week-to-week change comes from progression.
     slot = get_owned_exercise_slot(exercise_slot_id, db, current_user)
-    weeks = sorted(slot.weekly_prescriptions, key=lambda wp: wp.week_number)
-    if not weeks:
+    if not slot.weekly_prescriptions:
         raise HTTPException(status_code=400, detail="This exercise has no weeks to generate.")
-    base, rest = weeks[0], weeks[1:]
-
     program = slot.day_template.mesocycle.program
+    prep = _prepare_exercise(db, program, _movement(slot, db))
+    _apply_exercise(slot, program, prep)
+    db.commit()
+    db.refresh(slot)
+    return slot
+
+
+@dataclass
+class _ExercisePrep:
+    fields: tuple[str, ...]
+    answers: dict
+    accessory_rule: models.RuleJustification | None
+    load_rule: models.RuleJustification | None
+
+
+def _prepare_exercise(db: Session, program: models.Program, movement: str) -> _ExercisePrep:
+    """Every answer and rule an exercise's values need, fetched before
+    anything is written: storing a new shared answer (or a rule's first
+    justification) commits, and nothing half-applied should be pending."""
     fields = exercise_fields(program.goal)
-    movement = _movement(slot, db)
     # A strength program's accessory lifts take the trials' 8-12 reps
     # (cited) rather than a generated rep range.
     accessory = program.goal == "strength" and movement == "isolation"
     generated = tuple(f for f in fields if not (accessory and f == "reps"))
-    # Every answer first, then apply: storing a new shared answer (or a
-    # rule's first justification) commits, and nothing half-applied should
-    # be pending when it does.
     answers = {
         field: _exercise_answer(db, field, program.goal, program.volume_preference, movement) for field in generated
     }
-    accessory_rule = justify_rule(db, "strength_accessory_reps") if accessory else None
-    load_rule = justify_rule(db, "reps_at_percent_1rm") if program.goal == "strength" else None
-    for field, answer in answers.items():
+    return _ExercisePrep(
+        fields=fields,
+        answers=answers,
+        accessory_rule=justify_rule(db, "strength_accessory_reps") if accessory else None,
+        load_rule=justify_rule(db, "reps_at_percent_1rm") if program.goal == "strength" else None,
+    )
+
+
+def _apply_exercise(slot: models.ExerciseSlot, program: models.Program, prep: _ExercisePrep) -> None:
+    """Reps, RIR and (strength) load on week 1, copied to every week."""
+    weeks = sorted(slot.weekly_prescriptions, key=lambda wp: wp.week_number)
+    base, rest = weeks[0], weeks[1:]
+    fields = prep.fields
+    for field, answer in prep.answers.items():
         _apply_answer(base, field, answer, slot.muscle_group, program.goal)
-    if accessory_rule is not None:
-        _set_from_rule(base, "reps", _ACCESSORY_REPS, _ACCESSORY_REPS_NOTE, accessory_rule)
-    if load_rule is not None:
-        _estimate_load(base, slot.exercise_name, load_rule)
+    if prep.accessory_rule is not None:
+        _set_from_rule(base, "reps", _ACCESSORY_REPS, _ACCESSORY_REPS_NOTE, prep.accessory_rule)
+    if prep.load_rule is not None:
+        _estimate_load(base, slot.exercise_name, prep.load_rule)
         fields += ("load",)
-
     copy_fields_to_other_weeks(base, rest, fields)
-
-    db.commit()
-    db.refresh(slot)
-    return slot
 
 
 def _attempt_frequency_generation(muscle_group: str | None, goal: str):
@@ -1006,16 +1027,43 @@ def generate_progression_endpoint(
             detail="Progression generation only applies to strength-goal programs.",
         )
 
+    scheme_record, updated_prescriptions = _run_progression(
+        db, mesocycle, muscle_group, _progression_rules(db, program),
+    )
+
+    db.commit()
+    db.refresh(scheme_record)
+    for wp in updated_prescriptions:
+        db.refresh(wp)
+
+    return schemas.GenerateProgressionResponse(
+        scheme=schemas.ProgressionSchemeOut.model_validate(scheme_record),
+        updated_prescriptions=[schemas.WeeklyPrescriptionOut.model_validate(wp) for wp in updated_prescriptions],
+    )
+
+
+def _progression_rules(db: Session, program: models.Program) -> dict:
     # The scheme follows from the lifter's training status (undulating beat
     # linear for 1RM in trained lifters only), cited through the same
     # verified rules the wizard shows - not generated per program. Every
     # rule is justified before anything is written: a first justification
     # commits.
-    rule = justify_rule(db, "periodization_by_training_status")
-    reps_rule = justify_rule(db, "reps_at_percent_1rm")
-    dup_rule = justify_rule(db, "daily_undulating_protocol") if program.trained else None
-    linear_rule = justify_rule(db, "linear_periodization_protocol")
+    return {
+        "periodization": justify_rule(db, "periodization_by_training_status"),
+        "reps": justify_rule(db, "reps_at_percent_1rm"),
+        "dup": justify_rule(db, "daily_undulating_protocol") if program.trained else None,
+        "linear": justify_rule(db, "linear_periodization_protocol"),
+    }
 
+
+def _run_progression(
+    db: Session, mesocycle: models.Mesocycle, muscle_group: str, rule_set: dict,
+) -> tuple[models.ProgressionScheme, list[models.WeeklyPrescription]]:
+    """Writes the muscle's progression (scheme record and week values);
+    the caller commits."""
+    program = mesocycle.program
+    rule, reps_rule = rule_set["periodization"], rule_set["reps"]
+    dup_rule, linear_rule = rule_set["dup"], rule_set["linear"]
     _delete_existing(db, models.ProgressionScheme, mesocycle.id, muscle_group)
 
     has_compound = any(
@@ -1050,16 +1098,179 @@ def generate_progression_endpoint(
     db.add(scheme_record)
     db.flush()  # populate scheme_record.id before it's used as a FK below
     _add_scheme_citations(db, scheme_record, *rules)
+    return scheme_record, updated_prescriptions
 
-    db.commit()
-    db.refresh(scheme_record)
-    for wp in updated_prescriptions:
-        db.refresh(wp)
 
-    return schemas.GenerateProgressionResponse(
-        scheme=schemas.ProgressionSchemeOut.model_validate(scheme_record),
-        updated_prescriptions=[schemas.WeeklyPrescriptionOut.model_validate(wp) for wp in updated_prescriptions],
+# --- Exercise swaps ----------------------------------------------------------
+# Same target muscle only. The new exercise gets its own reps, RIR and load;
+# its sets stay (they're the muscle's share of its cited weekly volume). The
+# ripple is recalculated and reported: muscles whose secondary credit
+# changed are re-split, and a strength muscle's progression is re-run (a
+# compound <-> isolation swap changes how many days it has a compound lift,
+# so the rotation on its other days).
+
+@exercise_slot_router.post("/{exercise_slot_id}/swap", response_model=schemas.SwapExerciseResponse)
+def swap_exercise(
+    exercise_slot_id: int,
+    request: schemas.SwapExerciseRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    slot = get_owned_exercise_slot(exercise_slot_id, db, current_user)
+    return swap_slot(db, slot, request.exercise_name)
+
+
+def swap_slot(db: Session, slot: models.ExerciseSlot, requested_name: str | None) -> schemas.SwapExerciseResponse:
+    day = slot.day_template
+    mesocycle = day.mesocycle
+    program = mesocycle.program
+    muscle_group = slot.muscle_group
+    old_name = slot.exercise_name
+    if not slot.weekly_prescriptions:
+        raise HTTPException(status_code=400, detail="This exercise has no weeks to swap.")
+
+    # 1. The new exercise, classified - model calls only, nothing written.
+    name, is_compound, secondaries = _choose_replacement(slot, requested_name)
+
+    # 2. Everything that may commit (a new shared answer or rule), still
+    #    before any write.
+    prep = _prepare_exercise(db, program, "compound" if is_compound else "isolation")
+    rerun_progression = program.goal == "strength" and any(
+        s.muscle_group == muscle_group for s in mesocycle.progression_schemes
     )
+    progression_rules = _progression_rules(db, program) if rerun_progression else None
+
+    # 3. Swap and recalculate.
+    before = _block_snapshot(mesocycle)
+    scheme_before = next((s.scheme for s in mesocycle.progression_schemes if s.muscle_group == muscle_group), None)
+    credit_changed = set(slot.secondary_muscle_groups) ^ set(secondaries)
+    slot.exercise_name, slot.is_compound, slot.secondary_muscle_groups = name, is_compound, secondaries
+    _apply_exercise(slot, program, prep)
+    _resplit_for_credit(mesocycle, credit_changed, program.goal)
+    if rerun_progression:
+        _run_progression(db, mesocycle, muscle_group, progression_rules)
+    db.commit()
+    db.refresh(slot)
+
+    changes = _describe_changes(before, _block_snapshot(mesocycle), slot.id)
+    db.refresh(mesocycle)
+    scheme_after = next((s.scheme for s in mesocycle.progression_schemes if s.muscle_group == muscle_group), None)
+    if scheme_before and scheme_after and scheme_before != scheme_after:
+        changes.insert(0, f"{muscle_group} progression: {scheme_before} -> {scheme_after}"
+                          f" (its compound lifts are now on a different number of days)")
+    return schemas.SwapExerciseResponse(
+        slot=schemas.ExerciseSlotOut.model_validate(slot), old_name=old_name, new_name=name, changes=changes,
+    )
+
+
+def _choose_replacement(slot: models.ExerciseSlot, requested_name: str | None) -> tuple[str, bool, list[str]]:
+    """(name, is_compound, secondaries) for the user's choice - checked to
+    mainly train the slot's muscle - or a suggestion for that muscle."""
+    muscle_group = slot.muscle_group
+    if requested_name and requested_name.strip():
+        name = requested_name.strip()
+        if name.lower() == slot.exercise_name.strip().lower():
+            raise HTTPException(status_code=400, detail=f"This is already {slot.exercise_name}.")
+        if is_isometric_hold(name):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{name} is a timed hold - every prescription is in repetitions, so pick a "
+                "repetition-based exercise.",
+            )
+        try:
+            trains, is_compound, secondaries = classify_exercise(name, muscle_group)
+        except ExerciseSelectionError:
+            raise HTTPException(status_code=503, detail=f"Couldn't classify {name} - try again.")
+        if not trains:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{name} doesn't mainly train {muscle_group}. Swaps keep the exercise's target muscle - "
+                f"pick a {muscle_group} exercise.",
+            )
+        return name, is_compound, secondaries
+    day = slot.day_template
+    try:
+        picks = select_additional_exercises(
+            day.name, muscle_group, [s.exercise_name for s in day.exercise_slots], 1, day.mesocycle.program.goal,
+        )
+    except Exception:
+        picks = []
+    if not picks:
+        raise HTTPException(status_code=503, detail=f"Couldn't suggest a {muscle_group} exercise - try naming one.")
+    name, secondaries, is_compound = picks[0]
+    return name, is_compound, secondaries
+
+
+def _resplit_for_credit(mesocycle: models.Mesocycle, muscles: set[str], goal: str) -> None:
+    """Re-splits the cited weekly volume of muscles whose secondary credit
+    changed. A re-split changes those muscles' sets, which changes the
+    credit THEIR exercises give others, so it repeats until nothing moves
+    (bounded). Muscles without generated volume are left alone."""
+    volumes = {v.muscle_group: v for v in mesocycle.muscle_group_volumes}
+    pending = set(muscles)
+    for _ in range(4):
+        moved = set()
+        for muscle in sorted(pending):
+            volume = volumes.get(muscle)
+            if volume is None:
+                continue
+            slots = [s for d in mesocycle.day_templates for s in d.exercise_slots if s.muscle_group == muscle]
+            before = {s.id: _first_week_sets(s) for s in slots}
+            _split_weekly_sets(mesocycle, muscle, volume.weekly_sets, goal)
+            for s in slots:
+                if _first_week_sets(s) != before[s.id]:
+                    moved |= set(s.secondary_muscle_groups)
+        if not moved:
+            return
+        pending = moved
+
+
+_VALUE_FIELDS = ("sets", "reps", "load", "rir")
+
+
+def _block_snapshot(mesocycle: models.Mesocycle) -> dict:
+    return {
+        slot.id: (slot.exercise_name, day.name, {
+            wp.week_number: tuple(str(getattr(wp, f)) for f in _VALUE_FIELDS) for wp in slot.weekly_prescriptions
+        })
+        for day in mesocycle.day_templates for slot in day.exercise_slots
+    }
+
+
+def _describe_changes(before: dict, after: dict, swapped_id: int) -> list[str]:
+    """One line per exercise and value the swap changed, e.g. 'Incline Press
+    (Upper B): reps 6 -> 4' or '... reps 8 -> 6 in weeks 1-3'."""
+    lines = []
+    for slot_id, (name, day, weeks) in after.items():
+        if slot_id not in before:
+            continue
+        old_weeks = before[slot_id][2]
+        who = f"{name} ({day})" + (" - the new exercise" if slot_id == swapped_id else "")
+        for i, field in enumerate(_VALUE_FIELDS):
+            diffs = [(w, old_weeks[w][i], weeks[w][i]) for w in sorted(weeks) if w in old_weeks and old_weeks[w][i] != weeks[w][i]]
+            if not diffs:
+                continue
+            label = "RIR" if field == "rir" else field
+            pairs = {(old, new) for _, old, new in diffs}
+            if len(pairs) == 1:
+                old, new = pairs.pop()
+                span = "" if len(diffs) == len(weeks) else f" in week{'s' if len(diffs) > 1 else ''} {_weeks_text([w for w, _, _ in diffs])}"
+                lines.append(f"{who}: {label} {old or 'none'} -> {new or 'none'}{span}")
+            else:
+                # Weeks with the same change grouped: "weeks 1-3: a -> b, week 4: c -> d".
+                groups: dict = {}
+                for w, old, new in diffs:
+                    groups.setdefault((old, new), []).append(w)
+                parts = [
+                    f"week{'s' if len(ws) > 1 else ''} {_weeks_text(ws)}: {old or 'none'} -> {new or 'none'}"
+                    for (old, new), ws in sorted(groups.items(), key=lambda g: g[1][0])
+                ]
+                lines.append(f"{who}: {label} " + ", ".join(parts))
+    return lines
+
+
+def _weeks_text(weeks: list[int]) -> str:
+    return f"{weeks[0]}-{weeks[-1]}" if weeks == list(range(weeks[0], weeks[-1] + 1)) and len(weeks) > 1 else ", ".join(map(str, weeks))
 
 
 _MIN_SETS_PER_EXERCISE = 2  # convention: below this an exercise is barely worth its slot

@@ -22,6 +22,14 @@ type FrequencyResult = {
   days_added: unknown[];
 };
 
+export function swapSummary(result: { old_name: string; new_name: string; changes: string[] }): string {
+  const others = result.changes.filter((c) => !c.includes(" - the new exercise:"));
+  return (
+    `Swapped "${result.old_name}" for "${result.new_name}".` +
+    (others.length > 0 ? ` Also changed: ${others.join("; ")}.` : " Nothing else in the block changed.")
+  );
+}
+
 // "constant": a muscle with only accessory lifts - the trials periodized
 // their main lifts only, so nothing is scheduled.
 function schemeLabel(scheme: string): string {
@@ -273,6 +281,23 @@ export default function ProgramTree({
     return runAction(`delete-day-${day.id}`, async () => {
       await api(`/day-templates/${day.id}`, { method: "DELETE" });
       return `Deleted day "${day.name}".`;
+    });
+  }
+
+  // Same target muscle; blank asks for a suggestion. Everything the swap
+  // changed elsewhere (rotation on other days, other muscles' sets) is listed.
+  function swapExercise(slot: ExerciseSlot) {
+    const name = window.prompt(
+      `Swap "${slot.exercise_name}" for which ${slot.muscle_group} exercise?\nLeave blank to have one suggested.`,
+      "",
+    );
+    if (name === null) return;
+    return runAction(`swap-${slot.id}`, async () => {
+      const result = await api<{ old_name: string; new_name: string; changes: string[] }>(
+        `/exercise-slots/${slot.id}/swap`,
+        { method: "POST", body: { exercise_name: name.trim() || null } },
+      );
+      return swapSummary(result);
     });
   }
 
@@ -534,6 +559,14 @@ export default function ProgramTree({
                               className={actionClass}
                             >
                               {busyKey === `exercise-${slot.id}` ? "generating..." : "generate reps & effort"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => swapExercise(slot)}
+                              className={actionClass}
+                            >
+                              {busyKey === `swap-${slot.id}` ? "swapping..." : "swap exercise"}
                             </button>
                             <button
                               type="button"

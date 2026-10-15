@@ -29,6 +29,7 @@ from .generation import (
     AdjustmentNotHonored,
     _generate_and_persist,
     adjust_strength_load,
+    swap_slot,
     copy_fields_to_other_weeks,
     field_pipeline,
     rebalance_for,
@@ -112,6 +113,17 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
         raise HTTPException(
             status_code=400,
             detail="This needs to say which exercise/week it's about - try asking from that prescription's chat.",
+        )
+    if decision.target_field == "exercise":
+        # Swap the anchored exercise (same target muscle), recalculating and
+        # reporting the ripple - see generation.swap_slot.
+        prescription = get_owned_prescription(decision.field_id, db, current_user)
+        swap = swap_slot(db, prescription.exercise_slot, decision.requested_value)
+        db.refresh(prescription)
+        return schemas.ChatResponse(
+            mode="adjust_prescription",
+            prescription=schemas.WeeklyPrescriptionOut.model_validate(prescription),
+            swap=swap,
         )
     if decision.target_field not in _ADJUST_FIELDS:
         raise HTTPException(

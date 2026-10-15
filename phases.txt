@@ -100,7 +100,11 @@ PHASE 6 — Chat interface + remaining product surface  <- CURRENT PHASE
    existing rows — DONE for sets/load: chat handles exact values (applied
    as a user override, cited only by what supports it), directions
    (moved, or kept with an explanation), and plain regenerate. Exercise
-   swaps still not supported
+   swaps DONE (chat "swap this for X" / "swap this exercise", and a swap
+   button): same target muscle only; the new exercise gets its own reps,
+   RIR and load, and the ripple is recalculated and reported - muscles
+   whose secondary credit changed are re-split, a strength muscle's
+   progression is re-run (rotation / scheme can change on other days)
 4. Conversational Q&A mode — retrieval + citation, no structured-output
    step — DONE, with claim-level citations verified per claim
 5. User document upload -> user_context collection, user_id-filtered

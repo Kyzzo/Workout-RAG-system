@@ -27,7 +27,9 @@ _ROUTER_SYSTEM_PROMPT = (
     "'sets' (how many sets), 'reps' (the rep range), 'load' (weight as "
     "%1RM) or 'rir' (effort: reps in reserve - 'closer to failure' / "
     "'harder' means DECREASE rir, 'further from failure' / 'easier' means "
-    "increase it) the "
+    "increase it) or 'exercise' (swap/replace the exercise itself - put "
+    "the exercise they name in requested_value, or leave it null if they "
+    "want one suggested) the "
     "request is actually about, and adjustment_kind to what's being asked: "
     "'set_value' if the user names an exact value (also put that value in "
     "requested_value, e.g. '4' for sets or '75% 1RM' / 'RPE 8' for load), "
@@ -63,10 +65,11 @@ class ChatRouteDecision(pydantic.BaseModel):
         description="The WeeklyPrescription id this message is about, if any. "
         "Leave null if the message didn't already tell you one.",
     )
-    target_field: Literal["sets", "reps", "load", "rir"] | None = pydantic.Field(
+    target_field: Literal["sets", "reps", "load", "rir", "exercise"] | None = pydantic.Field(
         default=None,
         description="For adjust_prescription only: which value the user "
-        "wants changed - 'sets', 'reps', 'load' (%1RM) or 'rir' (effort).",
+        "wants changed - 'sets', 'reps', 'load' (%1RM), 'rir' (effort), or "
+        "'exercise' to swap the exercise for another.",
     )
     adjustment_kind: Literal["set_value", "increase", "decrease", "regenerate"] | None = pydantic.Field(
         default=None,
@@ -76,7 +79,9 @@ class ChatRouteDecision(pydantic.BaseModel):
     requested_value: str | None = pydantic.Field(
         default=None,
         description="For adjust_prescription with adjustment_kind='set_value' "
-        "only: the exact value the user asked for, e.g. '4' or '75% 1RM'.",
+        "only: the exact value the user asked for, e.g. '4' or '75% 1RM'; for "
+        "target_field='exercise', the exercise they want instead (null to "
+        "have one suggested).",
     )
     requested_change: str | None = pydantic.Field(
         default=None,

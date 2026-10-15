@@ -297,6 +297,20 @@ class RebalanceRequest(BaseModel):
     apply_field: RebalanceField
 
 
+class SwapExerciseRequest(BaseModel):
+    # None: have an exercise for the same muscle suggested.
+    exercise_name: str | None = Field(default=None, max_length=80)
+
+
+class SwapExerciseResponse(BaseModel):
+    slot: ExerciseSlotOut
+    old_name: str
+    new_name: str
+    # Every value the swap changed, here or elsewhere in the block (the
+    # rotation on other days, other muscles' sets via secondary credit).
+    changes: list[str]
+
+
 class ChatResponse(BaseModel):
     mode: Literal["adjust_prescription", "discuss_prescription", "answer_general_question"]
     prescription: WeeklyPrescriptionOut | None = None
@@ -304,5 +318,6 @@ class ChatResponse(BaseModel):
     citations: list[ChatCitationOut] = []
     grounding_note: str | None = None
     rebalance: RebalanceOut | None = None
+    swap: SwapExerciseResponse | None = None
 
 

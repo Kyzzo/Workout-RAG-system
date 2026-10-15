@@ -281,6 +281,36 @@ def select_additional_exercises(
     return picks[:count]
 
 
+def classify_exercise(exercise_name: str, muscle_group: str) -> tuple[bool, bool, list[str]]:
+    """For a swap the user names: (mainly trains `muscle_group`, is_compound,
+    secondary muscles). Not a research claim, so the cheap model is fine."""
+    schema = pydantic.create_model(
+        "ExerciseClassification",
+        mainly_trains_target=(bool, ...),
+        is_compound=(bool, ...),
+        secondary_muscle_groups=(list[Literal[MUSCLE_GROUPS]], ...),
+    )
+    completion = client.chat.completions.parse(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": (
+                f"Classify a resistance-training exercise for a program slot whose target muscle is "
+                f"{muscle_group}. mainly_trains_target: is {muscle_group} the main muscle it trains? "
+                "is_compound: true for multi-joint movements (squats, presses, rows, pull-ups, deadlifts, "
+                "lunges), false for single-joint ones (curls, extensions, raises, flyes, calf raises). "
+                "secondary_muscle_groups: up to 3 other muscles it meaningfully trains, none for isolation work."
+            )},
+            {"role": "user", "content": exercise_name},
+        ],
+        response_format=schema,
+    )
+    message = completion.choices[0].message
+    if message.refusal or message.parsed is None:
+        raise ExerciseSelectionError(f"Couldn't classify {exercise_name!r}")
+    parsed = message.parsed
+    return parsed.mainly_trains_target, parsed.is_compound, _clean_secondaries(muscle_group, parsed.secondary_muscle_groups)
+
+
 def classify_compound(exercise_name: str) -> bool:
     """Whether a hand-added exercise is compound (multi-joint) - AI-picked
     ones are classified when picked. Not a research claim, so the cheap
