@@ -61,6 +61,7 @@ export function RuleSources({
             heading={first.claim}
             citations={first.supporting_citations}
             note={first.grounding_note}
+            onClose={() => setOpen(false)}
             rule={second ? { heading: secondHeading ?? second.claim, justification: second } : null}
           />
         ) : (

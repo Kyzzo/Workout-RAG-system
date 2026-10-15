@@ -584,12 +584,14 @@ export default function ProgramTree({
                                   heading={`Why research suggests ${volume.weekly_sets} weekly sets for ${group}`}
                                   citations={volume.supporting_citations}
                                   note={volume.grounding_note}
+                                  onClose={() => setOpenSources(null)}
                                 />
                               ) : strength && frequency && openSources === freqKey ? (
                                 <SourcesPanel
                                   heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
                                   citations={frequency.supporting_citations}
                                   note={frequency.grounding_note}
+                                  onClose={() => setOpenSources(null)}
                                 />
                               ) : scheme && openSources === schemeKey ? (
                                 <SourcesPanel
@@ -601,6 +603,7 @@ export default function ProgramTree({
                                   }
                                   citations={scheme.supporting_citations}
                                   note={scheme.grounding_note}
+                                  onClose={() => setOpenSources(null)}
                                 />
                               ) : null;
                             return [
@@ -1032,6 +1035,7 @@ function ExerciseBlock({
                     heading={open.heading}
                     citations={open.citations}
                     note={open.note}
+                    onClose={() => toggleSources(`wp-${wp.id}-${open.field}`)}
                     rule={
                       open.field === "sets" && splitRule && wp.sets_grounding_note?.startsWith("Share of")
                         ? { heading: "Why the sets are spread evenly across sessions", justification: splitRule }

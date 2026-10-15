@@ -1,4 +1,4 @@
-import { Alert, Book } from "./Icons";
+import { Alert, Book, Close } from "./Icons";
 import type { RuleJustification, SupportingCitation } from "./types";
 
 // The two verification outcomes that count as evidence read differently to
@@ -81,6 +81,7 @@ export function SourcesPanel({
   citations,
   note,
   rule,
+  onClose,
 }: {
   heading: string;
   citations: SupportingCitation[];
@@ -88,13 +89,22 @@ export function SourcesPanel({
   // A mechanical rule that shaped this value (e.g. the even split of a
   // muscle's weekly sets across sessions), with its own verified sources.
   rule?: { heading: string; justification: RuleJustification } | null;
+  // Shows a close button (the badge that opened the panel also closes it).
+  onClose?: () => void;
 }) {
   return (
     <div className="animate-in mt-2 flex flex-col gap-3 rounded-xl border border-line bg-surface-2/70 p-3.5 text-[13px]">
-      <p className="flex items-center gap-2 font-semibold text-fg">
-        <Book className="size-3.5 text-evidence" />
-        {heading}
-      </p>
+      <div className="flex items-start gap-2">
+        <p className="flex flex-1 items-center gap-2 font-semibold text-fg">
+          <Book className="size-3.5 shrink-0 text-evidence" />
+          {heading}
+        </p>
+        {onClose && (
+          <button type="button" onClick={onClose} className="icon-btn -me-1.5 -mt-1.5 size-7" aria-label="Close sources">
+            <Close className="size-3.5" />
+          </button>
+        )}
+      </div>
       {note && <CaveatNote>{note}</CaveatNote>}
       <CitationItems citations={citations} />
       {rule && (
