@@ -1,10 +1,10 @@
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
-from .. import models, schemas
+from .. import changes, models, schemas
 from ..auth import get_current_user
 from ..database import get_db
 from ..ownership import get_owned_prescription
@@ -29,7 +29,7 @@ from .generation import (
     AdjustmentNotHonored,
     _generate_and_persist,
     adjust_strength_load,
-    swap_slot,
+    preview_swap,
     copy_fields_to_other_weeks,
     field_pipeline,
     rebalance_for,
@@ -61,10 +61,67 @@ def send_chat_message(
     decision = route_chat_message(request.message, request.field_id, request.history)
 
     if decision.tool == "adjust_prescription":
-        return _handle_adjust(decision, db, current_user, request.message)
-    if decision.tool == "discuss_prescription":
-        return _handle_discuss(decision, db, current_user, request.message)
-    return _handle_general_question(decision, request.message)
+        response = _handle_adjust(decision, db, current_user, request.message)
+    elif decision.tool == "discuss_prescription":
+        response = _handle_discuss(decision, db, current_user, request.message)
+    else:
+        response = _handle_general_question(decision, request.message)
+
+    # Saved history: the message and the full response, so a reload renders
+    # the conversation as it was. A failed request isn't saved.
+    db.add(models.ChatMessage(
+        user_id=current_user.id, role="user",
+        content={"text": request.message, "anchor": request.anchor_label},
+    ))
+    db.add(models.ChatMessage(user_id=current_user.id, role="assistant", content=response.model_dump(mode="json")))
+    db.commit()
+    return response
+
+
+_HISTORY_LIMIT = 100  # turns returned on load (oldest first)
+
+
+@router.get("/history", response_model=list[schemas.SavedChatTurn])
+def get_chat_history(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    rows = (
+        db.query(models.ChatMessage)
+        .filter(models.ChatMessage.user_id == current_user.id)
+        .order_by(models.ChatMessage.id.desc())
+        .limit(_HISTORY_LIMIT)
+        .all()
+    )[::-1]
+
+    def change_id(content):
+        return content.get("change_id") or (content.get("swap") or {}).get("change_id")
+
+    ids = {change_id(r.content) for r in rows if r.role == "assistant"} - {None}
+    statuses = {
+        c.id: c.status
+        for c in db.query(models.ChangeRecord).filter(
+            models.ChangeRecord.id.in_(ids), models.ChangeRecord.user_id == current_user.id,
+        )
+    } if ids else {}
+    return [
+        schemas.SavedChatTurn(
+            role=r.role, content=r.content,
+            change_status=(statuses.get(change_id(r.content), "cancelled")
+                           if r.role == "assistant" and change_id(r.content) else None),
+        )
+        for r in rows
+    ]
+
+
+@router.delete("/history", status_code=204)
+def clear_chat_history(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    db.query(models.ChatMessage).filter(models.ChatMessage.user_id == current_user.id).delete()
+    db.commit()
+    return Response(status_code=204)
 
 
 def _build_adjustment(decision, prescription: models.WeeklyPrescription, raw_message: str) -> Adjustment | None:
@@ -115,11 +172,10 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
             detail="This needs to say which exercise/week it's about - try asking from that prescription's chat.",
         )
     if decision.target_field == "exercise":
-        # Swap the anchored exercise (same target muscle), recalculating and
-        # reporting the ripple - see generation.swap_slot.
+        # A swap is previewed (what it would change, nothing applied) and
+        # applied only when confirmed - see generation.preview_swap.
         prescription = get_owned_prescription(decision.field_id, db, current_user)
-        swap = swap_slot(db, prescription.exercise_slot, decision.requested_value)
-        db.refresh(prescription)
+        swap = preview_swap(db, current_user, prescription.exercise_slot, decision.requested_value)
         return schemas.ChatResponse(
             mode="adjust_prescription",
             prescription=schemas.WeeklyPrescriptionOut.model_validate(prescription),
@@ -150,9 +206,13 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
     # A strength load comes from the reps-to-failure table, never a separate
     # generation that could contradict the reps and RIR; only an exact value
     # the user names is taken as given (their override).
+    mesocycle = prescription.exercise_slot.day_template.mesocycle
+    before = changes.snapshot(mesocycle, [prescription.exercise_slot])  # for undo
+    description = f"{decision.target_field} of {prescription.exercise_slot.exercise_name}, week {prescription.week_number}"
     if decision.target_field == "load" and decision.adjustment_kind != "set_value":
         adjustment = _build_adjustment(decision, prescription, raw_message)  # None: nothing to move from
         reason = adjust_strength_load(db, prescription, adjustment.kind if adjustment else None)
+        change = None if reason else changes.record(db, current_user, mesocycle, "adjust", description, before)
         db.commit()
         db.refresh(prescription)
         return schemas.ChatResponse(
@@ -161,6 +221,7 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
             answer=reason,
             grounding_note=prescription.load_grounding_note,
             rebalance=None if reason else rebalance_for(prescription, "load"),
+            change_id=change.id if change else None,
         )
     if _ADJUST_FIELDS[decision.target_field] is None:
         generate_fn, query_fn = field_pipeline(
@@ -212,8 +273,12 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
             ),
             grounding_note=getattr(prescription, f"{decision.target_field}_grounding_note"),
         )
+    change = changes.record(db, current_user, mesocycle, "adjust", description, before)
+    db.commit()
+    db.refresh(updated)
     return schemas.ChatResponse(
         mode="adjust_prescription",
+        change_id=change.id,
         prescription=schemas.WeeklyPrescriptionOut.model_validate(updated),
         grounding_note=getattr(updated, f"{decision.target_field}_grounding_note"),
         # Strength only: hypertrophy has no load to fit reps and RIR to.

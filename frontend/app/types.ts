@@ -97,7 +97,13 @@ export type Mesocycle = {
 export type ProgramSummary = {
   id: number;
   goal: string;
+  name?: string | null;
 };
+
+// "#22 Summer cut (strength)" or "#22 - strength" when unnamed.
+export function programLabel(p: ProgramSummary): string {
+  return p.name ? `#${p.id} ${p.name} (${p.goal})` : `#${p.id} - ${p.goal}`;
+}
 
 export type VolumePreference = "minimal" | "moderate" | "high";
 
@@ -129,6 +135,7 @@ export type Program = {
   user_id: number;
   goal: string;
   volume_preference: VolumePreference;
+  name?: string | null;
   trained: boolean;
   include_deload: boolean;
   mesocycles: Mesocycle[];

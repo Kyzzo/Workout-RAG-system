@@ -399,7 +399,8 @@ def test_applying_a_rebalance_recalculates_it_and_cites_the_table(db_session, ow
             db=db_session, current_user=user,
         )
 
-    out = schemas.WeeklyPrescriptionOut.model_validate(result)
+    out = result.prescription
+    assert result.change_id is not None  # undoable
     assert (out.reps, out.load, out.rir) == ("3", "90% 1RM", "1-2 RIR")
     assert [c.citation.title for c in out.reps_citations] == ["reps-table-paper"]
     assert "Recalculated to fit the load you set" in out.reps_grounding_note

@@ -9,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import CLERK_ALLOWED_ORIGINS
 from .rag.ingest import ingest_literature_pdf, inngest_client
-from .routers import chat, generation, programs, structure
+from .routers import changes, chat, generation, programs, structure
 
 app = FastAPI()
 logger = logging.getLogger("uvicorn")
@@ -49,6 +49,7 @@ app.include_router(generation.router)
 app.include_router(generation.mesocycle_router)
 app.include_router(generation.exercise_slot_router)
 app.include_router(chat.router)
+app.include_router(changes.router)
 app.include_router(structure.router)
 
 inngest.fast_api.serve(app, inngest_client, [ingest_literature_pdf])

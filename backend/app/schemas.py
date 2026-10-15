@@ -59,6 +59,7 @@ class SplitOut(BaseModel):
 class ProgramSummaryOut(BaseModel):
     id: int
     goal: str
+    name: str | None = None
     volume_preference: str = "moderate"
     trained: bool = False
     include_deload: bool = False
@@ -93,6 +94,7 @@ class ProgramOut(BaseModel):
     id: int
     user_id: int
     goal: str
+    name: str | None = None
     volume_preference: str = "moderate"
     trained: bool = False
     include_deload: bool = False
@@ -266,6 +268,18 @@ class ChatMessageRequest(BaseModel):
     # references ("ok lower it"), never as a source of ids or authority -
     # field_id above and the ownership check still decide what gets touched.
     history: list[ChatTurn] = Field(default=[], max_length=20)
+    # What the message was anchored to, as shown in the UI ("Bench Press,
+    # week 2") - saved with the message so reloaded history reads the same.
+    anchor_label: str | None = Field(default=None, max_length=200)
+
+
+class SavedChatTurn(BaseModel):
+    role: str  # "user" / "assistant"
+    content: dict
+    # For a turn that made (or previewed) a change: "pending" / "applied" /
+    # "undone", or "cancelled" once a preview is gone - so a reload shows
+    # the right Undo / Confirm buttons.
+    change_status: str | None = None
 
 
 class ChatCitationOut(BaseModel):
@@ -292,9 +306,41 @@ class RebalanceOut(BaseModel):
     options: list[RebalanceOption]
 
 
+class RebalanceResult(BaseModel):
+    prescription: WeeklyPrescriptionOut
+    change_id: int  # undo with POST /changes/{id}/undo
+
+
 class RebalanceRequest(BaseModel):
     changed_field: RebalanceField
     apply_field: RebalanceField
+
+
+class ChangeOut(BaseModel):
+    id: int
+    kind: str
+    description: str
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
+class Rename(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class MesocycleSummaryOut(BaseModel):
+    id: int
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class DayTemplateSummaryOut(BaseModel):
+    id: int
+    name: str
+
+    model_config = {"from_attributes": True}
 
 
 class SwapExerciseRequest(BaseModel):
@@ -306,9 +352,13 @@ class SwapExerciseResponse(BaseModel):
     slot: ExerciseSlotOut
     old_name: str
     new_name: str
-    # Every value the swap changed, here or elsewhere in the block (the
+    # Every value the swap changes, here or elsewhere in the block (the
     # rotation on other days, other muscles' sets via secondary credit).
     changes: list[str]
+    # A swap is previewed first (pending, nothing applied) and applied on
+    # confirm; change_id confirms, cancels or (once applied) undoes it.
+    change_id: int | None = None
+    pending: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -319,5 +369,7 @@ class ChatResponse(BaseModel):
     grounding_note: str | None = None
     rebalance: RebalanceOut | None = None
     swap: SwapExerciseResponse | None = None
+    # Set when the message changed the program: undo with POST /changes/{id}/undo.
+    change_id: int | None = None
 
 

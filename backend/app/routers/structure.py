@@ -123,6 +123,37 @@ def create_exercise_slot(
 # have been in the program", not "replace it from week N onward".
 
 
+# Renaming blocks and days. Exercises aren't renamed here: a different
+# exercise changes its classification and values, so it's a swap.
+
+@router.patch("/mesocycles/{mesocycle_id}", response_model=schemas.MesocycleSummaryOut)
+def rename_mesocycle(
+    mesocycle_id: int,
+    request: schemas.Rename,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    mesocycle = get_owned_mesocycle(mesocycle_id, db, current_user)
+    mesocycle.name = request.name.strip()
+    db.commit()
+    db.refresh(mesocycle)
+    return mesocycle
+
+
+@router.patch("/day-templates/{day_template_id}", response_model=schemas.DayTemplateSummaryOut)
+def rename_day_template(
+    day_template_id: int,
+    request: schemas.Rename,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    day = get_owned_day_template(day_template_id, db, current_user)
+    day.name = request.name.strip()
+    db.commit()
+    db.refresh(day)
+    return day
+
+
 @router.delete("/day-templates/{day_template_id}", status_code=204)
 def delete_day_template(
     day_template_id: int,

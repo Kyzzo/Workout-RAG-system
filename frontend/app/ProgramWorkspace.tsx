@@ -5,7 +5,7 @@ import ChatWindow from "./ChatWindow";
 import ProgramForm from "./ProgramForm";
 import ProgramTree from "./ProgramTree";
 import ProgramWizard from "./ProgramWizard";
-import type { Program, ProgramSummary, WeeklyPrescription } from "./types";
+import { programLabel, type Program, type ProgramSummary, type WeeklyPrescription } from "./types";
 import { useApi } from "./useApi";
 
 export default function ProgramWorkspace() {
@@ -99,6 +99,20 @@ export default function ProgramWorkspace() {
     }
   }
 
+  async function handleRename() {
+    const target = programs.find((p) => p.id === selectedId);
+    if (!target) return;
+    const name = window.prompt(`Name for program #${target.id}:`, target.name ?? "");
+    if (name === null || !name.trim()) return;
+    try {
+      const renamed = await api<ProgramSummary>(`/programs/${target.id}`, { method: "PATCH", body: { name } });
+      setPrograms((prev) => prev.map((p) => (p.id === renamed.id ? { ...p, name: renamed.name } : p)));
+      reloadProgram();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   function handleCreated(created: ProgramSummary) {
     setPrograms((prev) => [created, ...prev]);
     handleSelect(created.id);
@@ -136,10 +150,18 @@ export default function ProgramWorkspace() {
             >
               {programs.map((p) => (
                 <option key={p.id} value={p.id}>
-                  #{p.id} - {p.goal}
+                  {programLabel(p)}
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              onClick={handleRename}
+              disabled={wizardRunning || selectedId === null}
+              className="text-sm underline disabled:opacity-40 disabled:no-underline shrink-0"
+            >
+              Rename
+            </button>
             <button
               type="button"
               onClick={handleDelete}

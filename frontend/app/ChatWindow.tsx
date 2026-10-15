@@ -3,7 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { useEffect, useRef, useState } from "react";
 import { API_URL } from "./apiUrl";
-import { swapSummary } from "./ProgramTree";
+import { swapSummary, type SwapResult } from "./ProgramTree";
 import type { WeeklyPrescription } from "./types";
 
 type Citation = { title: string; snippet: string; field: "sets" | "reps" | "load" | "rir" | null };
@@ -26,22 +26,32 @@ type ChatResponse = {
   citations: Citation[];
   grounding_note: string | null;
   rebalance: Rebalance | null;
-  // A swap: the old and new exercise and everything else it changed.
-  swap: { old_name: string; new_name: string; changes: string[] } | null;
+  // A swap: a preview (pending) until confirmed, with everything it changes.
+  swap: SwapResult | null;
+  // Set when the message changed the program - undoable.
+  change_id: number | null;
 };
+
+// A change's state: a swap preview awaiting confirm, applied (undoable),
+// undone, or a cancelled preview.
+type ChangeStatus = "pending" | "applied" | "undone" | "cancelled";
+
+function changeIdOf(r: ChatResponse): number | null {
+  return r.change_id ?? r.swap?.change_id ?? null;
+}
 
 type ChatTurn =
   // anchor: which prescription the message was about when sent, so the
   // history stays unambiguous if the user re-anchors mid-conversation.
   | { role: "user"; text: string; anchor: string | null }
-  | { role: "assistant"; response: ChatResponse }
+  | { role: "assistant"; response: ChatResponse; status: ChangeStatus | null }
   | { role: "error"; text: string };
 
 type HistoryTurn = { role: "user" | "assistant"; content: string };
 
 // Recent turns sent with each message so follow-ups ("ok lower it") can be
-// resolved. Session-only: history lives in this component's state and is
-// gone on refresh. The backend uses it purely as context for routing.
+// resolved; the backend uses them purely as context for routing. The whole
+// conversation is also saved server-side and reloaded on open.
 const HISTORY_TURNS = 10;
 const MAX_TURN_CHARS = 2000; // matches the backend's ChatTurn limit
 
@@ -90,7 +100,9 @@ function describe(p: WeeklyPrescription): string {
 function summarizeResponse(r: ChatResponse): string {
   const p = r.prescription;
   const values = p ? describe(p) : "";
-  if (r.mode === "adjust_prescription" && r.swap) return swapSummary(r.swap);
+  if (r.mode === "adjust_prescription" && r.swap) {
+    return r.swap.pending ? `Previewed swapping ${r.swap.old_name} for ${r.swap.new_name}.` : swapSummary(r.swap);
+  }
   if (r.mode === "adjust_prescription") {
     return r.answer ? `Kept as is: ${r.answer}` : `Updated it to ${values}.${r.grounding_note ? ` ${r.grounding_note}` : ""}`;
   }
@@ -139,6 +151,77 @@ export default function ChatWindow({
   const messageInputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
+  // Saved history, loaded once on open (each change with its current state,
+  // so Undo / Confirm buttons are right after a reload).
+  useEffect(() => {
+    let stale = false;
+    (async () => {
+      try {
+        const saved = await call<{ role: string; content: Record<string, unknown>; change_status: ChangeStatus | null }[]>(
+          "/chat/history", "GET",
+        );
+        if (stale) return;
+        setTurns(saved.map((t): ChatTurn =>
+          t.role === "user"
+            ? { role: "user", text: String(t.content.text ?? ""), anchor: (t.content.anchor as string | null) ?? null }
+            : { role: "assistant", response: t.content as unknown as ChatResponse, status: t.change_status },
+        ));
+      } catch {
+        // No saved history (or it couldn't load): start empty.
+      }
+    })();
+    return () => {
+      stale = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function call<T>(path: string, method: string, body?: unknown): Promise<T> {
+    const token = await getToken();
+    const res = await fetch(`${API_URL}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.detail ?? `Request failed: ${res.status}`);
+    }
+    return (res.status === 204 ? null : await res.json()) as T;
+  }
+
+  function updateTurn(index: number, update: (turn: ChatTurn & { role: "assistant" }) => ChatTurn) {
+    setTurns((prev) => prev.map((t, i) => (i === index && t.role === "assistant" ? update(t) : t)));
+  }
+
+  async function changeAction(index: number, action: "undo" | "confirm" | "cancel", changeId: number) {
+    try {
+      if (action === "undo") {
+        await call(`/changes/${changeId}/undo`, "POST");
+        updateTurn(index, (t) => ({ ...t, status: "undone" }));
+      } else if (action === "confirm") {
+        const applied = await call<SwapResult>(`/changes/${changeId}/confirm`, "POST");
+        updateTurn(index, (t) => ({ ...t, status: "applied", response: { ...t.response, swap: applied } }));
+      } else {
+        await call(`/changes/${changeId}`, "DELETE");
+        updateTurn(index, (t) => ({ ...t, status: "cancelled" }));
+      }
+      if (action !== "cancel") onPrescriptionUpdated?.();
+    } catch (err) {
+      setTurns((prev) => [...prev, { role: "error", text: err instanceof Error ? err.message : String(err) }]);
+    }
+  }
+
+  async function clearHistory() {
+    if (!window.confirm("Clear the saved chat history? Changes you made stay in your programs.")) return;
+    try {
+      await call("/chat/history", "DELETE");
+      setTurns([]);
+    } catch (err) {
+      setTurns((prev) => [...prev, { role: "error", text: err instanceof Error ? err.message : String(err) }]);
+    }
+  }
+
   // Keep the newest message in view.
   useEffect(() => {
     const box = messagesRef.current;
@@ -176,6 +259,7 @@ export default function ChatWindow({
           message: sentMessage,
           field_id: fieldId,
           history,
+          anchor_label: sentAnchor,
         }),
       });
 
@@ -189,7 +273,8 @@ export default function ChatWindow({
       }
 
       const data: ChatResponse = await res.json();
-      setTurns((prev) => [...prev, { role: "assistant", response: data }]);
+      const status: ChangeStatus | null = data.swap?.pending ? "pending" : changeIdOf(data) ? "applied" : null;
+      setTurns((prev) => [...prev, { role: "assistant", response: data, status }]);
       if (data.mode === "adjust_prescription") onPrescriptionUpdated?.();
     } catch (err) {
       setTurns((prev) => [
@@ -203,19 +288,18 @@ export default function ChatWindow({
 
   // Applies one rebalance option; the server recalculates it from the stored
   // values. Returns the updated values, or throws with the server's reason.
-  async function applyRebalance(rebalance: Rebalance, field: RebalanceField): Promise<WeeklyPrescription> {
-    const token = await getToken();
-    const res = await fetch(`${API_URL}/weekly-prescriptions/${rebalance.prescription_id}/rebalance`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ changed_field: rebalance.changed_field, apply_field: field }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.detail ?? `Request failed: ${res.status}`);
-    }
+  async function applyRebalance(rebalance: Rebalance, field: RebalanceField): Promise<RebalanceResult> {
+    const result = await call<RebalanceResult>(
+      `/weekly-prescriptions/${rebalance.prescription_id}/rebalance`, "POST",
+      { changed_field: rebalance.changed_field, apply_field: field },
+    );
     onPrescriptionUpdated?.();
-    return res.json();
+    return result;
+  }
+
+  async function undoChange(changeId: number) {
+    await call(`/changes/${changeId}/undo`, "POST");
+    onPrescriptionUpdated?.();
   }
 
   return (
@@ -269,11 +353,25 @@ export default function ChatWindow({
               </div>
             );
           }
+          const changeId = changeIdOf(turn.response);
           return (
-            <ChatTurnResult key={i} response={turn.response} onApplyRebalance={applyRebalance} />
+            <ChatTurnResult
+              key={i}
+              response={turn.response}
+              status={turn.status}
+              onChange={changeId === null ? undefined : (action) => changeAction(i, action, changeId)}
+              onApplyRebalance={applyRebalance}
+              onUndoRebalance={undoChange}
+            />
           );
         })}
       </div>
+
+      {turns.length > 0 && (
+        <button type="button" onClick={clearHistory} className="self-end text-xs text-zinc-500 underline -mt-2">
+          clear history
+        </button>
+      )}
 
       <SuggestedPrompts
         anchored={fieldId !== null}
@@ -346,34 +444,82 @@ function SuggestedPrompts({
   );
 }
 
+type ChangeAction = "undo" | "confirm" | "cancel";
+
+// Undo for an applied change; Confirm / Cancel for a swap preview.
+function ChangeControls({ status, onChange }: { status: ChangeStatus | null; onChange?: (a: ChangeAction) => void }) {
+  const [busy, setBusy] = useState(false);
+  if (!onChange || status === null) return null;
+  const act = async (a: ChangeAction) => {
+    setBusy(true);
+    try {
+      await onChange(a);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const button = "border rounded px-2 py-1 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-50";
+  if (status === "pending") {
+    return (
+      <div className="flex gap-2 mt-2">
+        <button type="button" disabled={busy} onClick={() => act("confirm")} className={button}>
+          Confirm swap
+        </button>
+        <button type="button" disabled={busy} onClick={() => act("cancel")} className="text-xs underline disabled:opacity-50">
+          Cancel
+        </button>
+      </div>
+    );
+  }
+  if (status === "applied") {
+    return (
+      <button type="button" disabled={busy} onClick={() => act("undo")} className={`${button} mt-2`}>
+        Undo
+      </button>
+    );
+  }
+  return <p className="text-xs text-zinc-500 mt-2">{status === "undone" ? "Undone." : "Cancelled - nothing changed."}</p>;
+}
+
 function ChatTurnResult({
   response,
+  status,
+  onChange,
   onApplyRebalance,
+  onUndoRebalance,
 }: {
   response: ChatResponse;
-  onApplyRebalance: (rebalance: Rebalance, field: RebalanceField) => Promise<WeeklyPrescription>;
+  status: ChangeStatus | null;
+  onChange?: (action: ChangeAction) => void;
+  onApplyRebalance: (rebalance: Rebalance, field: RebalanceField) => Promise<RebalanceResult>;
+  onUndoRebalance: (changeId: number) => Promise<void>;
 }) {
   if (response.mode === "adjust_prescription" && response.swap) {
     const { old_name, new_name, changes } = response.swap;
+    const preview = status === "pending" || status === "cancelled";
     const others = changes.filter((c) => !c.includes(" - the new exercise:"));
     const own = changes.filter((c) => c.includes(" - the new exercise:"));
     return (
       <div className="self-start bg-white dark:bg-zinc-800 border rounded px-3 py-2 max-w-[90%] text-sm">
         <p className="font-medium">
-          Swapped {old_name} for {new_name}
+          {preview ? `Swap ${old_name} for ${new_name}?` : `Swapped ${old_name} for ${new_name}`}
         </p>
-        {response.prescription && <p>{describe(response.prescription)}</p>}
         {own.length > 0 && (
           <ul className="text-xs text-zinc-500 mt-1 list-disc list-inside">
             {own.map((c) => <li key={c}>{c.replace(/^.* - the new exercise: /, "")}</li>)}
           </ul>
         )}
-        <p className="text-xs mt-2 font-medium">{others.length > 0 ? "Also changed:" : "Nothing else in the block changed."}</p>
+        <p className="text-xs mt-2 font-medium">
+          {others.length > 0
+            ? preview ? "This would also change:" : "Also changed:"
+            : preview ? "Nothing else in the block would change." : "Nothing else in the block changed."}
+        </p>
         {others.length > 0 && (
           <ul className="text-xs text-amber-700 dark:text-amber-500 list-disc list-inside">
             {others.map((c) => <li key={c}>{c}</li>)}
           </ul>
         )}
+        <ChangeControls status={status} onChange={onChange} />
       </div>
     );
   }
@@ -396,7 +542,10 @@ function ChatTurnResult({
             Fully supported by cited research.
           </p>
         )}
-        {response.rebalance && <RebalancePrompt rebalance={response.rebalance} onApply={onApplyRebalance} />}
+        <ChangeControls status={status} onChange={onChange} />
+        {response.rebalance && status !== "undone" && (
+          <RebalancePrompt rebalance={response.rebalance} onApply={onApplyRebalance} onUndo={onUndoRebalance} />
+        )}
       </div>
     );
   }
@@ -430,22 +579,40 @@ function ChatTurnResult({
 
 // "Rebalance?": the change left reps, load and RIR not fitting together, so
 // offer the two table-calculated fixes, or keeping it as is.
+type RebalanceResult = { prescription: WeeklyPrescription; change_id: number };
+
 function RebalancePrompt({
   rebalance,
   onApply,
+  onUndo,
 }: {
   rebalance: Rebalance;
-  onApply: (rebalance: Rebalance, field: RebalanceField) => Promise<WeeklyPrescription>;
+  onApply: (rebalance: Rebalance, field: RebalanceField) => Promise<RebalanceResult>;
+  onUndo: (changeId: number) => Promise<void>;
 }) {
   const [state, setState] = useState<
-    { kind: "open" } | { kind: "busy" } | { kind: "done"; text: string } | { kind: "kept" } | { kind: "error"; text: string }
+    | { kind: "open" }
+    | { kind: "busy" }
+    | { kind: "done"; text: string; changeId: number }
+    | { kind: "kept" }
+    | { kind: "undone" }
+    | { kind: "error"; text: string }
   >({ kind: "open" });
 
   async function choose(field: RebalanceField) {
     setState({ kind: "busy" });
     try {
-      const updated = await onApply(rebalance, field);
-      setState({ kind: "done", text: describe(updated) });
+      const result = await onApply(rebalance, field);
+      setState({ kind: "done", text: describe(result.prescription), changeId: result.change_id });
+    } catch (err) {
+      setState({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function undo(changeId: number) {
+    try {
+      await onUndo(changeId);
+      setState({ kind: "undone" });
     } catch (err) {
       setState({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     }
@@ -455,7 +622,14 @@ function RebalancePrompt({
     <div className="mt-2 border-t pt-2 text-xs">
       <p className="text-amber-600">{rebalance.message}</p>
       {state.kind === "done" ? (
-        <p className="mt-1 text-green-700 dark:text-green-500">Rebalanced: {state.text}.</p>
+        <p className="mt-1 text-green-700 dark:text-green-500">
+          Rebalanced: {state.text}.{" "}
+          <button type="button" onClick={() => undo(state.changeId)} className="underline">
+            undo
+          </button>
+        </p>
+      ) : state.kind === "undone" ? (
+        <p className="mt-1 text-zinc-500">Rebalance undone.</p>
       ) : state.kind === "kept" ? (
         <p className="mt-1 text-zinc-500">Kept as is.</p>
       ) : (

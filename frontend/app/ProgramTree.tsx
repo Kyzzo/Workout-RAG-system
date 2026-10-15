@@ -22,6 +22,14 @@ type FrequencyResult = {
   days_added: unknown[];
 };
 
+export type SwapResult = {
+  old_name: string;
+  new_name: string;
+  changes: string[];
+  change_id: number;
+  pending: boolean;
+};
+
 export function swapSummary(result: { old_name: string; new_name: string; changes: string[] }): string {
   const others = result.changes.filter((c) => !c.includes(" - the new exercise:"));
   return (
@@ -124,6 +132,8 @@ export default function ProgramTree({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The last swap made from this view, undoable from its notice.
+  const [undoable, setUndoable] = useState<{ id: number; label: string } | null>(null);
   // Which value's sources are expanded, e.g. "wp-12-sets" or "freq-3" -
   // one at a time so the tree doesn't turn into a wall of excerpts.
   const [openSources, setOpenSources] = useState<string | null>(null);
@@ -284,8 +294,18 @@ export default function ProgramTree({
     });
   }
 
-  // Same target muscle; blank asks for a suggestion. Everything the swap
-  // changed elsewhere (rotation on other days, other muscles' sets) is listed.
+  function rename(path: string, what: string, current: string) {
+    const name = window.prompt(`New name for this ${what}:`, current);
+    if (name === null || !name.trim() || name.trim() === current) return;
+    return runAction(`rename-${path}`, async () => {
+      await api(path, { method: "PATCH", body: { name } });
+      return `Renamed the ${what} to "${name.trim()}".`;
+    });
+  }
+
+  // Same target muscle; blank asks for a suggestion. Previewed first: the
+  // confirm dialog lists everything it would change elsewhere (rotation on
+  // other days, other muscles' sets); nothing is applied unless confirmed.
   function swapExercise(slot: ExerciseSlot) {
     const name = window.prompt(
       `Swap "${slot.exercise_name}" for which ${slot.muscle_group} exercise?\nLeave blank to have one suggested.`,
@@ -293,11 +313,30 @@ export default function ProgramTree({
     );
     if (name === null) return;
     return runAction(`swap-${slot.id}`, async () => {
-      const result = await api<{ old_name: string; new_name: string; changes: string[] }>(
-        `/exercise-slots/${slot.id}/swap`,
-        { method: "POST", body: { exercise_name: name.trim() || null } },
+      const preview = await api<SwapResult>(`/exercise-slots/${slot.id}/swap`, {
+        method: "POST", body: { exercise_name: name.trim() || null },
+      });
+      const others = preview.changes.filter((c) => !c.includes(" - the new exercise:"));
+      const ok = window.confirm(
+        `Swap "${preview.old_name}" for "${preview.new_name}"?\n\n` +
+          (others.length > 0 ? `This also changes:\n- ${others.join("\n- ")}` : "Nothing else in the block changes."),
       );
-      return swapSummary(result);
+      if (!ok) {
+        await api(`/changes/${preview.change_id}`, { method: "DELETE" });
+        return "Swap cancelled - nothing changed.";
+      }
+      const applied = await api<SwapResult>(`/changes/${preview.change_id}/confirm`, { method: "POST" });
+      setUndoable({ id: applied.change_id, label: `swap of ${applied.old_name}` });
+      return swapSummary(applied);
+    });
+  }
+
+  function undoLast() {
+    if (!undoable) return;
+    const target = undoable;
+    return runAction("undo", async () => {
+      await api(`/changes/${target.id}/undo`, { method: "POST" });
+      return `Undid the ${target.label}.`;
     });
   }
 
@@ -336,7 +375,16 @@ export default function ProgramTree({
           </button>
         </div>
       )}
-      {notice && <p className="text-green-700 dark:text-green-500 text-xs">{notice}</p>}
+      {notice && (
+        <p className="text-green-700 dark:text-green-500 text-xs">
+          {notice}
+          {undoable && notice.startsWith("Swapped") && (
+            <button type="button" disabled={busy} onClick={undoLast} className="underline ml-2">
+              undo
+            </button>
+          )}
+        </p>
+      )}
       {error && <p className="text-red-600 text-xs whitespace-pre-line">{error}</p>}
 
       {program.mesocycles.length === 0 && (
@@ -352,6 +400,14 @@ export default function ProgramTree({
             <div className="flex items-center justify-between gap-2">
               <p className="font-medium">
                 {mesocycle.name} (weeks {mesocycle.start_week}-{mesocycle.end_week})
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => rename(`/mesocycles/${mesocycle.id}`, "block", mesocycle.name)}
+                  className={`${actionClass} ml-2 font-normal`}
+                >
+                  rename
+                </button>
               </p>
               {muscleGroups.length > 0 && (
                 <button
@@ -529,6 +585,14 @@ export default function ProgramTree({
                     <span className="text-zinc-500 font-normal text-xs ml-2">
                       {"·"} {day.exercise_slots.length} exercise{day.exercise_slots.length === 1 ? "" : "s"}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => rename(`/day-templates/${day.id}`, "day", day.name)}
+                    className={actionClass}
+                  >
+                    rename
                   </button>
                   <button
                     type="button"

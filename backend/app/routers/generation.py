@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from .. import models, schemas
+from .. import changes, models, schemas
 from ..auth import get_current_user
 from ..database import get_db
 from ..citations import get_or_create_citation
@@ -541,7 +541,7 @@ def adjust_strength_load(
     return None
 
 
-@router.post("/{prescription_id}/rebalance", response_model=schemas.WeeklyPrescriptionOut)
+@router.post("/{prescription_id}/rebalance", response_model=schemas.RebalanceResult)
 def rebalance(
     prescription_id: int,
     request: schemas.RebalanceRequest,
@@ -559,10 +559,18 @@ def rebalance(
         raise HTTPException(status_code=409, detail="These values already fit together - nothing to rebalance.")
     field, value, _ = match
     rule = justify_rule(db, "reps_at_percent_1rm")
+    mesocycle = prescription.exercise_slot.day_template.mesocycle
+    before = changes.snapshot(mesocycle, [prescription.exercise_slot])
     _set_from_rule(prescription, field, value, _REBALANCED_NOTE.format(changed=request.changed_field), rule)
+    change = changes.record(
+        db, current_user, mesocycle, "rebalance",
+        f"rebalance {field} of {prescription.exercise_slot.exercise_name}, week {prescription.week_number}", before,
+    )
     db.commit()
     db.refresh(prescription)
-    return prescription
+    return schemas.RebalanceResult(
+        prescription=schemas.WeeklyPrescriptionOut.model_validate(prescription), change_id=change.id,
+    )
 
 
 def exercise_fields(goal: str) -> tuple[str, ...]:
@@ -1116,51 +1124,111 @@ def swap_exercise(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    """A PREVIEW: what the swap would change. Nothing is applied until it's
+    confirmed (POST /changes/{change_id}/confirm)."""
     slot = get_owned_exercise_slot(exercise_slot_id, db, current_user)
-    return swap_slot(db, slot, request.exercise_name)
+    return preview_swap(db, current_user, slot, request.exercise_name)
 
 
-def swap_slot(db: Session, slot: models.ExerciseSlot, requested_name: str | None) -> schemas.SwapExerciseResponse:
-    day = slot.day_template
-    mesocycle = day.mesocycle
-    program = mesocycle.program
-    muscle_group = slot.muscle_group
-    old_name = slot.exercise_name
+def preview_swap(
+    db: Session, user: models.User, slot: models.ExerciseSlot, requested_name: str | None,
+) -> schemas.SwapExerciseResponse:
     if not slot.weekly_prescriptions:
         raise HTTPException(status_code=400, detail="This exercise has no weeks to swap.")
-
-    # 1. The new exercise, classified - model calls only, nothing written.
+    mesocycle = slot.day_template.mesocycle
+    old_name = slot.exercise_name
+    # The new exercise, classified (model calls), then every answer and rule
+    # it needs (may commit) - all before the trial run.
     name, is_compound, secondaries = _choose_replacement(slot, requested_name)
+    choice = {"slot_id": slot.id, "name": name, "is_compound": is_compound, "secondaries": secondaries}
+    plan = _plan_swap(db, slot, choice)
+    block_fingerprint = changes.fingerprint(db, mesocycle)
 
-    # 2. Everything that may commit (a new shared answer or rule), still
-    #    before any write.
-    prep = _prepare_exercise(db, program, "compound" if is_compound else "isolation")
-    rerun_progression = program.goal == "strength" and any(
-        s.muscle_group == muscle_group for s in mesocycle.progression_schemes
+    # Trial run inside a savepoint, rolled back: the preview shows exactly
+    # what confirming will do (the same cached answers, rules and arithmetic).
+    savepoint = db.begin_nested()
+    try:
+        lines = _execute_swap(db, slot, plan)
+        preview_slot = schemas.ExerciseSlotOut.model_validate(slot)
+    finally:
+        savepoint.rollback()
+
+    change = changes.pending_swap(
+        db, user, mesocycle, f"Swap {old_name} for {name}", choice, block_fingerprint,
     )
-    progression_rules = _progression_rules(db, program) if rerun_progression else None
+    return schemas.SwapExerciseResponse(
+        slot=preview_slot, old_name=old_name, new_name=name, changes=lines, change_id=change.id, pending=True,
+    )
 
-    # 3. Swap and recalculate.
-    before = _block_snapshot(mesocycle)
-    scheme_before = next((s.scheme for s in mesocycle.progression_schemes if s.muscle_group == muscle_group), None)
-    credit_changed = set(slot.secondary_muscle_groups) ^ set(secondaries)
-    slot.exercise_name, slot.is_compound, slot.secondary_muscle_groups = name, is_compound, secondaries
-    _apply_exercise(slot, program, prep)
-    _resplit_for_credit(mesocycle, credit_changed, program.goal)
-    if rerun_progression:
-        _run_progression(db, mesocycle, muscle_group, progression_rules)
+
+def confirm_swap(db: Session, user: models.User, change_id: int) -> schemas.SwapExerciseResponse:
+    change = changes.confirmable(db, user, change_id)
+    choice = change.pending
+    slot = db.get(models.ExerciseSlot, choice["slot_id"])
+    mesocycle = slot.day_template.mesocycle
+    old_name = slot.exercise_name
+    plan = _plan_swap(db, slot, choice)
+    before = changes.snapshot(mesocycle)
+    lines = _execute_swap(db, slot, plan)
+    change.snapshot = before
+    change.status = "applied"
+    change.fingerprint = changes.fingerprint(db, mesocycle)
     db.commit()
     db.refresh(slot)
+    return schemas.SwapExerciseResponse(
+        slot=schemas.ExerciseSlotOut.model_validate(slot), old_name=old_name, new_name=choice["name"],
+        changes=lines, change_id=change.id, pending=False,
+    )
 
-    changes = _describe_changes(before, _block_snapshot(mesocycle), slot.id)
-    db.refresh(mesocycle)
+
+@dataclass
+class _SwapPlan:
+    choice: dict
+    prep: _ExercisePrep
+    progression_rules: dict | None
+
+
+def _plan_swap(db: Session, slot: models.ExerciseSlot, choice: dict) -> _SwapPlan:
+    """Everything that may commit (a new shared answer or a rule's first
+    justification), fetched before any write."""
+    mesocycle = slot.day_template.mesocycle
+    program = mesocycle.program
+    rerun_progression = program.goal == "strength" and any(
+        s.muscle_group == slot.muscle_group for s in mesocycle.progression_schemes
+    )
+    return _SwapPlan(
+        choice=choice,
+        prep=_prepare_exercise(db, program, "compound" if choice["is_compound"] else "isolation"),
+        progression_rules=_progression_rules(db, program) if rerun_progression else None,
+    )
+
+
+def _execute_swap(db: Session, slot: models.ExerciseSlot, plan: _SwapPlan) -> list[str]:
+    """Swaps and recalculates (nothing committed); returns what changed."""
+    mesocycle = slot.day_template.mesocycle
+    program = mesocycle.program
+    muscle_group = slot.muscle_group
+    choice = plan.choice
+    before = _block_snapshot(mesocycle)
+    scheme_before = next((s.scheme for s in mesocycle.progression_schemes if s.muscle_group == muscle_group), None)
+
+    credit_changed = set(slot.secondary_muscle_groups) ^ set(choice["secondaries"])
+    slot.exercise_name = choice["name"]
+    slot.is_compound = choice["is_compound"]
+    slot.secondary_muscle_groups = choice["secondaries"]
+    _apply_exercise(slot, program, plan.prep)
+    _resplit_for_credit(mesocycle, credit_changed, program.goal)
+    if plan.progression_rules is not None:
+        _run_progression(db, mesocycle, muscle_group, plan.progression_rules)
+    db.flush()
+    db.expire(mesocycle)
+
+    lines = _describe_changes(before, _block_snapshot(mesocycle), slot.id)
     scheme_after = next((s.scheme for s in mesocycle.progression_schemes if s.muscle_group == muscle_group), None)
     if scheme_before and scheme_after and scheme_before != scheme_after:
-        changes.insert(0, f"{muscle_group} progression: {scheme_before} -> {scheme_after}"
-                          f" (its compound lifts are now on a different number of days)")
-    return schemas.SwapExerciseResponse(
-        slot=schemas.ExerciseSlotOut.model_validate(slot), old_name=old_name, new_name=name, changes=changes,
-    )
+        lines.insert(0, f"{muscle_group} progression: {scheme_before} -> {scheme_after}"
+                        f" (its compound lifts are now on a different number of days)")
+    return lines
 
 
 def _choose_replacement(slot: models.ExerciseSlot, requested_name: str | None) -> tuple[str, bool, list[str]]:

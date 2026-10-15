@@ -1,5 +1,5 @@
 from sqlalchemy import ForeignKey, String, false as sa_false, func
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 import datetime
@@ -27,6 +27,7 @@ class Program(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     goal: Mapped[str] = mapped_column(String)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)  # optional; shown with "#id"
     # Where in the research-supported weekly volume range to land:
     # "minimal" (fewer, harder sets), "moderate" or "high".
     volume_preference: Mapped[str] = mapped_column(String, default="moderate", server_default="moderate")
@@ -54,6 +55,7 @@ class Mesocycle(Base):
     muscle_group_frequencies: Mapped[list["MuscleGroupFrequency"]] = relationship(back_populates="mesocycle", order_by="MuscleGroupFrequency.muscle_group", cascade="all, delete-orphan")
     muscle_group_volumes: Mapped[list["MuscleGroupVolume"]] = relationship(back_populates="mesocycle", order_by="MuscleGroupVolume.muscle_group", cascade="all, delete-orphan")
     progression_schemes: Mapped[list["ProgressionScheme"]] = relationship(back_populates="mesocycle", order_by="ProgressionScheme.muscle_group", cascade="all, delete-orphan")
+    change_records: Mapped[list["ChangeRecord"]] = relationship(back_populates="mesocycle", cascade="all, delete-orphan")
 
 class DayTemplate(Base):
     __tablename__ = "day_templates"
@@ -326,3 +328,39 @@ class SharedAnswerCitation(Base):
 
     answer: Mapped["SharedAnswer"] = relationship(back_populates="citations")
     citation: Mapped["Citation"] = relationship(back_populates="shared_answer_citations")
+
+
+class ChangeRecord(Base):
+    # One chat change, rebalance or swap to a block, kept so it can be
+    # undone: `snapshot` is the block's exercise values, citations and
+    # progression schemes BEFORE the change. A swap is first a preview
+    # (status "pending", `pending` holds the chosen exercise and
+    # `fingerprint` the block it was previewed against); confirming applies
+    # it. Undo restores the snapshot - latest change first.
+    __tablename__ = "change_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    mesocycle_id: Mapped[int] = mapped_column(ForeignKey("mesocycles.id"), index=True)
+    kind: Mapped[str] = mapped_column(String)  # "adjust" / "rebalance" / "swap"
+    description: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)  # "pending" / "applied" / "undone"
+    snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    pending: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    fingerprint: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
+
+    mesocycle: Mapped["Mesocycle"] = relationship(back_populates="change_records")
+
+
+class ChatMessage(Base):
+    # Saved chat history, one row per turn: the user's message (text and
+    # what it was anchored to) or the assistant's full response, so a reload
+    # renders it the same way.
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    role: Mapped[str] = mapped_column(String)  # "user" / "assistant"
+    content: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())

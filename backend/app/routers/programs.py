@@ -148,6 +148,20 @@ def get_program(
     return program
 
 
+@router.patch("/{program_id}", response_model=schemas.ProgramSummaryOut)
+def rename_program(
+    program_id: int,
+    request: schemas.Rename,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    program = get_owned_program(program_id, db, current_user)
+    program.name = request.name.strip()
+    db.commit()
+    db.refresh(program)
+    return program
+
+
 @router.delete("/{program_id}", status_code=204)
 def delete_program(
     program_id: int,
