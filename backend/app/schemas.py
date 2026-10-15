@@ -160,6 +160,7 @@ class WeeklyPrescriptionOut(BaseModel):
 
 
 class CitationOut(BaseModel):
+    id: int  # for its plain-language summary (GET /citations/{id}/summary)
     title: str
     snippet: str
 

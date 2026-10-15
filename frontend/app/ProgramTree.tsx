@@ -18,7 +18,7 @@ import {
   type SupportingCitation,
   type WeeklyPrescription,
 } from "./types";
-import { Menu, Notice, Spinner } from "./ui";
+import { Menu, Notice, Segmented, Spinner } from "./ui";
 import { useApi } from "./useApi";
 
 type FrequencyResult = {
@@ -56,6 +56,19 @@ type ProgressionResult = {
 };
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// A block's shown week, or every week at once.
+type Week = number | "all";
+
+// How a value moved from the week before ("70% 1RM" -> "72.5% 1RM" is up),
+// by its leading number; null if it didn't change or can't be compared.
+function change(before: string | number | undefined, now: string | number): "up" | "down" | null {
+  if (before === undefined || String(before) === String(now)) return null;
+  const a = parseFloat(String(before));
+  const b = parseFloat(String(now));
+  if (Number.isNaN(a) || Number.isNaN(b) || a === b) return null;
+  return b > a ? "up" : "down";
+}
 
 // "12" or "11–14" for a list of numbers.
 function range(values: number[]) {
@@ -182,6 +195,10 @@ export default function ProgramTree({
   // Days start collapsed so a long program reads as an outline; open the
   // ones you're looking at.
   const [openDays, setOpenDays] = useState<Set<number>>(new Set());
+  // The week each block shows (its first week by default), or "all" for
+  // every week at once. Only blocks whose weeks differ (strength) get a
+  // picker; the rest are the same every week.
+  const [weekByBlock, setWeekByBlock] = useState<Record<number, Week>>({});
   const toggleDay = (id: number) =>
     setOpenDays((current) => {
       const next = new Set(current);
@@ -468,6 +485,11 @@ export default function ProgramTree({
         const muscleGroups = muscleGroupsIn(mesocycle);
         const slots = mesocycle.day_templates.flatMap((d) => d.exercise_slots);
         const ungenerated = slots.some((s) => s.weekly_prescriptions.some(isPlaceholder));
+        const weeks = [...new Set(slots.flatMap((s) => s.weekly_prescriptions.map((wp) => wp.week_number)))].sort(
+          (a, b) => a - b,
+        );
+        const weeksDiffer = slots.some((s) => rowsToShow(s, false).length > 1);
+        const week: Week = weekByBlock[mesocycle.id] ?? weeks[0] ?? "all";
         // A preview of the dosing table, shown on its collapsed row.
         const suggested = mesocycle.muscle_group_volumes
           .filter((v) => muscleGroups.includes(v.muscle_group))
@@ -482,6 +504,7 @@ export default function ProgramTree({
               <div className="min-w-0 flex-1">
                 <p className="eyebrow">
                   Weeks {mesocycle.start_week}–{mesocycle.end_week}
+                  {!weeksDiffer && slots.length > 0 && weeks.length > 1 && " · same every week"}
                 </p>
                 <div className="mt-0.5 flex items-center gap-1">
                   <h3 className="truncate text-lg font-semibold tracking-tight">{mesocycle.name}</h3>
@@ -764,6 +787,25 @@ export default function ProgramTree({
                 </details>
               )}
 
+              {weeksDiffer && weeks.length > 1 && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <span className="text-[13px] font-medium text-fg-muted">Week</span>
+                  <div className="min-w-0 flex-1 sm:max-w-sm">
+                    <Segmented
+                      label="Week shown"
+                      options={[
+                        ...weeks.map((w) => ({ value: String(w), label: String(w) })),
+                        { value: "all", label: "All" },
+                      ]}
+                      value={String(week)}
+                      onChange={(v) =>
+                        setWeekByBlock((current) => ({ ...current, [mesocycle.id]: v === "all" ? "all" : Number(v) }))
+                      }
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col gap-2.5">
                 {mesocycle.day_templates.map((day, dayIndex) => {
                   const open = openDays.has(day.id);
@@ -832,6 +874,7 @@ export default function ProgramTree({
                                 slot={slot}
                                 mesocycle={mesocycle}
                                 strength={strength}
+                                week={week}
                                 busy={busy}
                                 busyKey={busyKey}
                                 anchoredFieldId={anchoredFieldId}
@@ -867,10 +910,22 @@ export default function ProgramTree({
   );
 }
 
+type ValueCell = {
+  field: string;
+  value: string;
+  unit: string;
+  // The same value the week before, when it changed (single-week view).
+  before: string | undefined;
+  citations: SupportingCitation[];
+  note: string | null;
+  heading: string;
+};
+
 function ExerciseBlock({
   slot,
   mesocycle,
   strength,
+  week,
   busy,
   busyKey,
   anchoredFieldId,
@@ -886,6 +941,7 @@ function ExerciseBlock({
   slot: ExerciseSlot;
   mesocycle: Mesocycle;
   strength: boolean;
+  week: Week;
   busy: boolean;
   busyKey: string | null;
   anchoredFieldId: number | null;
@@ -906,15 +962,167 @@ function ExerciseBlock({
         : busyKey === `delete-exercise-${slot.id}`
           ? "Deleting..."
           : null;
-  const rows = rowsToShow(slot, strength);
+  const allRows = rowsToShow(slot, strength);
+  // "All" lists every week as a table; otherwise (one week picked, or an
+  // exercise that's the same every week) it's one line under the name.
+  const table = week === "all" && allRows.length > 1;
+  const single = allRows.find((r) => r.wp.week_number === week) ?? allRows[0];
   const showLoad = strength || slot.weekly_prescriptions.some((wp) => wp.load);
-  // Week label, then sets / reps / (load) / effort, then actions. Every row
-  // of an exercise shares it, so the weeks line up as columns (from sm up;
-  // narrower, each row wraps as a line).
-  const columns = `4.25rem minmax(0,0.8fr) minmax(0,1fr) ${showLoad ? "minmax(0,1.35fr) " : ""}minmax(0,1.1fr) auto`;
+  // Sets / reps / (load) / effort - the same widths in both views, so values
+  // line up down a day.
+  const valueColumns = `minmax(0,0.8fr) minmax(0,1fr) ${showLoad ? "minmax(0,1.35fr) " : ""}minmax(0,1.1fr)`;
   // Split sets carry no per-exercise citations; their evidence is the
   // muscle's cited weekly volume.
   const muscleVolume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === slot.muscle_group);
+
+  const labelOf = (wp: WeeklyPrescription, everyWeek: boolean) =>
+    everyWeek ? slot.exercise_name : `${slot.exercise_name}, week ${wp.week_number}`;
+
+  // Each value with its own sources: sets (a share of the muscle's cited
+  // weekly volume), reps, load (%1RM) and effort (RIR).
+  function valuesOf(wp: WeeklyPrescription, previous?: WeeklyPrescription): ValueCell[] {
+    const setsCitations =
+      wp.sets_citations.length > 0 ? wp.sets_citations : (muscleVolume?.supporting_citations ?? []);
+    const changed = (now: string | number, before: string | number | undefined) =>
+      previous && change(before, now) ? String(before) : undefined;
+    return [
+      {
+        field: "sets",
+        value: wp.sets > 0 ? String(wp.sets) : "—",
+        unit: wp.sets === 1 ? "set" : "sets",
+        before: changed(wp.sets, previous?.sets),
+        citations: setsCitations,
+        note: wp.sets_grounding_note,
+        heading: `Why ${wp.sets} sets`,
+      },
+      {
+        field: "reps",
+        value: wp.reps || "—",
+        unit: "reps",
+        before: changed(wp.reps, previous?.reps),
+        citations: wp.reps_citations,
+        note: wp.reps_grounding_note,
+        heading: `Why ${wp.reps} reps`,
+      },
+      ...(showLoad
+        ? [
+            {
+              field: "load",
+              value: wp.load || "—",
+              unit: "",
+              before: changed(wp.load, previous?.load),
+              citations: wp.load_citations,
+              note: wp.load_grounding_note,
+              heading: `Why ${wp.load}`,
+            },
+          ]
+        : []),
+      {
+        field: "rir",
+        value: wp.rir || "—",
+        unit: "",
+        before: changed(wp.rir, previous?.rir),
+        citations: wp.rir_citations,
+        note: wp.rir_grounding_note,
+        heading: `Why ${wp.rir}`,
+      },
+    ];
+  }
+
+  function regenerateItems(wp: WeeklyPrescription, everyWeek: boolean, suffix = "") {
+    return [
+      // Regenerating one week's sets only makes sense when weeks differ.
+      ...(!everyWeek
+        ? [{ label: `Regenerate sets${suffix}`, icon: <Refresh className="size-4" />, onSelect: () => onGeneratePrescription(wp, "volume") }]
+        : []),
+      ...(strength
+        ? [{ label: `Regenerate load${suffix}`, icon: <Refresh className="size-4" />, onSelect: () => onGeneratePrescription(wp, "intensity") }]
+        : []),
+    ];
+  }
+
+  function cells(wp: WeeklyPrescription, values: ValueCell[]) {
+    if (isPlaceholder(wp)) {
+      return (
+        <span className="col-span-2 text-sm italic text-fg-subtle sm:[grid-column:span_var(--span)]">
+          Not generated yet
+        </span>
+      );
+    }
+    return values.map((v) => {
+      const move = v.before !== undefined ? change(v.before, v.value) : null;
+      return (
+        <span key={v.field} className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+          <span className="text-sm font-medium tabular-nums text-fg">
+            {v.value}
+            {v.unit && v.value !== "—" && <span className="ms-1 text-xs font-normal text-fg-subtle">{v.unit}</span>}
+          </span>
+          {move && (
+            <span
+              className="text-xs font-semibold text-accent-text"
+              title={`Week ${wp.week_number - 1}: ${v.before}`}
+              aria-label={`${move === "up" ? "up" : "down"} from ${v.before} the week before`}
+            >
+              {move === "up" ? "↑" : "↓"}
+            </span>
+          )}
+          <SourcesBadge
+            what={v.field === "rir" ? "effort" : v.field}
+            citations={v.citations}
+            note={v.note}
+            open={openSources === `wp-${wp.id}-${v.field}`}
+            onToggle={() => toggleSources(`wp-${wp.id}-${v.field}`)}
+          />
+        </span>
+      );
+    });
+  }
+
+  function details(wp: WeeklyPrescription, values: ValueCell[]) {
+    const open = values.find((v) => openSources === `wp-${wp.id}-${v.field}`);
+    return (
+      <>
+        {wp.load_fit_note && !isPlaceholder(wp) && (
+          <CaveatNote className="px-2 pb-2 text-xs">{wp.load_fit_note}</CaveatNote>
+        )}
+        {open && (
+          <div className="px-2 pb-2">
+            <SourcesPanel
+              heading={open.heading}
+              citations={open.citations}
+              note={open.note}
+              onClose={() => toggleSources(`wp-${wp.id}-${open.field}`)}
+              rule={
+                open.field === "sets" && splitRule && wp.sets_grounding_note?.startsWith("Share of")
+                  ? { heading: "Why the sets are spread evenly across sessions", justification: splitRule }
+                  : null
+              }
+            />
+          </div>
+        )}
+      </>
+    );
+  }
+
+  function askButton(wp: WeeklyPrescription, label: string) {
+    const isAnchored = anchoredFieldId === wp.id;
+    return (
+      <button
+        type="button"
+        onClick={() => onAskAbout(wp, label)}
+        aria-pressed={isAnchored}
+        aria-label={`Ask about or adjust ${label}`}
+        title="Ask about or adjust this in the chat"
+        className={`btn btn-sm h-7 gap-1.5 px-2 ${isAnchored ? "bg-accent text-accent-fg" : "btn-ghost text-accent-text"}`}
+      >
+        <Message className="size-3.5" />
+        <span className="hidden sm:inline">{isAnchored ? "Asking" : "Ask"}</span>
+      </button>
+    );
+  }
+
+  const rowWorking = (wp: WeeklyPrescription) => busyKey === `volume-${wp.id}` || busyKey === `intensity-${wp.id}`;
+  const singleLabel = single ? labelOf(single.wp, single.everyWeek) : slot.exercise_name;
 
   return (
     <div className="flex flex-col gap-2 py-3.5">
@@ -932,158 +1140,82 @@ function ExerciseBlock({
             )}
           </p>
         </div>
-        <Menu
-          label={`Actions for ${slot.exercise_name}`}
-          disabled={busy}
-          items={[
-            { label: "Generate reps & effort", icon: <Zap className="size-4" />, onSelect: onGenerate },
-            { label: "Swap exercise", icon: <Swap className="size-4" />, onSelect: onSwap },
-            { label: "Delete exercise", icon: <Trash className="size-4" />, danger: true, onSelect: onDelete },
-          ]}
-        />
+        <span className="flex shrink-0 items-center gap-0.5">
+          {!table && single && rowWorking(single.wp) && <Spinner className="me-1 size-3.5 text-accent-text" />}
+          {!table && single && askButton(single.wp, singleLabel)}
+          <Menu
+            label={`Actions for ${slot.exercise_name}`}
+            disabled={busy}
+            items={[
+              { label: "Generate reps & effort", icon: <Zap className="size-4" />, onSelect: onGenerate },
+              ...(!table && single
+                ? regenerateItems(single.wp, single.everyWeek, single.everyWeek ? "" : ` (week ${single.wp.week_number})`)
+                : []),
+              { label: "Swap exercise", icon: <Swap className="size-4" />, onSelect: onSwap },
+              { label: "Delete exercise", icon: <Trash className="size-4" />, danger: true, onSelect: onDelete },
+            ]}
+          />
+        </span>
       </div>
 
-      <ul className="flex flex-col gap-0.5">
-        {rows.map(({ wp, everyWeek }) => {
-          const label = everyWeek ? slot.exercise_name : `${slot.exercise_name}, week ${wp.week_number}`;
-          const isAnchored = anchoredFieldId === wp.id;
-          const setsCitations: SupportingCitation[] =
-            wp.sets_citations.length > 0 ? wp.sets_citations : (muscleVolume?.supporting_citations ?? []);
-          // Each value with its own sources: sets (a share of the muscle's
-          // cited weekly volume), reps, load (%1RM) and effort (RIR).
-          const values = [
-            {
-              field: "sets",
-              value: wp.sets > 0 ? String(wp.sets) : "—",
-              unit: wp.sets === 1 ? "set" : "sets",
-              citations: setsCitations,
-              note: wp.sets_grounding_note,
-              heading: `Why ${wp.sets} sets`,
-            },
-            {
-              field: "reps",
-              value: wp.reps || "—",
-              unit: "reps",
-              citations: wp.reps_citations,
-              note: wp.reps_grounding_note,
-              heading: `Why ${wp.reps} reps`,
-            },
-            ...(showLoad
-              ? [
-                  {
-                    field: "load",
-                    value: wp.load || "—",
-                    unit: "",
-                    citations: wp.load_citations,
-                    note: wp.load_grounding_note,
-                    heading: `Why ${wp.load}`,
-                  },
-                ]
-              : []),
-            {
-              field: "rir",
-              value: wp.rir || "—",
-              unit: "",
-              citations: wp.rir_citations,
-              note: wp.rir_grounding_note,
-              heading: `Why ${wp.rir}`,
-            },
-          ];
-          const open = values.find((v) => openSources === `wp-${wp.id}-${v.field}`);
-          const regenerate = [
-            // Regenerating one week's sets only makes sense when weeks are
-            // listed separately.
-            ...(!everyWeek
-              ? [{ label: "Regenerate sets", icon: <Refresh className="size-4" />, onSelect: () => onGeneratePrescription(wp, "volume") }]
-              : []),
-            ...(strength
-              ? [{ label: "Regenerate load", icon: <Refresh className="size-4" />, onSelect: () => onGeneratePrescription(wp, "intensity") }]
-              : []),
-          ];
-          const rowWorking = busyKey === `volume-${wp.id}` || busyKey === `intensity-${wp.id}`;
-          return (
-            <li
-              key={wp.id}
-              className={`rounded-lg transition-colors duration-150 ${
-                isAnchored ? "bg-accent-soft ring-1 ring-accent/50" : "hover:bg-surface-3/40"
-              }`}
+      {!table && single && (() => {
+        const previous =
+          allRows.length > 1
+            ? slot.weekly_prescriptions.find((wp) => wp.week_number === single.wp.week_number - 1)
+            : undefined;
+        const values = valuesOf(single.wp, previous);
+        return (
+          <div
+            className={`rounded-lg transition-colors duration-150 ${
+              anchoredFieldId === single.wp.id ? "bg-accent-soft ring-1 ring-accent/50" : ""
+            }`}
+          >
+            <div
+              className="grid grid-cols-2 items-center gap-x-3 gap-y-1 px-2 py-1.5 sm:grid-cols-[var(--cols)]"
+              style={{ "--cols": valueColumns, "--span": values.length } as React.CSSProperties}
             >
-              {/* Narrow: week label and actions on a slim top line, values in
-                  a 2x2 grid below. From sm up the values wrapper dissolves
-                  (display: contents) so each value takes its own column of the
-                  shared template and the row is one line. */}
-              <div
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-2 py-2 sm:grid-cols-[var(--cols)] sm:gap-y-0 sm:py-1.5"
-                style={{ "--cols": columns, "--span": values.length } as React.CSSProperties}
+              {cells(single.wp, values)}
+            </div>
+            {details(single.wp, values)}
+          </div>
+        );
+      })()}
+
+      {table && (
+        <ul className="flex flex-col gap-0.5">
+          {allRows.map(({ wp, everyWeek }) => {
+            const label = labelOf(wp, everyWeek);
+            const values = valuesOf(wp);
+            const regenerate = regenerateItems(wp, everyWeek);
+            return (
+              <li
+                key={wp.id}
+                className={`rounded-lg transition-colors duration-150 ${
+                  anchoredFieldId === wp.id ? "bg-accent-soft ring-1 ring-accent/50" : "hover:bg-surface-3/40"
+                }`}
               >
-                <span className="font-mono text-xs text-fg-subtle">
-                  {everyWeek ? "Weekly" : `Wk ${wp.week_number}`}
-                </span>
-                <div className="col-span-2 grid grid-cols-2 gap-x-3 gap-y-1 sm:contents">
-                  {isPlaceholder(wp) ? (
-                    <span className="col-span-2 text-sm italic text-fg-subtle sm:[grid-column:span_var(--span)]">
-                      Not generated yet
-                    </span>
-                  ) : (
-                    values.map((v) => (
-                      <span key={v.field} className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-                        <span className="text-sm font-medium tabular-nums text-fg">
-                          {v.value}
-                          {v.unit && v.value !== "—" && <span className="ms-1 text-xs font-normal text-fg-subtle">{v.unit}</span>}
-                        </span>
-                        <SourcesBadge
-                          what={v.field === "rir" ? "effort" : v.field}
-                          citations={v.citations}
-                          note={v.note}
-                          open={openSources === `wp-${wp.id}-${v.field}`}
-                          onToggle={() => toggleSources(`wp-${wp.id}-${v.field}`)}
-                        />
-                      </span>
-                    ))
-                  )}
+                {/* Narrow: week label and actions on a slim top line, values
+                    in a 2x2 grid below. From sm up the values wrapper
+                    dissolves (display: contents) so each value takes its own
+                    column of the shared template and the row is one line. */}
+                <div
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-2 py-2 sm:grid-cols-[var(--cols)] sm:gap-y-0 sm:py-1.5"
+                  style={{ "--cols": `4.25rem ${valueColumns} auto`, "--span": values.length } as React.CSSProperties}
+                >
+                  <span className="font-mono text-xs text-fg-subtle">Wk {wp.week_number}</span>
+                  <div className="col-span-2 grid grid-cols-2 gap-x-3 gap-y-1 sm:contents">{cells(wp, values)}</div>
+                  <span className="col-start-2 row-start-1 flex items-center justify-end gap-0.5 sm:col-start-auto sm:row-start-auto">
+                    {rowWorking(wp) && <Spinner className="me-1 size-3.5 text-accent-text" />}
+                    {askButton(wp, label)}
+                    {regenerate.length > 0 && <Menu label={`More for ${label}`} disabled={busy} items={regenerate} quiet />}
+                  </span>
                 </div>
-                <span className="col-start-2 row-start-1 flex items-center justify-end gap-0.5 sm:col-start-auto sm:row-start-auto">
-                  {rowWorking && <Spinner className="me-1 size-3.5 text-accent-text" />}
-                  <button
-                    type="button"
-                    onClick={() => onAskAbout(wp, label)}
-                    aria-pressed={isAnchored}
-                    aria-label={`Ask about or adjust ${label}`}
-                    title="Ask about or adjust this in the chat"
-                    className={`btn btn-sm h-7 gap-1.5 px-2 ${
-                      isAnchored ? "bg-accent text-accent-fg" : "btn-ghost text-accent-text"
-                    }`}
-                  >
-                    <Message className="size-3.5" />
-                    <span className="hidden sm:inline">{isAnchored ? "Asking" : "Ask"}</span>
-                  </button>
-                  {regenerate.length > 0 && (
-                    <Menu label={`More for ${label}`} disabled={busy} items={regenerate} quiet />
-                  )}
-                </span>
-              </div>
-              {wp.load_fit_note && !isPlaceholder(wp) && (
-                <CaveatNote className="px-2 pb-2 text-xs">{wp.load_fit_note}</CaveatNote>
-              )}
-              {open && (
-                <div className="px-2 pb-2">
-                  <SourcesPanel
-                    heading={open.heading}
-                    citations={open.citations}
-                    note={open.note}
-                    onClose={() => toggleSources(`wp-${wp.id}-${open.field}`)}
-                    rule={
-                      open.field === "sets" && splitRule && wp.sets_grounding_note?.startsWith("Share of")
-                        ? { heading: "Why the sets are spread evenly across sessions", justification: splitRule }
-                        : null
-                    }
-                  />
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                {details(wp, values)}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

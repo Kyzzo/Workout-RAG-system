@@ -4,7 +4,7 @@
 // server-side for QA).
 export type SupportingCitation = {
   verification_status: "primary_support" | "contextual_support";
-  citation: { title: string; snippet: string };
+  citation: { id: number; title: string; snippet: string };
 };
 
 export type WeeklyPrescription = {

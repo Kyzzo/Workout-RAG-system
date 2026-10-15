@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Book, ChevronRight, Close } from "./Icons";
 import type { RuleJustification, SupportingCitation } from "./types";
+import { Spinner } from "./ui";
+import { useApi } from "./useApi";
 
 // The two verification outcomes that count as evidence read differently to
 // a user: one source states the value directly, the other informed it
@@ -65,25 +67,70 @@ function CitationItems({ citations }: { citations: SupportingCitation[] }) {
   );
 }
 
-// One source: title and status, then its excerpt folded to a two-line
-// preview - a panel can hold several long excerpts. Clicking the title row
-// (or the preview) shows the whole excerpt.
+type Api = ReturnType<typeof useApi>;
+
+// Summaries already fetched (or in flight) this session, by citation id, so
+// reopening a panel doesn't ask again. A failed request is dropped so a
+// later open retries it.
+const summaries = new Map<number, Promise<string | null>>();
+
+function summaryFor(api: Api, citationId: number): Promise<string | null> {
+  let pending = summaries.get(citationId);
+  if (!pending) {
+    pending = api<{ summary: string | null }>(`/citations/${citationId}/summary`).then((r) => r.summary);
+    pending.catch(() => summaries.delete(citationId));
+    summaries.set(citationId, pending);
+  }
+  return pending;
+}
+
+// One source: its paper and what the excerpt found, in plain language
+// (written once and checked against the excerpt server-side - see
+// backend/app/rag/citation_summaries.py). The study details, how it was
+// verified and the exact excerpt sit one click below.
 function CitationItem({ citation: c }: { citation: SupportingCitation }) {
+  const api = useApi();
   const [open, setOpen] = useState(false);
+  // undefined: loading; null: no summary passed the check.
+  const [summary, setSummary] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let stale = false;
+    summaryFor(api, c.citation.id).then(
+      (s) => !stale && setSummary(s),
+      () => !stale && setSummary(null),
+    );
+    return () => {
+      stale = true;
+    };
+  }, [api, c.citation.id]);
+
+  const [paper, ...details] = c.citation.title.split(" · ");
   return (
-    <figure className="flex flex-col gap-1.5">
-      <figcaption>
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          className="group/cite flex w-full items-start gap-1.5 text-start"
-        >
-          <ChevronRight
-            className={`mt-[3px] size-3.5 shrink-0 text-fg-subtle transition-transform duration-200 group-hover/cite:text-fg ${open ? "rotate-90" : ""}`}
-          />
-          <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <span className="font-medium text-fg">{c.citation.title}</span>
+    <figure className="flex flex-col gap-1.5 border-t border-line pt-3 first-of-type:border-0 first-of-type:pt-0">
+      <figcaption className="text-xs font-medium text-fg-muted">{paper}</figcaption>
+      {summary === undefined ? (
+        <p className="flex items-center gap-2 text-fg-subtle">
+          <Spinner className="size-3.5 shrink-0" />
+          Writing a plain-language summary and checking it against the study...
+        </p>
+      ) : summary ? (
+        <p className="leading-relaxed text-fg">{summary}</p>
+      ) : (
+        <p className="text-fg-subtle">No checked plain-language summary for this source - see the exact excerpt.</p>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 self-start rounded text-xs text-fg-subtle hover:text-fg"
+      >
+        <ChevronRight className={`size-3.5 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
+        Study details & exact excerpt
+      </button>
+      {open && (
+        <div className="animate-in ms-[18px] flex flex-col gap-2">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-subtle">
+            {details.length > 0 && <span>{details.join(" · ")}</span>}
             <span
               className={`rounded-full px-1.5 py-px text-[11px] font-medium ${
                 c.verification_status === "primary_support" ? "bg-evidence-soft text-evidence" : "bg-surface-3 text-fg-muted"
@@ -91,17 +138,12 @@ function CitationItem({ citation: c }: { citation: SupportingCitation }) {
             >
               {STATUS_LABEL[c.verification_status]}
             </span>
-          </span>
-        </button>
-      </figcaption>
-      <blockquote
-        onClick={open ? undefined : () => setOpen(true)}
-        className={`ms-5 whitespace-pre-line border-s-2 border-line-strong ps-3 leading-relaxed text-fg-muted ${
-          open ? "animate-in" : "line-clamp-2 cursor-pointer"
-        }`}
-      >
-        {c.citation.snippet}
-      </blockquote>
+          </p>
+          <blockquote className="whitespace-pre-line border-s-2 border-line-strong ps-3 leading-relaxed text-fg-muted">
+            {c.citation.snippet}
+          </blockquote>
+        </div>
+      )}
     </figure>
   );
 }
