@@ -531,11 +531,12 @@ export default function ProgramTree({
               )}
 
               {muscleGroups.length > 0 && (
-                // Styled as a summary panel, not another day row, with a
-                // preview of what's inside and a labelled expand control.
-                <details className="group rounded-xl border border-accent/25 bg-gradient-to-br from-accent-soft to-transparent">
+                // A summary panel, not another day row: a raised neutral
+                // surface, a preview of what's inside and a labelled expand
+                // control. Accent stays on the control only (accent = action).
+                <details className="group rounded-xl border border-line-strong bg-surface-2/70">
                   <summary className="flex cursor-pointer items-center gap-3 px-4 py-3.5 select-none">
-                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-3 text-fg-muted">
                       <Layers className="size-4" />
                     </span>
                     <span className="min-w-0 flex-1">
