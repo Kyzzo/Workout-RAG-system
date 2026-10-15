@@ -149,10 +149,20 @@ GENERATION_JUDGE = Judge("gpt-5", reasoning_effort="low")
 # 158/175: 6 differences come from the theory rule, 11 (~6%) are borderline
 # related-evidence calls in both directions, and none is a false 'states
 # this directly'. Median check 4.0s vs 9.0s, $0.0045 vs $0.0098.
-# Not measured at low: verify_summary (chat's lead summary, which defaults
-# to this judge) and the citation-summary check - the eval has no case for
-# either.
+# Not measured at low: the citation-summary check (citation_summaries.py) -
+# the eval has no case for it.
 STATEMENT_JUDGE = Judge("gpt-5", reasoning_effort="low")
+# Chat's lead summary, judged against all of its excerpts at once - at low
+# effort the slowest check in an answer (11.4s of a 24.6s answer, Oct 15,
+# 2026), which set how long judging took. Minimal effort since Oct 15, 2026,
+# measured on the 14 summary cases (scripts/eval_judge.py --judge-cases
+# summary, 5 runs each). With the old (outcome, reasoning) verdict, minimal
+# and low both passed 13/14, failing the same case - fractional-set tiers
+# relabeled as 'total' sets, which even default effort caught only 1 time
+# in 5. With SummaryVerdict listing each figure's unit first: 14/14 at
+# minimal (~1-4s per check) and at low (~2-20s - the figure list costs low
+# effort far more reasoning time).
+SUMMARY_JUDGE = Judge("gpt-5", reasoning_effort="minimal")
 
 
 def judge_citation(query: str, value: int | str, chunk_text: str, judge: Judge | None = None) -> JudgeVerdict:
@@ -178,9 +188,20 @@ def judge_citation(query: str, value: int | str, chunk_text: str, judge: Judge |
     return message.parsed
 
 
+class FigureCheck(pydantic.BaseModel):
+    figure: str
+    unit_in_summary: str
+    unit_in_excerpts: str
+    same_unit: bool
+
+
 class SummaryVerdict(pydantic.BaseModel):
+    # Each figure's unit is set beside the excerpts' before the verdict
+    # (fields are generated in order): the judge noted Pelland's tiers were
+    # 'fractional weekly sets' yet accepted them relabeled as 'total sets' -
+    # it matched the numbers and never compared the units.
+    figures: list[FigureCheck]
     outcome: Literal["supported", "contradicted"]
-    reasoning: str
 
 
 _SUMMARY_JUDGE_SYSTEM_PROMPT = """You are verifying a short summary answer that \
@@ -200,33 +221,50 @@ supports. That includes a range or number the findings don't cover; calling \
 a sub-range optimal or best when the excerpts found similar outcomes across \
 it; treating 'no detectable superiority beyond X' as a ceiling, a maximum or \
 proof of no further benefit; mixing units (e.g. 'fractional' sets presented \
-as direct sets, per-session as weekly) or outcomes (a strength finding \
+as direct or total sets, per-session as weekly - fractional, direct and total \
+sets are three different counts, so a figure stated in one is not supported \
+by an excerpt that reports it in another) or outcomes (a strength finding \
 presented as hypertrophy); presenting a finding from one population as \
 general without saying so; hiding a real disagreement between the excerpts; \
 or sounding more certain than the evidence (e.g. 'proven', 'always').
 
-Give brief reasoning for your classification."""
+Before deciding, list in `figures` every number or range the summary states. \
+For each, write its unit exactly as the summary words it (`unit_in_summary`, \
+e.g. 'total sets per muscle per week'), the unit the excerpts report that \
+figure in (`unit_in_excerpts`, e.g. 'fractional weekly sets', or 'not \
+reported' if no excerpt gives it), and whether the two are the same count \
+(`same_unit`). A summary that leaves the unit unstated takes the excerpts' \
+unit; a summary that names a different one ('total' or 'direct' for \
+fractional, per session for per week) does not. Any figure with same_unit \
+false makes the summary contradicted. Then give the `outcome`."""
 
 
-def verify_summary(question: str, summary: str, excerpts: list[str], judge: Judge = STATEMENT_JUDGE) -> bool:
+def judge_summary(question: str, summary: str, excerpts: list[str], judge: Judge | None = None) -> SummaryVerdict:
+    judge = judge or SUMMARY_JUDGE  # looked up per call, so it can be swapped (scripts/eval_judge.py)
+    options = {"reasoning_effort": judge.reasoning_effort} if judge.reasoning_effort else {}
+    numbered = "\n\n".join(f"Excerpt {i}:\n{text}" for i, text in enumerate(excerpts, start=1))
+    completion = client.chat.completions.parse(
+        model=judge.model,
+        **options,
+        messages=[
+            {"role": "system", "content": _SUMMARY_JUDGE_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Question: {question}\nSummary: {summary}\n\n{numbered}"},
+        ],
+        response_format=SummaryVerdict,
+    )
+    verdict = completion.choices[0].message.parsed
+    if verdict is None:
+        raise ValueError(f"Summary judge refused to classify: {completion.choices[0].message.refusal}")
+    return verdict
+
+
+def verify_summary(question: str, summary: str, excerpts: list[str], judge: Judge | None = None) -> bool:
     """Whether a cross-source summary is a fair consensus of its cited
     excerpts. Any failure to get a verdict counts as not verified."""
     if not excerpts:
         return False
-    options = {"reasoning_effort": judge.reasoning_effort} if judge.reasoning_effort else {}
-    numbered = "\n\n".join(f"Excerpt {i}:\n{text}" for i, text in enumerate(excerpts, start=1))
     try:
-        completion = client.chat.completions.parse(
-            model=judge.model,
-            **options,
-            messages=[
-                {"role": "system", "content": _SUMMARY_JUDGE_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Question: {question}\nSummary: {summary}\n\n{numbered}"},
-            ],
-            response_format=SummaryVerdict,
-        )
-        verdict = completion.choices[0].message.parsed
-        return verdict is not None and verdict.outcome == "supported"
+        return judge_summary(question, summary, excerpts, judge).outcome == "supported"
     except Exception:
         return False
 

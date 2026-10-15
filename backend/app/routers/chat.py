@@ -3,7 +3,7 @@ import logging
 import queue
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -28,6 +28,7 @@ from ..rag.generate import (
     generate_intensity_load,
     generate_volume_sets,
     max_sets_per_exercise,
+    search_general,
 )
 from ..rag.corpus import evidence_label, evidence_text
 from ..rag.verification import STATEMENT_JUDGE, verify_citation, verify_summary
@@ -112,6 +113,17 @@ def _respond(request: schemas.ChatMessageRequest, db: Session, current_user: mod
     if request.field_id is None and preset in _PRESET_KEYS:
         return _answer_preset(preset, request.message, db)
 
+    # A message from the general chat window (not opened from a
+    # prescription) is usually a research question, so its evidence search
+    # starts while the message is routed instead of after (~2s). Only an
+    # embedding and Qdrant searches - the reranker waits for routing - so a
+    # message routed elsewhere wastes a fraction of a cent.
+    prefetch = None
+    if request.field_id is None:
+        executor = ThreadPoolExecutor(max_workers=1)
+        prefetch = executor.submit(search_general, request.message)
+        executor.shutdown(wait=False)
+
     report("Understanding your question")
     decision = route_chat_message(request.message, request.field_id, request.history)
     if decision.tool == "adjust_prescription":
@@ -120,7 +132,21 @@ def _respond(request: schemas.ChatMessageRequest, db: Session, current_user: mod
     if decision.tool == "discuss_prescription":
         report("Reading this prescription's sources")
         return _handle_discuss(decision, db, current_user, request.message)
-    return _handle_general_question(decision, request.message)
+    return _handle_general_question(decision, request.message, prefetch)
+
+
+def _prefetched(prefetch: Future | None, topic: str, raw_message: str) -> list[dict] | None:
+    """The early search's candidates, if they're for the question being
+    answered: routing can rewrite a follow-up ('what about for strength?')
+    into a different topic, and then the search runs again on that. If the
+    early search failed, the normal search runs instead (and raises its own
+    error if the failure wasn't a fluke)."""
+    if prefetch is None or _normalize_question(topic) != _normalize_question(raw_message):
+        return None
+    try:
+        return prefetch.result()
+    except Exception:
+        return None
 
 
 def _answer_preset(preset: str, message: str, db: Session) -> schemas.ChatResponse:
@@ -542,18 +568,18 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
     )
 
 
-def _attempt_general_question(topic: str):
-    parsed, chunks = answer_general_question(topic)
+def _attempt_general_question(topic: str, candidates: list[dict] | None = None):
+    parsed, chunks = answer_general_question(topic, candidates)
     kept, removed, summary = _verify_statements(topic, parsed, {c["id"]: c for c in chunks})
     return parsed, kept, removed, summary
 
 
-def _handle_general_question(decision, raw_message: str) -> schemas.ChatResponse:
+def _handle_general_question(decision, raw_message: str, prefetch: Future | None = None) -> schemas.ChatResponse:
     # Not persisted - conversational. Same bounded-retry policy as every
     # other generation path: retried once if nothing verified and the model
     # didn't already admit general_knowledge.
     topic = decision.topic or raw_message
-    parsed, kept, removed, summary = _attempt_general_question(topic)
+    parsed, kept, removed, summary = _attempt_general_question(topic, _prefetched(prefetch, topic, raw_message))
     if not kept and not summary and parsed.grounding != "general_knowledge":
         report("Nothing held up against the sources - trying once more")
         parsed, kept, removed, summary = _attempt_general_question(topic)

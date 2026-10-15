@@ -31,12 +31,14 @@ import json
 import logging
 import re
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
 from app.rag import verification
+from app.rag.corpus import evidence_text, paper
 from app.rag.generate import VOLUME_BANDS, build_reps_query, build_rir_query, build_volume_query
 from app.rag.verification import STATEMENT_JUDGE, Judge, judge_citation
 
@@ -142,6 +144,86 @@ JUDGE_CASES = [
               "statement", "rejected", "the view's claim stated as a finding"),
 ]
 
+@dataclass(frozen=True)
+class SummaryCase:
+    name: str
+    excerpts: tuple[str, ...]  # keys in judge_excerpts.json, judged together as in chat
+    question: str
+    summary: str
+    expect: str  # "supported" or "rejected"
+    why: str
+
+
+_VOLUME = ("pelland_results", "tier_table", "aube_conclusion", "remmert_intro")
+_LOAD = ("schoenfeld_loading", "plotkin_cited_loading", "schoenfeld_continuum_intro")
+_LOAD_QUESTION = "Can light weights build as much muscle as heavy weights?"
+_FAILURE_QUESTION = "Do I need to train to failure to build muscle?"
+
+# Chat's lead summary may synthesize across its excerpts, so it's judged
+# against all of them at once (verification.judge_summary). Faithful
+# summaries must pass; each trap is a way a synthesis misrepresents.
+SUMMARY_CASES = [
+    SummaryCase("faithful dose-response", _VOLUME, CHAT_QUESTION,
+                "More weekly sets generally bring more muscle growth, but with diminishing returns: gains per added "
+                "set are largest at lower volumes (around 5-10 fractional sets per muscle per week) and get smaller as "
+                "volume rises. In very strong lifters, 12 to 24 weekly sets produced similar growth over 8 weeks.",
+                "supported", "the dose-response with its units and Aube's population"),
+    SummaryCase("faithful hedged range", _VOLUME, CHAT_QUESTION,
+                "For most lifters, roughly 5 to 18 fractional sets per muscle per week is an efficient range for "
+                "growth; more sets can still add muscle, but each extra set adds less.",
+                "supported", "a rough range the efficiency tiers cover, hedged, with diminishing returns"),
+    SummaryCase("sub-range called optimal", _VOLUME, CHAT_QUESTION,
+                "The optimal volume for muscle growth is 18 to 24 weekly sets; doing fewer sets leaves growth on the "
+                "table.", "rejected", "Aube found 12-24 similar; nothing makes 18-24 optimal"),
+    SummaryCase("ceiling", _VOLUME, CHAT_QUESTION,
+                "Muscle growth stops at about 31 sets per week, so there is no benefit to doing more than that.",
+                "rejected", "'no detectable superiority beyond ~31 fractional sets' read as a ceiling, unit dropped"),
+    SummaryCase("unit changed", _VOLUME, CHAT_QUESTION,
+                "About 5 to 10 total sets per muscle per week is the most efficient range for growth, and 11 to 18 "
+                "total sets is intermediate.", "rejected", "the tiers are fractional sets, presented as total sets"),
+    SummaryCase("strength result as hypertrophy", _VOLUME, CHAT_QUESTION,
+                "About 18 weekly sets is the sweet spot for building quad size in trained lifters.",
+                "rejected", "Aube's ~18 sets is a squat 1RM finding"),
+    SummaryCase("overcertain", _VOLUME, CHAT_QUESTION,
+                "Research has proven that every additional weekly set always produces more muscle growth.",
+                "rejected", "'proven' and 'always' - the findings show diminishing returns"),
+    SummaryCase("one population generalized", _VOLUME, CHAT_QUESTION,
+                "Doing more than 12 weekly sets per muscle does not add muscle growth.",
+                "rejected", "Aube's highly trained squatters generalized, hiding the meta-analyses' dose-response"),
+    SummaryCase("faithful load spectrum", _LOAD, _LOAD_QUESTION,
+                "Yes - from roughly 30% of your max up to heavy weights, muscle growth is similar when sets are taken "
+                "with a high level of effort. Heavier loads are better for maximal strength, and light loads mean "
+                "many more reps and more discomfort.", "supported", "the review's findings with their qualifiers"),
+    SummaryCase("theory stated as fact", _LOAD, _LOAD_QUESTION,
+                "Moderate loads of 8 to 12 reps per set are the best range for building muscle; lighter and heavier "
+                "loads build less.", "rejected", "the repetition continuum's claim, which the review's findings contradict"),
+    SummaryCase("load overreach", _LOAD, _LOAD_QUESTION,
+                "Any load builds the same muscle, even very light weights well below 30% of your max.",
+                "rejected", "the similar-growth finding holds at >= ~30% 1RM"),
+    SummaryCase("faithful theory answer", ("schoenfeld_continuum_intro", "schoenfeld_loading"), THEORY_QUESTION,
+                "The repetition continuum is the traditional idea that heavy, low-rep training builds strength, "
+                "moderate reps build muscle and light, high-rep training builds endurance. A 2021 review found the "
+                "strength part holds up, but muscle growth is similar across a wide range of loads.",
+                "supported", "the view presented as a view, then the review's findings"),
+    SummaryCase("faithful proximity to failure", ("refalo_key_points",), _FAILURE_QUESTION,
+                "Not necessarily: in trained lifters, stopping sets 1-2 reps short of failure grew the quadriceps "
+                "about as much as training to failure over 8 weeks.", "supported", "Refalo 2024 as reported"),
+    SummaryCase("failure overclaimed", ("refalo_key_points",), _FAILURE_QUESTION,
+                "Training to failure produces clearly more muscle growth than stopping short, so every set should "
+                "go to failure.", "rejected", "Refalo found similar growth"),
+]
+
+
+def _evidence(key: str) -> str:
+    # As chat passes excerpts to the judge: labeled with the paper's tags.
+    excerpt = EXCERPTS[key]
+    try:
+        tags = paper(excerpt["source"]).payload()
+    except KeyError:
+        tags = {"source": excerpt["source"]}
+    return evidence_text({**tags, "text": excerpt["text"]})
+
+
 # (muscle, goal, preference): the value must land in its goal and
 # preference's band (VOLUME_BANDS) and verify.
 GENERATION_CASES = [
@@ -163,6 +245,16 @@ def _run_judge_case(case: JudgeCase) -> tuple[bool, str]:
         return verdict.outcome != "primary_support", verdict.outcome
     supported = verdict.outcome in SUPPORTED
     return supported == (case.expect == "supported"), verdict.outcome
+
+
+def _run_summary_case(case: SummaryCase) -> tuple[bool, str]:
+    start = time.perf_counter()
+    try:
+        verdict = verification.judge_summary(case.question, case.summary, [_evidence(k) for k in case.excerpts])
+    except Exception as e:
+        return False, f"error: {type(e).__name__}"
+    supported = verdict.outcome == "supported"
+    return supported == (case.expect == "supported"), f"{verdict.outcome} {time.perf_counter() - start:.1f}s"
 
 
 def _run_generation_case(case) -> tuple[bool, str]:
@@ -242,20 +334,30 @@ def main():
         help="try a different judge for generated values, e.g. gpt-5-mini:low (default: the app's)",
     )
     parser.add_argument(
-        "--judge-cases", choices=("all", "statement", "generation"), default="all",
-        help="which judge cases to run (generation = bare generated values only)",
+        "--summary-judge", metavar="MODEL[:EFFORT]",
+        help="try a different judge for chat's lead summary, e.g. gpt-5:minimal (default: the app's)",
+    )
+    parser.add_argument(
+        "--judge-cases", choices=("all", "statement", "generation", "summary"), default="all",
+        help="which judge cases to run (generation = bare generated values; summary = chat's lead summary)",
     )
     args = parser.parse_args()
     if args.generation_judge:
         model, _, effort = args.generation_judge.partition(":")
         verification.GENERATION_JUDGE = Judge(model, effort or None)
+    if args.summary_judge:
+        model, _, effort = args.summary_judge.partition(":")
+        verification.SUMMARY_JUDGE = Judge(model, effort or None)
 
     describe_judge = lambda c: f"{c.name} -> expect {c.expect} ({c.judge} judge): {c.why}"
+    describe_summary = lambda c: f"{c.name} -> expect {c.expect}: {c.why}"
     describe_gen = lambda c: f"weekly volume {c[0]} / {c[1]} / {c[2]}" + (
         f" -> in {VOLUME_BANDS[c[1]][c[2]]} and verified")
     if args.list:
         for case in JUDGE_CASES:
             print("judge      ", describe_judge(case))
+        for case in SUMMARY_CASES:
+            print("summary    ", describe_summary(case))
         for case in GENERATION_CASES:
             print("generation ", describe_gen(case))
         print("chat        no merged 18-31 range; 31 always with 'fractional' (--chat)")
@@ -263,9 +365,14 @@ def main():
         return 0
 
     logging.disable(logging.INFO)
-    print(f"judges: statement={STATEMENT_JUDGE}, generation={verification.GENERATION_JUDGE}; {args.repeats} runs per case")
+    print(f"judges: statement={STATEMENT_JUDGE}, generation={verification.GENERATION_JUDGE}, "
+          f"summary={verification.SUMMARY_JUDGE}; {args.repeats} runs per case")
+    ok = True
     judge_cases = [c for c in JUDGE_CASES if args.judge_cases in ("all", c.judge)]
-    ok = _report("JUDGE CASES", judge_cases, _run_judge_case, args.repeats, describe_judge)
+    if judge_cases:
+        ok &= _report("JUDGE CASES", judge_cases, _run_judge_case, args.repeats, describe_judge)
+    if args.judge_cases in ("all", "summary"):
+        ok &= _report("SUMMARY CASES", SUMMARY_CASES, _run_summary_case, args.repeats, describe_summary)
     if not args.judge_only:
         ok &= _report("GENERATION CASES", GENERATION_CASES, _run_generation_case, args.repeats, describe_gen)
     if args.chat:

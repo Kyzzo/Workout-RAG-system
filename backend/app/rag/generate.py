@@ -401,45 +401,85 @@ def _retrieve_chunks(
     query_vector = embed_texts([search or query])[0]
     storage = QdrantStorage(collection="literature")
 
-    def gather(outcome_filter):
+    def searches(outcome_filter):
         query_filter = _build_filter(category, outcome_filter, findings_only)
-        found = storage.search(query_vector, top_k=GENERATION_CANDIDATES, query_filter=query_filter)
-        return found + storage.search_per_source(
-            query_vector, per_source=CANDIDATES_PER_PAPER, sources=MAX_PAPERS, query_filter=query_filter,
-        )
+        return [
+            lambda: storage.search(query_vector, top_k=GENERATION_CANDIDATES, query_filter=query_filter),
+            lambda: storage.search_per_source(
+                query_vector, per_source=CANDIDATES_PER_PAPER, sources=MAX_PAPERS, query_filter=query_filter,
+            ),
+        ]
 
-    candidates = gather(outcome)
-    if outcome is not None and not _enough_papers(candidates):
-        candidates = gather(None)
+    filtered, *unfiltered = _search_rounds(searches, outcome)
+    candidates = filtered[0] + filtered[1]
+    if unfiltered and not _enough_papers(candidates):
+        candidates = unfiltered[0][0] + unfiltered[0][1]
     return _select(query, candidates, GENERATION_TOP_K, rerank)
 
 
-def _retrieve_general_chunks(topic: str) -> list[dict]:
-    """A chat question's evidence: candidates from the categories it names
-    and from the whole corpus, reranked and diversified."""
+def _search_rounds(searches, outcome: str | None) -> list[list[list[dict]]]:
+    """Runs a retrieval's Qdrant searches at once - each is a round trip to
+    Qdrant Cloud, and run one after another they added up. With an outcome,
+    the unfiltered round its fallback needs runs alongside instead of after
+    (Qdrant is billed per cluster, not per query, so the extra searches are
+    free). Returns each round's results in order: [filtered, unfiltered?].
+
+    Measured gain is small: ~0.06s per chat question (0.14s -> 0.08s, Oct
+    15, 2026). Kept because it costs nothing at today's traffic. If load on
+    the Qdrant cluster ever ramps up (searches slowing down, or a bigger
+    cluster needed), run the fallback round only when it's needed (after
+    the filtered round, as before) - that alone halves the searches for
+    questions naming an outcome - or go back to searching one at a time."""
+    rounds = [searches(outcome)] + ([searches(None)] if outcome is not None else [])
+    jobs = [search for round_ in rounds for search in round_]
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        results = list(pool.map(lambda search: search(), jobs))
+    per_round = len(rounds[0])
+    return [results[i:i + per_round] for i in range(0, len(results), per_round)]
+
+
+def search_general(topic: str) -> list[dict]:
+    """A chat question's candidate excerpts, before reranking: from the
+    categories it names and from the whole corpus. Only an embedding and
+    Qdrant searches - no model calls - so chat can start it while the
+    message is still being routed (routers/chat.py). Reports no progress:
+    it may run on a worker thread, which has no progress reporter."""
     query_vector = embed_texts([topic])[0]
     storage = QdrantStorage(collection="literature")
     matched = [cat for cat, pattern in _CATEGORY_KEYWORDS.items() if pattern.search(topic)]
-    outcome = _outcome_of(topic)
 
-    def gather(outcome_filter):
-        ranked = []
-        for category in matched:
-            ranked += storage.search(
+    def searches(outcome_filter):
+        whole_corpus = _build_filter(None, outcome_filter)
+        by_category = [
+            lambda category=category: storage.search(
                 query_vector, top_k=GENERAL_TOP_K, query_filter=_build_filter(category, outcome_filter),
             )
-        ranked.sort(key=lambda c: c.get("score", 0.0), reverse=True)
-        whole_corpus = _build_filter(None, outcome_filter)
-        ranked += storage.search(query_vector, top_k=GENERAL_CANDIDATES, query_filter=whole_corpus)
-        ranked += storage.search_per_source(
-            query_vector, per_source=GENERAL_CANDIDATES_PER_PAPER, sources=GENERAL_MAX_PAPERS,
-            query_filter=whole_corpus,
-        )
-        return ranked
+            for category in matched
+        ]
+        return by_category + [
+            lambda: storage.search(query_vector, top_k=GENERAL_CANDIDATES, query_filter=whole_corpus),
+            lambda: storage.search_per_source(
+                query_vector, per_source=GENERAL_CANDIDATES_PER_PAPER, sources=GENERAL_MAX_PAPERS,
+                query_filter=whole_corpus,
+            ),
+        ]
 
-    ranked = gather(outcome)
-    if outcome is not None and not _enough_papers(ranked):
-        ranked = gather(None)
+    def combined(results):
+        # The named categories' best first, then the whole corpus's.
+        ranked = sorted((c for found in results[:-2] for c in found), key=lambda c: c.get("score", 0.0), reverse=True)
+        return ranked + results[-2] + results[-1]
+
+    filtered, *unfiltered = _search_rounds(searches, _outcome_of(topic))
+    ranked = combined(filtered)
+    if unfiltered and not _enough_papers(ranked):
+        ranked = combined(unfiltered[0])
+    return ranked
+
+
+def _retrieve_general_chunks(topic: str, candidates: list[dict] | None = None) -> list[dict]:
+    """A chat question's evidence: search_general's candidates (or ones it
+    already found for this topic), reranked and diversified."""
+    ranked = search_general(topic) if candidates is None else candidates
     report(f"Ranking {len(_usable(ranked))} excerpts by relevance")
     return _select(topic, ranked, GENERAL_TOP_K)
 
@@ -905,11 +945,14 @@ def _answer_in_statements(
     return message.parsed
 
 
-def answer_general_question(topic: str) -> tuple[pydantic.BaseModel, list[dict]]:
+def answer_general_question(
+    topic: str, candidates: list[dict] | None = None,
+) -> tuple[pydantic.BaseModel, list[dict]]:
     # General Q&A (chat mode 3): not tied to one dosage category, so
     # it searches the whole corpus. Returns a summary and statements to verify.
+    # `candidates`: search_general's results for this topic, if already found.
     report("Searching the papers")
-    chunks = _retrieve_general_chunks(topic)
+    chunks = _retrieve_general_chunks(topic, candidates)
     report("Writing the answer")
     context_block = "\n\n".join(f"[{c['id']}] ({context_label(c)}) {c['text']}" for c in chunks)
     parsed = _answer_in_statements(

@@ -109,7 +109,9 @@ def test_category_named_in_the_question_is_searched_first():
 
     chunks = _retrieve("what is the optimal set range for hypertrophy", storage)
 
-    assert storage.filters == ["volume"]
+    # Twice: the outcome-filtered round and, alongside it, the unfiltered
+    # round its fallback would need.
+    assert set(storage.filters) == {"volume"}
     assert [c["id"] for c in chunks] == ["v1", "r1"]  # volume finding first, the duplicate not repeated
 
 
@@ -248,6 +250,24 @@ def test_excerpts_are_labeled_with_their_evidence_type():
         "Pelland et al. 2025 · meta-analysis · hypertrophy and strength · mixed training status"
     )
     assert evidence_label({"source": "untagged-paper"}) == "untagged-paper"
+
+
+def test_chat_uses_the_early_search_only_for_the_question_it_searched():
+    from concurrent.futures import Future
+
+    from app.routers.chat import _prefetched
+
+    done = Future()
+    done.set_result(["candidate"])
+    failed = Future()
+    failed.set_exception(RuntimeError("qdrant down"))
+
+    assert _prefetched(done, "How many sets per week?", "how many  sets per week?") == ["candidate"]
+    # Routing rewrote a follow-up into a different topic: search again.
+    assert _prefetched(done, "weekly sets for strength", "what about for strength?") is None
+    # A failed early search falls back to the normal one.
+    assert _prefetched(failed, "q", "q") is None
+    assert _prefetched(None, "q", "q") is None
 
 
 def test_value_generation_leaves_out_excerpts_that_report_no_result():
