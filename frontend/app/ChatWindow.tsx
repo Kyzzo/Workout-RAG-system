@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { API_URL } from "./apiUrl";
 import { CaveatNote } from "./Citations";
 import { useDialogs } from "./Dialogs";
-import { ArrowUp, Book, Check, ChevronRight, Close, Message, Sparkles, Trash, Undo } from "./Icons";
+import { ArrowUp, Book, Check, ChevronDown, ChevronRight, Close, Message, Sparkles, Trash, Undo } from "./Icons";
 import { swapSummary, type SwapResult } from "./ProgramTree";
 import type { WeeklyPrescription } from "./types";
 import { Spinner } from "./ui";
@@ -155,6 +155,7 @@ export default function ChatWindow({
   const [message, setMessage] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [sending, setSending] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
@@ -356,7 +357,7 @@ export default function ChatWindow({
         aria-live="polite"
       >
         {turns.length === 0 && !sending && (
-          <div className="m-auto flex max-w-xs flex-col items-center gap-3 py-6 text-center">
+          <div className="m-auto flex max-w-sm flex-col items-center gap-3 py-6 text-center">
             <span className="grid size-11 place-items-center rounded-2xl bg-accent-soft text-accent-text">
               <Sparkles className="size-5" />
             </span>
@@ -365,6 +366,16 @@ export default function ChatWindow({
               Press <span className="font-medium text-fg">Ask</span>{" "}on any prescription to question or change it
               (&quot;why this load?&quot;, &quot;make it 4 sets&quot;), or ask a general question below.
             </p>
+            <div className="mt-3">
+              <SuggestedPrompts
+                anchored={fieldId !== null}
+                hasPercentLoad={anchorHasPercentLoad}
+                goal={goal}
+                disabled={sending}
+                onPick={send}
+                centered
+              />
+            </div>
           </div>
         )}
         {turns.map((turn, i) => {
@@ -432,13 +443,36 @@ export default function ChatWindow({
           </div>
         )}
 
-        <SuggestedPrompts
-          anchored={fieldId !== null}
-          hasPercentLoad={anchorHasPercentLoad}
-          goal={goal}
-          disabled={sending}
-          onPick={send}
-        />
+        {/* With a conversation on screen the suggestions fold behind a
+            toggle (an empty chat shows them in the message area). */}
+        {turns.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => setShowSuggestions((v) => !v)}
+              aria-expanded={showSuggestions}
+              className="inline-flex items-center gap-1 self-start rounded-md px-1 text-xs font-medium text-fg-subtle hover:text-fg"
+            >
+              <Sparkles className="size-3.5" />
+              Suggestions{fieldId !== null ? " for this exercise" : ""}
+              <ChevronDown className={`size-3.5 transition-transform duration-200 ${showSuggestions ? "rotate-180" : ""}`} />
+            </button>
+            {showSuggestions && (
+              <div className="animate-in scroll-thin max-h-44 overflow-y-auto px-1">
+                <SuggestedPrompts
+                  anchored={fieldId !== null}
+                  hasPercentLoad={anchorHasPercentLoad}
+                  goal={goal}
+                  disabled={sending}
+                  onPick={(p) => {
+                    setShowSuggestions(false);
+                    void send(p);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         <form
           onSubmit={handleSend}
@@ -481,41 +515,37 @@ function SuggestedPrompts({
   goal,
   disabled,
   onPick,
+  centered = false,
 }: {
   anchored: boolean;
   hasPercentLoad: boolean;
   goal: string | null;
   disabled: boolean;
   onPick: (prompt: string) => void;
+  centered?: boolean;
 }) {
   const groups: [string, string[]][] = anchored
     ? Object.entries(anchoredPrompts(hasPercentLoad)).map(([k, v]) => [k === "ask" ? "Ask" : "Change", v])
-    : [["Try", GENERAL_PROMPTS[goal ?? ""] ?? GENERAL_PROMPTS.hypertrophy]];
+    : [["Try asking", GENERAL_PROMPTS[goal ?? ""] ?? GENERAL_PROMPTS.hypertrophy]];
+  // Every prompt visible, wrapped, under its group's label.
   return (
-    // One scrolling row per group; the fade at the trailing edge shows
-    // there's more to scroll to.
-    <div className="flex flex-col gap-1.5">
+    <div className={`flex flex-col gap-3 ${centered ? "items-center" : ""}`}>
       {groups.map(([label, prompts]) => (
-        <div
-          key={label}
-          onWheel={(e) => {
-            // A vertical wheel scrolls the row sideways (mouse users).
-            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY;
-          }}
-          className="no-scrollbar flex items-center gap-1.5 overflow-x-auto pe-6 [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]"
-        >
-          <span className="w-12 shrink-0 text-[11px] font-medium uppercase tracking-wide text-fg-subtle">{label}</span>
-          {prompts.map((p) => (
-            <button
-              key={p}
-              type="button"
-              disabled={disabled}
-              onClick={() => onPick(p)}
-              className="h-7 shrink-0 whitespace-nowrap rounded-full border border-line bg-surface-2 px-2.5 text-xs text-fg-muted transition-[background-color,border-color,color,transform] duration-150 hover:border-line-strong hover:bg-surface-3 hover:text-fg active:scale-[0.97] disabled:opacity-50"
-            >
-              {p}
-            </button>
-          ))}
+        <div key={label} className={`flex flex-col gap-1.5 ${centered ? "items-center" : ""}`}>
+          <span className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">{label}</span>
+          <div className={`flex flex-wrap gap-1.5 ${centered ? "justify-center" : ""}`}>
+            {prompts.map((p) => (
+              <button
+                key={p}
+                type="button"
+                disabled={disabled}
+                onClick={() => onPick(p)}
+                className="min-h-7 rounded-full border border-line bg-surface-2 px-2.5 py-1 text-start text-xs text-fg-muted transition-[background-color,border-color,color,transform] duration-150 hover:border-line-strong hover:bg-surface-3 hover:text-fg active:scale-[0.97] disabled:opacity-50"
+              >
+                {p}
+              </button>
+            ))}
+          </div>
         </div>
       ))}
     </div>
