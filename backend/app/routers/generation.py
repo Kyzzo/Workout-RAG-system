@@ -8,13 +8,11 @@ from ..rag.generate import (
     Adjustment,
     build_frequency_query,
     build_intensity_query,
-    build_progression_query,
     build_reps_query,
     build_rir_query,
     build_volume_query,
     generate_frequency,
     generate_intensity_load,
-    generate_progression_scheme,
     generate_reps,
     generate_rir,
     generate_volume_sets,
@@ -22,6 +20,7 @@ from ..rag.generate import (
     max_sets_per_exercise,
 )
 from ..rag.corpus import evidence_text
+from ..rag.rule_justifications import justify_rule
 from ..rag.verification import verify_citation
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -47,8 +46,17 @@ _GENERAL_KNOWLEDGE_NOTE = (
 )
 _UNSUBSTANTIATED_NOTE = "This value could not be substantiated by the current research corpus."
 _PROGRESSION_DERIVED_NOTE = (
-    "Calculated from week 1's load by the block's linear progression scheme "
+    "Calculated from week 1's load by the block's {scheme} progression scheme "
     "- the scheme is cited, this specific week's number is not."
+)
+_UNDULATING_LIGHT_WEEK_NOTE = (
+    "A lighter week in the block's undulating progression: the research supports undulating over "
+    "linear periodization for trained lifters, but this week-to-week heavy/light pattern and the "
+    "{percent:g}-point lighter load are a convention, not a cited number."
+)
+_DELOAD_WEEK_NOTE = (
+    "Optional deload week you chose: {percent:g}% of the block's peak load. The deload's size is a "
+    "convention, not a cited number."
 )
 _USER_OVERRIDE_NOTE = "Set by you - the current research corpus doesn't support this specific value."
 _SUPPORTED_STATUSES = models.SUPPORTED_VERIFICATION_STATUSES
@@ -470,13 +478,13 @@ def _delete_existing(db: Session, model, mesocycle_id: int, muscle_group: str) -
     db.flush()
 
 
-def _set_derived_load(wp: models.WeeklyPrescription, load: str) -> None:
+def _set_derived_load(wp: models.WeeklyPrescription, load: str, scheme: str) -> None:
     # A mechanically-computed load is a different claim than whatever was
     # generated for this week before: any load citations still attached
     # would now vouch for a number they never backed, so they're removed
     # and the note says where the number actually came from.
     wp.load = load
-    wp.load_grounding_note = _PROGRESSION_DERIVED_NOTE
+    wp.load_grounding_note = _PROGRESSION_DERIVED_NOTE.format(scheme=scheme)
     wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != "load"]
 
 
@@ -609,29 +617,29 @@ def generate_frequency_endpoint(
     )
 
 
-def _attempt_progression_generation(muscle_group: str | None, goal: str):
-    result, chunks = generate_progression_scheme(muscle_group, goal)
-    query = build_progression_query(muscle_group, goal)
-    chunks_by_id = {c["id"]: c for c in chunks}
-
-    return (result, *_verify_chunks(
-        query, result.scheme, result.chunk_ids, chunks_by_id, passes=SHARED_JUDGE_PASSES,
-    ))
-
-
 _LOAD_PERCENT_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*%")
-_LINEAR_WEEKLY_INCREMENT_PERCENT = 2.5  # a standard, uncontroversial convention -
-# not itself a research claim needing its own citation, same reasoning already
-# used for the (never-built) hypertrophy double-progression increment
+_WEEKLY_INCREMENT_PERCENT = 2.5  # a standard, uncontroversial convention -
+# not itself a research claim needing its own citation
+_LIGHT_WEEK_REDUCTION_PERCENT = 10  # convention: an undulating light week's
+# load, this many points of 1RM below the heavy-week trend
 _DELOAD_FRACTION_OF_PEAK = 0.6  # standard deload convention: a significant,
 # clearly-below-peak reduction in the block's final week
 
 
-def _apply_linear_progression(mesocycle: models.Mesocycle, muscle_group: str) -> list[models.WeeklyPrescription]:
+def _apply_progression(
+    mesocycle: models.Mesocycle, muscle_group: str, scheme: str, include_deload: bool,
+) -> list[models.WeeklyPrescription]:
+    """Writes each week's load from week 1's baseline.
+
+    Linear: +2.5% 1RM a week. Undulating (weekly): heavy and light weeks
+    alternate - heavy weeks follow the same +2.5%/week trend, light weeks sit
+    10 points below it with the same sets and reps. Either way, an optional
+    deload makes the final week 60% of the block's peak.
+    """
     updated = []
     total_weeks = mesocycle.end_week - mesocycle.start_week + 1
-    has_deload = total_weeks >= 3  # too short a block for progression AND a
-    # separate deload week to both make sense
+    has_deload = include_deload and total_weeks >= 3  # too short a block for
+    # progression AND a separate deload week to both make sense
 
     for day in mesocycle.day_templates:
         for slot in day.exercise_slots:
@@ -655,16 +663,26 @@ def _apply_linear_progression(mesocycle: models.Mesocycle, muscle_group: str) ->
                 if wp is None:
                     continue
                 offset = week - mesocycle.start_week
-                percent = baseline_percent + offset * _LINEAR_WEEKLY_INCREMENT_PERCENT
+                percent = baseline_percent + offset * _WEEKLY_INCREMENT_PERCENT
+                light = scheme == "undulating" and offset % 2 == 1
+                if light:
+                    percent -= _LIGHT_WEEK_REDUCTION_PERCENT
                 peak_percent = max(peak_percent, percent)
-                _set_derived_load(wp, f"{percent:g}% 1RM")
+                _set_derived_load(wp, f"{percent:g}% 1RM", scheme)
+                if light:
+                    wp.load_grounding_note = _UNDULATING_LIGHT_WEEK_NOTE.format(
+                        percent=_LIGHT_WEEK_REDUCTION_PERCENT,
+                    )
                 updated.append(wp)
 
             if has_deload:
                 deload_wp = prescriptions_by_week.get(mesocycle.end_week)
                 if deload_wp is not None:
                     deload_percent = peak_percent * _DELOAD_FRACTION_OF_PEAK
-                    _set_derived_load(deload_wp, f"{deload_percent:g}% 1RM")
+                    _set_derived_load(deload_wp, f"{deload_percent:g}% 1RM", scheme)
+                    deload_wp.load_grounding_note = _DELOAD_WEEK_NOTE.format(
+                        percent=_DELOAD_FRACTION_OF_PEAK * 100,
+                    )
                     updated.append(deload_wp)
 
     return updated
@@ -692,50 +710,42 @@ def generate_progression_endpoint(
         raise HTTPException(status_code=404, detail="Mesocycle not found")
 
     muscle_group = request.muscle_group
-    goal = mesocycle.program.goal
+    program = mesocycle.program
 
-    # Progression only applies to strength goals - for hypertrophy, the
-    # "implied progression" from staying in a rep range and naturally
-    # moving up once you hit the top of it doesn't need a research-grounded
-    # scheme, it's just what following a stable rep-range target does on
-    # its own. Enforced structurally rather than left as a usage
-    # convention, matching how the rest of this app constrains things.
-    if goal != "strength":
+    # Progression is only scheduled into strength programs - hypertrophy
+    # progression depends on how each session goes (add reps, then load),
+    # so it's given as guidance the lifter applies. Enforced structurally
+    # rather than left as a usage convention.
+    if program.goal != "strength":
         raise HTTPException(
             status_code=400,
             detail="Progression generation only applies to strength-goal programs.",
         )
 
-    # One answer per goal, shared by every muscle and program
-    # (app/shared_answers.py): periodization research isn't muscle-specific.
-    answer = get_or_generate(
-        db, shared_key("progression", goal), "scheme",
-        lambda: _generated(lambda: _attempt_progression_generation(None, goal), "scheme"),
-    )
+    # The scheme follows from the lifter's training status (undulating beat
+    # linear for 1RM in trained lifters only), cited through the same
+    # verified rule the wizard shows - not generated per program.
+    scheme = "undulating" if program.trained else "linear"
+    rule = justify_rule(db, "periodization_by_training_status")
 
     _delete_existing(db, models.ProgressionScheme, mesocycle.id, muscle_group)
 
     scheme_record = models.ProgressionScheme(
         mesocycle_id=mesocycle.id,
         muscle_group=muscle_group,
-        scheme=answer.value,
-        grounding_note=_note_for(answer, "progression scheme", muscle_group, goal),
+        scheme=scheme,
+        grounding_note=rule.grounding_note,
     )
     db.add(scheme_record)
     db.flush()  # populate scheme_record.id before it's used as a FK below
 
-    for citation_id, status in answer.citations:
+    for rule_citation in rule.rule_citations:
         db.add(models.ProgressionSchemeCitation(
-            scheme_id=scheme_record.id, citation_id=citation_id, verification_status=status,
+            scheme_id=scheme_record.id, citation_id=rule_citation.citation_id,
+            verification_status=rule_citation.verification_status,
         ))
 
-    # Mechanical application only exists for "linear" - "undulating" needs an
-    # alternating pattern, a separate, harder problem not built yet. The
-    # scheme itself is still classified and cited either way; only the
-    # week-by-week write-back is scoped to linear for now.
-    updated_prescriptions = []
-    if answer.value == "linear":
-        updated_prescriptions = _apply_linear_progression(mesocycle, muscle_group)
+    updated_prescriptions = _apply_progression(mesocycle, muscle_group, scheme, program.include_deload)
 
     db.commit()
     db.refresh(scheme_record)

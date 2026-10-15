@@ -10,7 +10,11 @@ recall. Hits the real Qdrant collection and embeddings API (no generation
 or judge calls).
 
 Usage (from backend/):
-    uv run python -m scripts.eval_retrieval
+    uv run python -m scripts.eval_retrieval [label-filter ...]
+
+With filters, only cases whose label contains one of them run (e.g.
+"rule:" or "/ strength") - each case costs an embedding and a few small
+reranker calls, so run just the cases a change can affect.
 """
 
 import logging
@@ -18,35 +22,52 @@ import sys
 from collections import Counter
 
 from app.rag import generate as G
+from app.rag.rule_justifications import RULES
+
+
+def field(field_name, query, category, goal):
+    # As generation searches: a short topic for similarity, the full question for reranking.
+    return lambda: G._retrieve_chunks(query, category, goal, search=G.search_text(field_name, goal))
+
+
+def rule(key, category=None):
+    r = RULES[key]
+    return lambda: G._retrieve_chunks(r.query, category or r.categories[0], r.outcome)
+
 
 # (label, retrieve() -> chunks, papers that should be among them)
 CASES = [
-    # Generation cases ask the questions generation actually asks: volume,
-    # frequency and progression once per goal (muscle_group=None); reps, RIR
-    # and load per movement type.
+    # Generation cases ask the questions generation actually asks: volume and
+    # frequency once per goal (muscle_group=None); reps, RIR and load per
+    # movement type. Rule cases use each rule's own query.
     ("volume / hypertrophy",
-     lambda: G._retrieve_chunks(G.build_volume_query(None, "hypertrophy"), "volume", "hypertrophy"),
+     field("weekly_sets", G.build_volume_query(None, "hypertrophy"), "volume", "hypertrophy"),
      {"pelland-etal-2025", "weekly-sets-dose-response", "remmert-etal-2025-per-session-volume"}),
     ("volume / strength",
-     lambda: G._retrieve_chunks(G.build_volume_query(None, "strength"), "volume", "strength"),
+     field("weekly_sets", G.build_volume_query(None, "strength"), "volume", "strength"),
      {"pelland-etal-2025", "androulakis-korakakis-etal-2020-min-dose"}),
     ("reps / hypertrophy / compound",
-     lambda: G._retrieve_chunks(G.build_movement_query("reps", "hypertrophy", "compound"), "intensity", "hypertrophy"),
+     field("reps", G.build_movement_query("reps", "hypertrophy", "compound"), "intensity", "hypertrophy"),
      {"schoenfeld-etal-2021"}),
     ("rir / hypertrophy / isolation",
-     lambda: G._retrieve_chunks(G.build_movement_query("rir", "hypertrophy", "isolation"), "intensity", "hypertrophy"),
+     field("rir", G.build_movement_query("rir", "hypertrophy", "isolation"), "intensity", "hypertrophy"),
      {"refalo-etal-2023-proximity-failure-meta", "robinson-etal-2024-proximity-to-failure",
       "refalo-etal-2024-failure-vs-rir"}),
     ("rir / strength / compound",
-     lambda: G._retrieve_chunks(G.build_movement_query("rir", "strength", "compound"), "intensity", "strength"),
+     field("rir", G.build_movement_query("rir", "strength", "compound"), "intensity", "strength"),
      {"robinson-etal-2024-proximity-to-failure", "grgic-etal-2022-failure-meta"},
      {"refalo-etal-2023-proximity-failure-meta", "refalo-etal-2024-failure-vs-rir"}),
     ("frequency / strength",
-     lambda: G._retrieve_chunks(G.build_frequency_query(None, "strength"), "frequency", "strength"),
+     field("frequency", G.build_frequency_query(None, "strength"), "frequency", "strength"),
      {"pelland-etal-2025"}),
-    ("progression / strength",
-     lambda: G._retrieve_chunks(G.build_progression_query(None, "strength"), "progression", "strength"),
-     {"zhang-etal-2026"}),
+    ("rule: periodization by training status",
+     rule("periodization_by_training_status"),
+     {"moesgaard-etal-2022-periodization-meta", "harries-etal-2015-linear-vs-undulating"}),
+    ("rule: deload week", rule("deload_week"), {"coleman-etal-2024-deload"}),
+    ("rule: hypertrophy rep progression",
+     rule("hypertrophy_rep_progression"), {"plotkin-etal-2022-load-vs-reps-progression"}),
+    ("rule: strength frequency",
+     rule("strength_frequency"), {"pelland-etal-2025", "grgic-etal-2018-frequency-strength-meta"}),
     ("chat: optimal weekly sets for hypertrophy",
      lambda: G._retrieve_general_chunks("What is the optimal number of weekly sets per muscle for hypertrophy?"),
      {"pelland-etal-2025", "remmert-etal-2025-per-session-volume", "weekly-sets-dose-response"}),
@@ -71,10 +92,10 @@ CASES = [
      {"refalo-etal-2023-proximity-failure-meta", "robinson-etal-2024-proximity-to-failure"}),
     # Papers added 2026-10-14.
     ("reps / strength / compound",
-     lambda: G._retrieve_chunks(G.build_movement_query("reps", "strength", "compound"), "intensity", "strength"),
+     field("reps", G.build_movement_query("reps", "strength", "compound"), "intensity", "strength"),
      {"lopez-etal-2021-load-network-meta", "schoenfeld-etal-2017-low-vs-high-load"}),
     ("reps / hypertrophy / isolation (load spectrum)",
-     lambda: G._retrieve_chunks(G.build_movement_query("reps", "hypertrophy", "isolation"), "intensity", "hypertrophy"),
+     field("reps", G.build_movement_query("reps", "hypertrophy", "isolation"), "intensity", "hypertrophy"),
      {"lopez-etal-2021-load-network-meta", "schoenfeld-etal-2017-low-vs-high-load"}),
     ("rule: strength frequency with matched volume",
      lambda: G._retrieve_chunks(
@@ -113,7 +134,10 @@ def main():
           f"chat top {G.GENERAL_TOP_K}, max {G.MAX_CHUNKS_PER_PAPER} per paper before backfill\n")
     found_total = expected_total = 0
     leaks = 0
+    filters = sys.argv[1:]
     for label, retrieve, expected, *rest in CASES:
+        if filters and not any(f in label for f in filters):
+            continue
         excluded = rest[0] if rest else set()
         chunks = retrieve()
         papers = Counter(c["source"] for c in chunks)

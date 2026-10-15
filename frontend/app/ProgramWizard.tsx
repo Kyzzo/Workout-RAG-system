@@ -54,6 +54,8 @@ export default function ProgramWizard({
   const [days, setDays] = useState(0);
   const [weeks, setWeeks] = useState("6");
   const [volume, setVolume] = useState<VolumePreference>("moderate");
+  const [trained, setTrained] = useState(false);
+  const [includeDeload, setIncludeDeload] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -96,7 +98,15 @@ export default function ProgramWizard({
       setProgress("Choosing exercises for each day");
       const program = await api<Program>("/programs/generate", {
         method: "POST",
-        body: { goal, split: splitKey, days_per_week: days, weeks: Number(weeks), volume_preference: volume },
+        body: {
+          goal,
+          split: splitKey,
+          days_per_week: days,
+          weeks: Number(weeks),
+          volume_preference: volume,
+          trained,
+          include_deload: goal === "strength" && includeDeload,
+        },
       });
       onCreated({ id: program.id, goal: program.goal });
 
@@ -183,10 +193,50 @@ export default function ProgramWizard({
         </select>
       </div>
       {goal === "strength" && (
-        <RuleSources
-          text="Volume ranges: Pelland et al. 2025's strength efficiency tiers (1 set minimum effective dose, 2 higher efficiency, 3-4 intermediate; more doesn't consistently add strength)."
-          ruleKeys={["strength_volume_efficiency_tiers"]}
-        />
+        <>
+          <RuleSources
+            text="Volume ranges: Pelland et al. 2025's strength efficiency tiers (1 set minimum effective dose, 2 higher efficiency, 3-4 intermediate; more doesn't consistently add strength)."
+            ruleKeys={["strength_volume_efficiency_tiers"]}
+          />
+          <RuleSources
+            text="Frequency: strength gains rise with how often a lift is trained, with diminishing returns at higher frequencies."
+            ruleKeys={["strength_frequency"]}
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={trained}
+              onChange={(e) => setTrained(e.target.checked)}
+              disabled={running}
+            />
+            I&apos;ve lifted consistently for 1+ year
+          </label>
+          <RuleSources
+            text={
+              (trained ? "Progression: undulating (heavy and light weeks alternate). " : "Progression: linear (load rises each week). ") +
+              "Undulating periodization has produced larger 1RM gains than linear in trained lifters, with no clear " +
+              "difference in untrained lifters. The weekly heavy/light pattern and the 2.5%/week step are common practice."
+            }
+            ruleKeys={["periodization_by_training_status"]}
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={includeDeload}
+              onChange={(e) => setIncludeDeload(e.target.checked)}
+              disabled={running}
+            />
+            Include a deload week (lighter final week)
+          </label>
+          <RuleSources
+            text={
+              "Off by default: in trained lifters, a week off partway through a 9-week program had minimal impact on " +
+              "muscle growth, and lower-body strength gains were modestly smaller than with continuous training. " +
+              "The deload's size here (60% of peak load) is common practice."
+            }
+            ruleKeys={["deload_week"]}
+          />
+        </>
       )}
       {goal === "hypertrophy" && (
         <>

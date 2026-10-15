@@ -237,3 +237,31 @@ def test_excerpts_are_labeled_with_their_evidence_type():
         "Pelland et al. 2025 · meta-analysis · hypertrophy and strength · mixed training status"
     )
     assert evidence_label({"source": "untagged-paper"}) == "untagged-paper"
+
+
+def test_generation_searches_with_a_short_topic_but_reranks_with_the_full_question():
+    # A templated question ("...answer with a rep range like '8-12'") pulled
+    # similarity toward passages naming exercises; the search embeds a short
+    # statement of the topic instead, while the reranker judges against the
+    # full question.
+    storage = _FakeStorage({"intensity": [_chunk("f1", "grgic-meta", 0.9, category="intensity")]}, [])
+    question = "How close to failure should sets of squats be taken for strength? 0 RIR means failure."
+    reranked_with = []
+
+    def fake_rerank(q, candidates):
+        reranked_with.append(q)
+        return candidates
+
+    with patch.object(generate, "embed_texts", return_value=[[0.0]]) as embed, \
+         patch.object(generate, "QdrantStorage", return_value=storage), \
+         patch.object(generate, "_rerank", side_effect=fake_rerank):
+        generate._retrieve_chunks(question, "intensity", "strength", search=generate.search_text("rir", "strength"))
+
+    assert embed.call_args.args[0] == ["Proximity to failure (repetitions in reserve) and maximal strength (1RM)"]
+    assert reranked_with == [question]
+
+
+def test_search_text_only_for_known_fields_and_goals():
+    assert generate.search_text("reps", "hypertrophy") == "Repetition range and load per set for muscle hypertrophy"
+    assert generate.search_text("reps", None) is None  # no goal: search with the question itself
+    assert generate.search_text("unknown", "strength") is None

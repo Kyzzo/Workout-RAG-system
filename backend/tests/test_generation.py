@@ -319,17 +319,37 @@ def test_intensity_ownership_enforced(mock_generate, mock_verify, db_session, ow
     mock_generate.assert_not_called()
 
 
-# --- progression: goal-gated (strength only), plus the mechanical
-# linear-application formula, which is pure deterministic logic tested
-# directly - no LLM call involved once the scheme itself is known.
+# --- progression: goal-gated (strength only). The scheme comes from the
+# program's training status via a cited rule (no LLM call here), and the
+# week-by-week write-back is deterministic logic tested directly.
 
-def _fake_scheme_result(scheme, chunk_ids, grounding):
-    return SimpleNamespace(scheme=scheme, chunk_ids=chunk_ids, grounding=grounding)
+def _fake_rule(db_session, note=None):
+    citation = models.Citation(title="periodization-paper", snippet="s", qdrant_point_id="prog-1")
+    db_session.add(citation)
+    db_session.flush()
+    return SimpleNamespace(
+        grounding_note=note,
+        rule_citations=[SimpleNamespace(citation_id=citation.id, verification_status="primary_support")],
+    )
 
 
-@patch("app.routers.generation.verify_citation")
-@patch("app.routers.generation.generate_progression_scheme")
-def test_progression_rejects_non_strength_goal(mock_generate, mock_verify, db_session, owner_and_prescription):
+def _loads_by_week(result):
+    return {wp.week_number: wp.load for wp in result.updated_prescriptions}
+
+
+def _progress(db_session, user, mesocycle, trained=False, include_deload=False):
+    mesocycle.program.trained = trained
+    mesocycle.program.include_deload = include_deload
+    db_session.flush()
+    request = schemas.GenerateProgressionRequest(muscle_group="chest")
+    with patch("app.routers.generation.justify_rule", return_value=_fake_rule(db_session)) as mock_rule:
+        result = generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
+    mock_rule.assert_called_once_with(db_session, "periodization_by_training_status")
+    return result
+
+
+@patch("app.routers.generation.justify_rule")
+def test_progression_rejects_non_strength_goal(mock_rule, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription  # hypertrophy-goal fixture
     mesocycle = prescription.exercise_slot.day_template.mesocycle
 
@@ -338,25 +358,17 @@ def test_progression_rejects_non_strength_goal(mock_generate, mock_verify, db_se
         generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
 
     assert exc_info.value.status_code == 400
-    mock_generate.assert_not_called()  # rejected before ever reaching generation
+    mock_rule.assert_not_called()
 
 
-@patch("app.routers.generation.verify_citation")
-@patch("app.routers.generation.generate_progression_scheme")
-def test_progression_linear_applies_mechanically(mock_generate, mock_verify, db_session, strength_owner_and_prescription):
+def test_untrained_lifter_gets_linear_progression(db_session, strength_owner_and_prescription):
     user, mesocycle = strength_owner_and_prescription
-    mock_generate.return_value = (
-        _fake_scheme_result("linear", ["chunk-1"], "fully_grounded"),
-        _fake_chunks("chunk-1"),
-    )
-    mock_verify.return_value = "primary_support"
 
-    request = schemas.GenerateProgressionRequest(muscle_group="chest")
-    result = generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
+    result = _progress(db_session, user, mesocycle, trained=False)
 
     assert result.scheme.scheme == "linear"
-    loads_by_week = {wp.week_number: wp.load for wp in result.updated_prescriptions}
-    assert loads_by_week == {2: "72.5% 1RM", 3: "75% 1RM", 4: "45% 1RM"}  # +2.5%/week, deload = 60% of peak
+    assert [c.verification_status for c in result.scheme.supporting_citations] == ["primary_support"]
+    assert _loads_by_week(result) == {2: "72.5% 1RM", 3: "75% 1RM", 4: "77.5% 1RM"}  # +2.5%/week, no deload
 
     # week 1's real baseline must be untouched
     db_session.refresh(mesocycle)
@@ -367,35 +379,56 @@ def test_progression_linear_applies_mechanically(mock_generate, mock_verify, db_
     assert week1.load == "70% 1RM"
 
 
-@patch("app.routers.generation.verify_citation")
-@patch("app.routers.generation.generate_progression_scheme")
-def test_progression_undulating_leaves_prescriptions_untouched(mock_generate, mock_verify, db_session, strength_owner_and_prescription):
+def test_trained_lifter_gets_alternating_heavy_and_light_weeks(db_session, strength_owner_and_prescription):
     user, mesocycle = strength_owner_and_prescription
-    mock_generate.return_value = (
-        _fake_scheme_result("undulating", ["chunk-1"], "fully_grounded"),
-        _fake_chunks("chunk-1"),
-    )
-    mock_verify.return_value = "primary_support"
 
-    request = schemas.GenerateProgressionRequest(muscle_group="chest")
-    result = generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
+    result = _progress(db_session, user, mesocycle, trained=True)
 
     assert result.scheme.scheme == "undulating"
-    assert result.updated_prescriptions == []  # mechanical application only exists for linear
+    # heavy weeks (1, 3) follow the +2.5%/week trend; light weeks (2, 4) sit 10 points below it
+    assert _loads_by_week(result) == {2: "62.5% 1RM", 3: "75% 1RM", 4: "67.5% 1RM"}
+    notes = {wp.week_number: wp.load_grounding_note for wp in result.updated_prescriptions}
+    assert "convention" in notes[2] and "undulating progression" in notes[2]
+    assert "undulating progression scheme" in notes[3]
 
 
-@patch("app.routers.generation.verify_citation")
-@patch("app.routers.generation.generate_progression_scheme")
-def test_progression_ownership_enforced(mock_generate, mock_verify, db_session, strength_owner_and_prescription, other_user):
+def test_deload_week_is_only_added_when_chosen(db_session, strength_owner_and_prescription):
+    user, mesocycle = strength_owner_and_prescription
+
+    result = _progress(db_session, user, mesocycle, include_deload=True)
+
+    assert _loads_by_week(result) == {2: "72.5% 1RM", 3: "75% 1RM", 4: "45% 1RM"}  # deload = 60% of peak
+    week4 = next(wp for wp in result.updated_prescriptions if wp.week_number == 4)
+    assert "deload" in week4.load_grounding_note
+
+
+def test_undulating_deload_is_taken_from_the_heavy_peak(db_session, strength_owner_and_prescription):
+    user, mesocycle = strength_owner_and_prescription
+
+    result = _progress(db_session, user, mesocycle, trained=True, include_deload=True)
+
+    assert _loads_by_week(result) == {2: "62.5% 1RM", 3: "75% 1RM", 4: "45% 1RM"}
+
+
+def test_progression_shows_the_rule_note_when_unsupported(db_session, strength_owner_and_prescription):
+    user, mesocycle = strength_owner_and_prescription
+    request = schemas.GenerateProgressionRequest(muscle_group="chest")
+    with patch("app.routers.generation.justify_rule", return_value=_fake_rule(db_session, note="no support")):
+        result = generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
+
+    assert result.scheme.grounding_note == "no support"
+
+
+@patch("app.routers.generation.justify_rule")
+def test_progression_ownership_enforced(mock_rule, db_session, strength_owner_and_prescription, other_user):
     _, mesocycle = strength_owner_and_prescription
-    mock_generate.return_value = (_fake_scheme_result("linear", [], "general_knowledge"), [])
 
     request = schemas.GenerateProgressionRequest(muscle_group="chest")
     with pytest.raises(HTTPException) as exc_info:
         generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=other_user)
 
     assert exc_info.value.status_code == 404
-    mock_generate.assert_not_called()
+    mock_rule.assert_not_called()
 
 
 # --- frequency: a genuinely different persistence shape (Mesocycle-scoped,

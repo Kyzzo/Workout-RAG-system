@@ -89,6 +89,47 @@ RULES = {
         categories=("volume", "frequency"),
         outcome="hypertrophy",
     ),
+    # Strength programs' progression scheme is chosen from the wizard's
+    # training-status answer by this rule, not generated per program.
+    "periodization_by_training_status": Rule(
+        claim=(
+            "For maximal (1RM) strength, undulating periodization has produced larger gains than linear "
+            "periodization in trained lifters, with no clear difference between the two in untrained lifters."
+        ),
+        query="Undulating versus linear periodization for 1RM strength in trained and untrained individuals",
+        categories=("progression",),
+        outcome="strength",
+    ),
+    # Why the deload week is an opt-in rather than the default.
+    "deload_week": Rule(
+        claim=(
+            "In resistance-trained lifters, taking one week off training partway through a 9-week program "
+            "did not change muscle hypertrophy compared with training continuously, and slightly reduced "
+            "gains in some strength measures."
+        ),
+        query="Effect of a one-week deload or training cessation on muscle hypertrophy and strength",
+        categories=("recovery",),
+    ),
+    # The basis of the hypertrophy progression guidance (add reps, then load).
+    "hypertrophy_rep_progression": Rule(
+        claim=(
+            "In trained lifters, progressing by adding repetitions at a fixed load produced muscle "
+            "hypertrophy similar to progressing by adding load within a fixed repetition range."
+        ),
+        query="Progressing repetitions versus progressing load for muscle hypertrophy",
+        categories=("progression",),
+        outcome="hypertrophy",
+    ),
+    # Shown with the frequency choice for strength programs.
+    "strength_frequency": Rule(
+        claim=(
+            "Strength gains increase with weekly training frequency, with diminishing returns at "
+            "higher frequencies."
+        ),
+        query="Dose-response of weekly training frequency and strength gains",
+        categories=("frequency",),
+        outcome="strength",
+    ),
 }
 
 NO_SUPPORT_NOTE = (

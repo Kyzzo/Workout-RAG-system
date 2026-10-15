@@ -115,12 +115,20 @@ def test_regenerating_frequency_replaces_previous_record(mock_generate, mock_ver
     assert citations == 1
 
 
-@patch("app.routers.generation.verify_citation")
-@patch("app.routers.generation.generate_progression_scheme")
-def test_regenerating_progression_replaces_previous_record(mock_generate, mock_verify, db_session, strength_owner_and_prescription):
+def _periodization_rule(db_session):
+    citation = models.Citation(title="periodization-paper", snippet="s", qdrant_point_id="prog-1")
+    db_session.add(citation)
+    db_session.flush()
+    return SimpleNamespace(
+        grounding_note=None,
+        rule_citations=[SimpleNamespace(citation_id=citation.id, verification_status="primary_support")],
+    )
+
+
+@patch("app.routers.generation.justify_rule")
+def test_regenerating_progression_replaces_previous_record(mock_rule, db_session, strength_owner_and_prescription):
     user, mesocycle = strength_owner_and_prescription
-    mock_generate.return_value = (_result(scheme="undulating", chunk_ids=["prog-1"], grounding="fully_grounded"), _chunks("prog-1"))
-    mock_verify.return_value = "primary_support"
+    mock_rule.return_value = _periodization_rule(db_session)
     request = schemas.GenerateProgressionRequest(muscle_group="chest")
 
     generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
@@ -136,9 +144,8 @@ def test_regenerating_progression_replaces_previous_record(mock_generate, mock_v
     assert citations == 1
 
 
-@patch("app.routers.generation.verify_citation")
-@patch("app.routers.generation.generate_progression_scheme")
-def test_linear_progression_drops_stale_load_citations(mock_generate, mock_verify, db_session, strength_owner_and_prescription):
+@patch("app.routers.generation.justify_rule")
+def test_linear_progression_drops_stale_load_citations(mock_rule, db_session, strength_owner_and_prescription):
     user, mesocycle = strength_owner_and_prescription
     week2 = next(
         wp for day in mesocycle.day_templates for s in day.exercise_slots for wp in s.weekly_prescriptions
@@ -154,8 +161,7 @@ def test_linear_progression_drops_stale_load_citations(mock_generate, mock_verif
             prescription_id=week2.id, citation_id=citation.id, field=field, verification_status="primary_support",
         ))
     db_session.flush()
-    mock_generate.return_value = (_result(scheme="linear", chunk_ids=["prog-1"], grounding="fully_grounded"), _chunks("prog-1"))
-    mock_verify.return_value = "primary_support"
+    mock_rule.return_value = _periodization_rule(db_session)
 
     request = schemas.GenerateProgressionRequest(muscle_group="chest")
     generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)

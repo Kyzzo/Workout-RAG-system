@@ -95,9 +95,20 @@ Growing the corpus from 14 to 26 papers surfaced two more:
   frequency question gave 10/10 to most excerpts of unrelated
   proximity-to-failure papers. Batching restored discrimination.
 
-After both: 39 of 40 expected papers. The one miss is a meta-analysis whose
-findings rank below its discussion for one long, templated generation
-question.
+After both: 39 of 40 expected papers. The one miss was a meta-analysis
+whose findings ranked below its discussion for one long, templated
+generation question - fixed by the next change.
+
+## Search with the topic, judge with the question
+
+A generation question names exercises and asks for a format ("answer with
+a rep range like '8-12'"), which pulled similarity toward passages that
+mention exercises rather than ones that report results. The similarity
+search now embeds a short statement of the topic ("Proximity to failure
+(repetitions in reserve) and maximal strength (1RM)"); the reranker,
+generator and judge still see the full question, so what counts as an
+answer is unchanged. With it, every affected check passes, including the
+previous miss.
 
 ## Cost
 
@@ -138,11 +149,6 @@ its excerpts. That changes three things:
 - **Thin categories.** Reranking can't conjure evidence that isn't there.
   Rep ranges and progression each rested on one paper until the corpus
   grew to 26; recovery still rests on two.
-- **Long generation questions.** A generation question names exercises and
-  asks for a format ("answer with a rep range like '8-12'"), which pulls
-  similarity toward passages that mention exercises rather than ones that
-  report results. Searching with a shorter statement of what's being asked
-  would likely help.
 - **The reranker is generous.** It sometimes scores a hypertrophy finding
   highly for a strength question. That's tolerable because the judge, not
   the reranker, decides what counts as support — reranking only decides

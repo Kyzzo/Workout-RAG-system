@@ -287,9 +287,12 @@ export default function ProgramTree({
     <div className="flex flex-col gap-4 w-full text-sm">
       <p className="text-zinc-500">
         Program #{program.id} - goal: {program.goal} · {volumeLabel(program.volume_preference, program.goal)}
+        {strength && ` · ${program.trained ? "lifting 1+ year" : "lifting under a year"}`}
+        {strength && program.include_deload && " · deload week"}
       </p>
-      {/* Strength progression is built into the loads (cited linear scheme);
-          hypertrophy progression is a principle applied session to session. */}
+      {/* Strength progression is built into the loads (a cited scheme chosen
+          by training status); hypertrophy progression is a principle applied
+          session to session. */}
       {!strength && program.mesocycles.length > 0 && <ProgressionGuide />}
 
       {busy && !blockProgress && (
@@ -460,7 +463,10 @@ export default function ProgramTree({
                         )}
                         {scheme && openSources === schemeKey && (
                           <SourcesPanel
-                            heading={`Why ${scheme.scheme} progression for ${group}`}
+                            heading={
+                              `Why ${scheme.scheme} progression: ` +
+                              (program.trained ? "you've lifted consistently for 1+ year" : "you're newer to lifting")
+                            }
                             citations={scheme.supporting_citations}
                             note={scheme.grounding_note}
                           />

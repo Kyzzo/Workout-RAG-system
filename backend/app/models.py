@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String, func
+from sqlalchemy import ForeignKey, String, false as sa_false, func
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
@@ -30,6 +30,12 @@ class Program(Base):
     # Where in the research-supported weekly volume range to land:
     # "minimal" (fewer, harder sets), "moderate" or "high".
     volume_preference: Mapped[str] = mapped_column(String, default="moderate", server_default="moderate")
+    # Lifted consistently for a year or more: decides the progression
+    # scheme (undulating for trained lifters, linear otherwise).
+    trained: Mapped[bool] = mapped_column(default=False, server_default=sa_false())
+    # A lighter final week; off by default (Coleman et al. 2024 found a
+    # week off didn't help hypertrophy and slightly cut strength gains).
+    include_deload: Mapped[bool] = mapped_column(default=False, server_default=sa_false())
 
     user: Mapped["User"] = relationship(back_populates="programs") #one ForeignKey so auto-detected, no need to specify
     mesocycles: Mapped[list["Mesocycle"]] = relationship(back_populates="program", order_by="Mesocycle.start_week", cascade="all, delete-orphan")

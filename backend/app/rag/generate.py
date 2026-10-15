@@ -334,11 +334,39 @@ def _enough_papers(candidates: list[dict]) -> bool:
     return len({c["source"] for c in _usable(candidates)}) >= MIN_PAPERS_AFTER_OUTCOME_FILTER
 
 
-def _retrieve_chunks(query: str, category: str | None, outcome: str | None = None) -> list[dict]:
+# What a generated field's similarity search looks for. The full question
+# names exercises and an answer format ("answer with a rep range like
+# '8-12'"), which pulled similarity toward passages mentioning exercises
+# rather than ones reporting results - a failure meta-analysis's findings
+# ranked below its discussion. The search uses this short statement of the
+# topic; the reranker, generator and judge still see the full question.
+_GOAL_PHRASE = {"hypertrophy": "muscle hypertrophy", "strength": "maximal strength (1RM)"}
+_SEARCH_TOPIC = {
+    "weekly_sets": "Weekly training volume (sets per muscle per week) and {goal}",
+    "sets": "Weekly training volume (sets per muscle per week) and {goal}",
+    "reps": "Repetition range and load per set for {goal}",
+    "load": "Training load (percentage of 1RM) for {goal}",
+    "rir": "Proximity to failure (repetitions in reserve) and {goal}",
+    "frequency": "Weekly training frequency and {goal}",
+}
+
+
+def search_text(field_name: str, goal: str | None) -> str | None:
+    topic = _SEARCH_TOPIC.get(field_name)
+    if topic is None or goal not in _GOAL_PHRASE:
+        return None
+    return topic.format(goal=_GOAL_PHRASE[goal])
+
+
+def _retrieve_chunks(
+    query: str, category: str | None, outcome: str | None = None, search: str | None = None,
+) -> list[dict]:
     """A generated field's (or rule's) evidence: its category's excerpts
     (category=None searches the whole corpus), limited to papers on the
-    program's outcome when enough exist, then reranked and diversified."""
-    query_vector = embed_texts([query])[0]
+    program's outcome when enough exist, then reranked and diversified.
+    `search`, when given, is what the similarity search embeds instead of
+    the full question; reranking always uses the question."""
+    query_vector = embed_texts([search or query])[0]
     storage = QdrantStorage(collection="literature")
 
     def gather(outcome_filter):
@@ -403,7 +431,7 @@ def _generate_field(
     guidance: str | None = None,
     outcome: str | None = None,
 ) -> tuple[pydantic.BaseModel, list[dict]]:
-    chunks = _retrieve_chunks(query, category, outcome)
+    chunks = _retrieve_chunks(query, category, outcome, search=search_text(field_name, outcome))
 
     context_block = "\n\n".join(f"[{c['id']}] ({evidence_label(c)}) {c['text']}" for c in chunks)
     locked_type = adjustment.locked_type() if adjustment else None
@@ -704,33 +732,6 @@ def build_frequency_query(muscle_group: str | None, goal: str) -> str:
         f"support a training goal of {goal}? Answer with a single whole "
         f"number of sessions per week - if the source material gives a "
         f"range, pick the single most defensible value within it."
-    )
-
-
-ProgressionSchemeType = Literal["linear", "undulating"]
-
-
-def generate_progression_scheme(muscle_group: str | None, goal: str) -> tuple[pydantic.BaseModel, list[dict]]:
-    return _generate_field(
-        "scheme",
-        ProgressionSchemeType,
-        "progression",
-        build_progression_query(muscle_group, goal),
-        field_description="Which periodization model is recommended: "
-        "'linear' (progressively increasing intensity/decreasing volume "
-        "across the block) or 'undulating' (intensity/volume varies "
-        "week to week or day to day rather than trending in one direction).",
-        outcome=goal,
-    )
-
-
-def build_progression_query(muscle_group: str | None, goal: str) -> str:
-    target = f"for {muscle_group} " if muscle_group else ""
-    return (
-        f"For a strength training goal, is linear or undulating "
-        f"periodization recommended {target}across a training "
-        f"block? Answer with which scheme is recommended, not a description "
-        f"of both."
     )
 
 

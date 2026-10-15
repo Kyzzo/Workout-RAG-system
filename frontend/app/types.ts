@@ -127,5 +127,7 @@ export type Program = {
   user_id: number;
   goal: string;
   volume_preference: VolumePreference;
+  trained: boolean;
+  include_deload: boolean;
   mesocycles: Mesocycle[];
 };

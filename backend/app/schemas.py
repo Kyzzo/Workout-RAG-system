@@ -25,6 +25,8 @@ VolumePreference = Literal["minimal", "moderate", "high"]
 class ProgramCreate(BaseModel):
     goal: str
     volume_preference: VolumePreference = "moderate"
+    trained: bool = False
+    include_deload: bool = False
 
 
 class ProgramGenerateRequest(BaseModel):
@@ -33,6 +35,8 @@ class ProgramGenerateRequest(BaseModel):
     days_per_week: int
     volume_preference: VolumePreference = "moderate"
     weeks: int = Field(default=6, ge=2, le=12)
+    trained: bool = False
+    include_deload: bool = False
 
     @model_validator(mode="after")
     def _check_split(self):
@@ -56,6 +60,8 @@ class ProgramSummaryOut(BaseModel):
     id: int
     goal: str
     volume_preference: str = "moderate"
+    trained: bool = False
+    include_deload: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -88,6 +94,8 @@ class ProgramOut(BaseModel):
     user_id: int
     goal: str
     volume_preference: str = "moderate"
+    trained: bool = False
+    include_deload: bool = False
     mesocycles: list["MesocycleOut"]
 
     model_config = {"from_attributes": True}
