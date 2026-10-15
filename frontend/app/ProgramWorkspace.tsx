@@ -104,6 +104,15 @@ export default function ProgramWorkspace() {
     handleSelect(created.id);
   }
 
+  // The anchored prescription as it is now (adjustments reload the
+  // program), so suggested prompts match it - e.g. load prompts only for a
+  // %1RM load.
+  const anchored = program?.mesocycles
+    .flatMap((m) => m.day_templates)
+    .flatMap((d) => d.exercise_slots)
+    .flatMap((s) => s.weekly_prescriptions)
+    .find((wp) => wp.id === anchoredFieldId);
+
   function handleAskAbout(prescription: WeeklyPrescription, label: string) {
     setAnchoredFieldId(prescription.id);
     setAnchorLabel(label);
@@ -161,6 +170,8 @@ export default function ProgramWorkspace() {
         <ChatWindow
           fieldId={anchoredFieldId}
           anchorLabel={anchorLabel}
+          anchorHasPercentLoad={!!anchored && anchored.load.includes("%")}
+          goal={program?.goal ?? null}
           onClearAnchor={clearAnchor}
           onPrescriptionUpdated={reloadProgram}
         />

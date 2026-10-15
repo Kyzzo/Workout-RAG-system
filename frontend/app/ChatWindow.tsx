@@ -42,6 +42,43 @@ type HistoryTurn = { role: "user" | "assistant"; content: string };
 const HISTORY_TURNS = 10;
 const MAX_TURN_CHARS = 2000; // matches the backend's ChatTurn limit
 
+// Suggested prompts: one click sends them into the same chat (retrieved,
+// verified and cited like a typed message). Anchored to an exercise: ask
+// about or change its values - load prompts only for a %1RM load. Not
+// anchored: general research questions.
+const GENERAL_PROMPTS: Record<string, string[]> = {
+  hypertrophy: [
+    "How many sets per week should I do per muscle?",
+    "How close to failure should I train?",
+    "Does training a muscle 3x a week beat 2x?",
+    "Should I add reps or add weight to progress?",
+  ],
+  strength: [
+    "How many sets per week build strength?",
+    "Do I need to train to failure to get stronger?",
+    "Is undulating periodization better than linear?",
+    "Should I take a deload week?",
+  ],
+};
+
+function anchoredPrompts(hasPercentLoad: boolean): { ask: string[]; change: string[] } {
+  return {
+    ask: [
+      "Why this many sets?",
+      "Why this rep range?",
+      "Why this effort (RIR)?",
+      ...(hasPercentLoad ? ["Why this load?"] : []),
+    ],
+    change: [
+      "Add a set",
+      "Remove a set",
+      "Take it closer to failure",
+      "Leave more reps in reserve",
+      ...(hasPercentLoad ? ["Make it heavier", "Make it lighter"] : []),
+    ],
+  };
+}
+
 function describe(p: WeeklyPrescription): string {
   return [`${p.sets} sets`, `${p.reps || "n/a"} reps`, ...(p.load ? [p.load] : []), p.rir || "effort n/a"].join(", ");
 }
@@ -70,6 +107,8 @@ function toHistory(turns: ChatTurn[]): HistoryTurn[] {
 export default function ChatWindow({
   fieldId,
   anchorLabel,
+  anchorHasPercentLoad = false,
+  goal = null,
   onClearAnchor,
   onPrescriptionUpdated,
 }: {
@@ -80,6 +119,10 @@ export default function ChatWindow({
   // a bare id.
   fieldId: number | null;
   anchorLabel: string | null;
+  // For suggested prompts: the anchored value has a %1RM load, and the
+  // selected program's goal (general questions differ by goal).
+  anchorHasPercentLoad?: boolean;
+  goal?: string | null;
   onClearAnchor: () => void;
   // Lets the program view refetch after an adjust changes a stored value.
   onPrescriptionUpdated?: () => void;
@@ -103,10 +146,14 @@ export default function ChatWindow({
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
-    if (!message.trim()) return;
+    await send(message);
+  }
+
+  async function send(text: string) {
+    if (!text.trim() || sending) return;
     setSending(true);
 
-    const sentMessage = message;
+    const sentMessage = text;
     const sentAnchor = fieldId !== null ? (anchorLabel ?? `prescription #${fieldId}`) : null;
     const history = toHistory(turns); // the conversation BEFORE this message
     setTurns((prev) => [...prev, { role: "user", text: sentMessage, anchor: sentAnchor }]);
@@ -223,6 +270,14 @@ export default function ChatWindow({
         })}
       </div>
 
+      <SuggestedPrompts
+        anchored={fieldId !== null}
+        hasPercentLoad={anchorHasPercentLoad}
+        goal={goal}
+        disabled={sending}
+        onPick={send}
+      />
+
       <form onSubmit={handleSend} className="flex gap-2">
         <input
           ref={messageInputRef}
@@ -244,6 +299,44 @@ export default function ChatWindow({
           {sending ? "Sending..." : "Send"}
         </button>
       </form>
+    </div>
+  );
+}
+
+function SuggestedPrompts({
+  anchored,
+  hasPercentLoad,
+  goal,
+  disabled,
+  onPick,
+}: {
+  anchored: boolean;
+  hasPercentLoad: boolean;
+  goal: string | null;
+  disabled: boolean;
+  onPick: (prompt: string) => void;
+}) {
+  const groups: [string, string[]][] = anchored
+    ? Object.entries(anchoredPrompts(hasPercentLoad)).map(([k, v]) => [k === "ask" ? "Ask" : "Change", v])
+    : [["Ask the research", GENERAL_PROMPTS[goal ?? ""] ?? GENERAL_PROMPTS.hypertrophy]];
+  return (
+    <div className="flex flex-col gap-1 text-xs">
+      {groups.map(([label, prompts]) => (
+        <div key={label} className="flex flex-wrap items-center gap-1">
+          <span className="text-zinc-500 mr-1">{label}:</span>
+          {prompts.map((p) => (
+            <button
+              key={p}
+              type="button"
+              disabled={disabled}
+              onClick={() => onPick(p)}
+              className="border rounded-full px-2 py-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
