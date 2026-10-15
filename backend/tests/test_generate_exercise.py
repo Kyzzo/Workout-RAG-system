@@ -84,20 +84,54 @@ def test_hypertrophy_exercise_gets_reps_and_rir_for_its_movement_type_every_week
         assert [c.citation.title for c in wp.rir_citations] == ["paper-rir-1"]
 
 
+def _reps_rule(db_session):
+    citation = models.Citation(title="reps-table-paper", snippet="s", qdrant_point_id="nuzzo-1")
+    db_session.add(citation)
+    db_session.flush()
+    return SimpleNamespace(
+        grounding_note=None,
+        rule_citations=[SimpleNamespace(citation_id=citation.id, verification_status="primary_support")],
+    )
+
+
 @patch("app.routers.generation.verify_citation", return_value="primary_support")
-def test_strength_exercise_also_gets_a_percent_load(_verify, db_session, owner_and_prescription):
+def test_strength_load_is_estimated_from_the_reps_and_rir(_verify, db_session, owner_and_prescription):
+    # Generated separately, reps, load and RIR didn't fit together ("1-5
+    # reps at 80% 1RM, 1-2 RIR" when ~10 reps are possible at 80%). The load
+    # is now where the top rep plus the RIR is the average reps to failure.
     user, prescription = owner_and_prescription
     prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"
     slot = _slot_with_weeks(db_session, prescription, [2])
     slot.is_compound = True
-    fake, _ = _movement_gen(reps="3-5", load="80% 1RM", rir="1-2 RIR")
+    slot.exercise_name = "Barbell Back Squat"
+    fake, calls = _movement_gen(reps="1-5", rir="1-2 RIR")
 
-    with patch("app.routers.generation.generate_for_movement", side_effect=fake):
+    with patch("app.routers.generation.generate_for_movement", side_effect=fake),          patch("app.routers.generation.justify_rule", return_value=_reps_rule(db_session)) as mock_rule:
         result = generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
 
+    assert sorted(c[0] for c in calls) == ["reps", "rir"]  # load isn't generated
+    mock_rule.assert_called_once_with(db_session, "reps_at_percent_1rm")
     weeks = schemas.ExerciseSlotOut.model_validate(result).weekly_prescriptions
-    assert [(wp.reps, wp.load, wp.rir) for wp in weeks] == [("3-5", "80% 1RM", "1-2 RIR")] * 2
-    assert all([c.citation.title for c in wp.load_citations] == ["paper-load-1"] for wp in weeks)
+    # 5 reps + 1.5 RIR = 6.5 reps to failure: ~86.5% 1RM on the main table
+    assert [(wp.reps, wp.load, wp.rir) for wp in weeks] == [("1-5", "86.5% 1RM", "1-2 RIR")] * 2
+    assert all([c.citation.title for c in wp.load_citations] == ["reps-table-paper"] for wp in weeks)
+    assert "starting weight" in weeks[0].load_grounding_note
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+def test_bodyweight_strength_exercise_gets_no_percent_load(_verify, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"
+    slot = prescription.exercise_slot
+    slot.is_compound = True
+    slot.exercise_name = "Pull-Up"
+    fake, _ = _movement_gen(reps="1-5", rir="1-2 RIR")
+
+    with patch("app.routers.generation.generate_for_movement", side_effect=fake),          patch("app.routers.generation.justify_rule", return_value=_reps_rule(db_session)):
+        result = generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
+
+    week = schemas.ExerciseSlotOut.model_validate(result).weekly_prescriptions[0]
+    assert (week.load, week.load_citations) == ("bodyweight", [])
 
 
 @patch("app.routers.generation.verify_citation", return_value="primary_support")

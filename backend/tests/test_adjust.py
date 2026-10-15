@@ -281,3 +281,103 @@ def test_strength_adjustment_stays_on_its_week(mock_route, mock_reps, _verify, d
     db_session.expire_all()
     weeks = db_session.get(models.ExerciseSlot, prescription.exercise_slot_id).weekly_prescriptions
     assert [wp.reps for wp in weeks] == ["5-6", "3-5"]  # strength weeks progress independently
+
+
+# --- Rebalancing: after a strength change to reps, load or RIR leaves the
+# three not fitting, chat offers the two table-calculated ways to fit the
+# others to it; applying one is recalculated server-side.
+
+def _strength_squat(prescription, reps="5", load="86.5% 1RM", rir="1-2 RIR"):
+    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"
+    prescription.exercise_slot.exercise_name = "Barbell Back Squat"
+    prescription.reps, prescription.load, prescription.rir = reps, load, rir
+
+
+@patch("app.routers.generation.verify_citation", return_value="contradicted")
+@patch("app.routers.chat.route_chat_message")
+def test_a_load_change_that_breaks_the_fit_offers_both_rebalances(mock_route, _verify, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    _strength_squat(prescription)
+    mock_route.return_value = _route(prescription, "load", "set_value", "90% 1RM")
+    generate = MagicMock(return_value=(SimpleNamespace(load="90% 1RM", chunk_ids=[], grounding="general_knowledge"), []))
+
+    with _patch_field("load", generate):
+        result = _send(db_session, user, prescription)
+
+    assert result.prescription.load == "90% 1RM"
+    assert "about 5 reps to failure" in result.rebalance.message
+    assert [(o.field, o.value) for o in result.rebalance.options] == [("reps", "3"), ("rir", "~0 RIR")]
+    assert result.prescription.load_fit_note == result.rebalance.message  # visible if kept
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.chat.route_chat_message")
+def test_a_change_that_still_fits_offers_nothing(mock_route, _verify, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    _strength_squat(prescription, load="85% 1RM")
+    mock_route.return_value = _route(prescription, "load", "set_value", "87.5% 1RM")
+    generate = MagicMock(return_value=(SimpleNamespace(load="87.5% 1RM", chunk_ids=["l-1"], grounding="fully_grounded"), _chunks("l-1")))
+
+    with _patch_field("load", generate):
+        result = _send(db_session, user, prescription)
+
+    assert result.rebalance is None  # 87.5%: ~6 reps to failure, 5 reps at 1-2 RIR fits within a rep
+    assert result.prescription.load_fit_note is None
+
+
+def _rule(db_session):
+    citation = models.Citation(title="reps-table-paper", snippet="s", qdrant_point_id="nuzzo-1")
+    db_session.add(citation)
+    db_session.flush()
+    return SimpleNamespace(
+        grounding_note=None,
+        rule_citations=[SimpleNamespace(citation_id=citation.id, verification_status="primary_support")],
+    )
+
+
+def test_applying_a_rebalance_recalculates_it_and_cites_the_table(db_session, owner_and_prescription):
+    from app.routers.generation import rebalance
+    user, prescription = owner_and_prescription
+    _strength_squat(prescription, load="90% 1RM")
+
+    with patch("app.routers.generation.justify_rule", return_value=_rule(db_session)):
+        result = rebalance(
+            prescription_id=prescription.id,
+            request=schemas.RebalanceRequest(changed_field="load", apply_field="reps"),
+            db=db_session, current_user=user,
+        )
+
+    out = schemas.WeeklyPrescriptionOut.model_validate(result)
+    assert (out.reps, out.load, out.rir) == ("3", "90% 1RM", "1-2 RIR")
+    assert [c.citation.title for c in out.reps_citations] == ["reps-table-paper"]
+    assert "Recalculated to fit the load you set" in out.reps_grounding_note
+    assert out.load_fit_note is None
+
+
+def test_rebalancing_values_that_already_fit_is_refused(db_session, owner_and_prescription):
+    from app.routers.generation import rebalance
+    user, prescription = owner_and_prescription
+    _strength_squat(prescription)
+
+    with pytest.raises(HTTPException) as exc_info, patch("app.routers.generation.justify_rule") as mock_rule:
+        rebalance(
+            prescription_id=prescription.id,
+            request=schemas.RebalanceRequest(changed_field="load", apply_field="reps"),
+            db=db_session, current_user=user,
+        )
+    assert exc_info.value.status_code == 409
+    mock_rule.assert_not_called()
+
+
+def test_rebalance_ownership_enforced(db_session, owner_and_prescription, other_user):
+    from app.routers.generation import rebalance
+    _, prescription = owner_and_prescription
+    _strength_squat(prescription, load="90% 1RM")
+
+    with pytest.raises(HTTPException) as exc_info:
+        rebalance(
+            prescription_id=prescription.id,
+            request=schemas.RebalanceRequest(changed_field="load", apply_field="reps"),
+            db=db_session, current_user=other_user,
+        )
+    assert exc_info.value.status_code == 404

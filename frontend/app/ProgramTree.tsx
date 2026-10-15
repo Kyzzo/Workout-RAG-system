@@ -642,6 +642,9 @@ export default function ProgramTree({
                                     </button>
                                   </span>
                                 </div>
+                                {wp.load_fit_note && !isPlaceholder(wp) && (
+                                  <p className="text-amber-600 text-xs">{wp.load_fit_note}</p>
+                                )}
                                 {open && (
                                   <SourcesPanel
                                     heading={open.heading}

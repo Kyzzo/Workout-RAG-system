@@ -146,6 +146,7 @@ class WeeklyPrescriptionOut(BaseModel):
     reps_grounding_note: str | None = None
     load_grounding_note: str | None = None
     rir_grounding_note: str | None = None
+    load_fit_note: str | None = None
     # Supported citations only (primary/contextual) - see
     # models.SUPPORTED_VERIFICATION_STATUSES.
     sets_citations: list["SupportingCitationOut"] = []
@@ -273,11 +274,35 @@ class ChatCitationOut(BaseModel):
     field: Literal["sets", "reps", "load", "rir"] | None = None  # discuss mode only
 
 
+RebalanceField = Literal["reps", "load", "rir"]
+
+
+class RebalanceOption(BaseModel):
+    field: RebalanceField
+    value: str
+    label: str
+
+
+class RebalanceOut(BaseModel):
+    # Offered after a chat change to reps, load or RIR leaves the three not
+    # fitting: the two ways to fit the others to the change (or keep it).
+    prescription_id: int
+    changed_field: RebalanceField
+    message: str
+    options: list[RebalanceOption]
+
+
+class RebalanceRequest(BaseModel):
+    changed_field: RebalanceField
+    apply_field: RebalanceField
+
+
 class ChatResponse(BaseModel):
     mode: Literal["adjust_prescription", "discuss_prescription", "answer_general_question"]
     prescription: WeeklyPrescriptionOut | None = None
     answer: str | None = None
     citations: list[ChatCitationOut] = []
     grounding_note: str | None = None
+    rebalance: RebalanceOut | None = None
 
 

@@ -120,6 +120,18 @@ RULES = {
         categories=("progression",),
         outcome="hypertrophy",
     ),
+    # The basis of app/rep_max.py: strength loads are estimated from the
+    # prescribed reps and RIR, and progression weeks' reps (or a deload's
+    # RIR) from their load.
+    "reps_at_percent_1rm": Rule(
+        claim=(
+            "The number of repetitions that can be completed to failure falls as the load (%1RM) rises - "
+            "on average about 5 repetitions at 90% 1RM and 15 at 70% 1RM - and varies between "
+            "individuals, with a standard deviation of about 2.5 repetitions at 80% 1RM."
+        ),
+        query="Maximal number of repetitions to failure at percentages of the one repetition maximum",
+        categories=("intensity",),
+    ),
     # Shown with the frequency choice for strength programs.
     "strength_frequency": Rule(
         claim=(

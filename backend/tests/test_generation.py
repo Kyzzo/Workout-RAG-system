@@ -18,10 +18,6 @@ def _fake_result(sets, chunk_ids, grounding):
     return SimpleNamespace(sets=sets, chunk_ids=chunk_ids, grounding=grounding)
 
 
-def _fake_intensity_result(load, chunk_ids, grounding):
-    return SimpleNamespace(load=load, chunk_ids=chunk_ids, grounding=grounding)
-
-
 def _fake_chunks(*ids):
     return [{"id": cid, "text": f"excerpt for {cid}", "source": f"paper-{cid}"} for cid in ids]
 
@@ -164,29 +160,22 @@ def test_regenerating_replaces_stale_citations(mock_generate, mock_verify, db_se
 # re-testing retry/messaging branches already covered above for volume,
 # since that logic is identical shared code for both categories.
 
-@patch("app.routers.generation.verify_citation")
 @patch("app.routers.generation.generate_intensity_load")
-def test_generate_intensity_success(mock_generate, mock_verify, db_session, owner_and_prescription):
+def test_gen_load_derives_the_load_from_the_weeks_reps_and_rir(mock_generate, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription
-    mock_generate.return_value = (
-        _fake_intensity_result("70% 1RM", ["chunk-1"], "fully_grounded"),
-        _fake_chunks("chunk-1"),
-    )
-    mock_verify.return_value = "primary_support"
+    prescription.reps, prescription.rir = "3-5", "1-2 RIR"
+    prescription.exercise_slot.exercise_name = "Barbell Back Squat"
+    with patch("app.routers.generation.justify_rule", return_value=_fake_rule(db_session)):
+        result = generate_intensity(prescription_id=prescription.id, db=db_session, current_user=user)
 
-    result = generate_intensity(prescription_id=prescription.id, db=db_session, current_user=user)
-
-    assert result.load == "70% 1RM"
-    assert result.load_grounding_note is None
-    mock_generate.assert_called_once()
-
+    assert result.load == "86.5% 1RM"  # 5 reps + 1.5 RIR = 6.5 reps to failure
+    mock_generate.assert_not_called()  # no separate generation to contradict reps and RIR
     rows = (
         db_session.query(models.PrescriptionCitation)
         .filter(models.PrescriptionCitation.prescription_id == prescription.id)
         .all()
     )
-    assert len(rows) == 1
-    assert rows[0].verification_status == "primary_support"
+    assert [(r.field, r.verification_status) for r in rows] == [("load", "primary_support")]
 
 
 # --- sibling-exercise volume context: the cross-exercise volume-coherence
@@ -272,23 +261,6 @@ def test_generate_volume_passes_sibling_context(mock_generate, mock_verify, db_s
     assert kwargs["sibling_context"] == "- Incline Dumbbell Press: 3 sets"
 
 
-@patch("app.routers.generation.verify_citation")
-@patch("app.routers.generation.generate_intensity_load")
-def test_generate_intensity_never_receives_sibling_context(mock_generate, mock_verify, db_session, owner_and_prescription):
-    # Deliberately scoped to volume only - load doesn't have volume's
-    # additive shared-weekly-budget problem.
-    user, prescription = owner_and_prescription
-    day_template = prescription.exercise_slot.day_template
-    _add_sibling_slot(db_session, day_template, "chest", "Incline Dumbbell Press", week_number=1, sets=3)
-    mock_generate.return_value = (_fake_intensity_result("70% 1RM", [], "general_knowledge"), [])
-    mock_verify.return_value = "unresolved"
-
-    generate_intensity(prescription_id=prescription.id, db=db_session, current_user=user)
-
-    _, kwargs = mock_generate.call_args
-    assert kwargs["sibling_context"] is None
-
-
 @patch("app.rag.verification.judge_citation")
 def test_a_covering_range_never_approves_a_citation_without_the_judge(mock_judge):
     # Regression: 18 weekly quad sets for hypertrophy was approved from Aube
@@ -306,17 +278,15 @@ def test_a_covering_range_never_approves_a_citation_without_the_judge(mock_judge
     mock_judge.assert_called_once()
 
 
-@patch("app.routers.generation.verify_citation")
-@patch("app.routers.generation.generate_intensity_load")
-def test_intensity_ownership_enforced(mock_generate, mock_verify, db_session, owner_and_prescription, other_user):
+@patch("app.routers.generation.justify_rule")
+def test_intensity_ownership_enforced(mock_rule, db_session, owner_and_prescription, other_user):
     _, prescription = owner_and_prescription
-    mock_generate.return_value = (_fake_intensity_result("70% 1RM", [], "general_knowledge"), [])
 
     with pytest.raises(HTTPException) as exc_info:
         generate_intensity(prescription_id=prescription.id, db=db_session, current_user=other_user)
 
     assert exc_info.value.status_code == 404
-    mock_generate.assert_not_called()
+    mock_rule.assert_not_called()
 
 
 # --- progression: goal-gated (strength only). The scheme comes from the
@@ -337,14 +307,24 @@ def _loads_by_week(result):
     return {wp.week_number: wp.load for wp in result.updated_prescriptions}
 
 
+def _weeks(result):
+    return {wp.week_number: (wp.load, wp.reps, wp.rir) for wp in result.updated_prescriptions}
+
+
 def _progress(db_session, user, mesocycle, trained=False, include_deload=False):
+    # The fixture's week 1: 5 reps at 70% 1RM on the bench press; RIR 1-2.
     mesocycle.program.trained = trained
     mesocycle.program.include_deload = include_deload
+    week1 = next(
+        wp for day in mesocycle.day_templates for s in day.exercise_slots for wp in s.weekly_prescriptions
+        if wp.week_number == 1
+    )
+    week1.rir = "1-2 RIR"
     db_session.flush()
     request = schemas.GenerateProgressionRequest(muscle_group="chest")
     with patch("app.routers.generation.justify_rule", return_value=_fake_rule(db_session)) as mock_rule:
         result = generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
-    mock_rule.assert_called_once_with(db_session, "periodization_by_training_status")
+    assert [c.args[1] for c in mock_rule.call_args_list] == ["periodization_by_training_status", "reps_at_percent_1rm"]
     return result
 
 
@@ -368,7 +348,14 @@ def test_untrained_lifter_gets_linear_progression(db_session, strength_owner_and
 
     assert result.scheme.scheme == "linear"
     assert [c.verification_status for c in result.scheme.supporting_citations] == ["primary_support"]
-    assert _loads_by_week(result) == {2: "72.5% 1RM", 3: "75% 1RM", 4: "77.5% 1RM"}  # +2.5%/week, no deload
+    # +2.5%/week, no deload; reps drop as load rises so the sets stay at 1-2
+    # RIR (bench press table: ~12.8 reps to failure at 72.5%, minus 1.5 RIR)
+    assert _weeks(result) == {
+        2: ("72.5% 1RM", "11", "1-2 RIR"), 3: ("75% 1RM", "10", "1-2 RIR"), 4: ("77.5% 1RM", "9", "1-2 RIR"),
+    }
+    week2 = next(wp for wp in result.updated_prescriptions if wp.week_number == 2)
+    assert "Nuzzo et al. 2024" in week2.reps_grounding_note
+    assert [c.verification_status for c in week2.reps_citations] == ["primary_support"]  # the rule's
 
     # week 1's real baseline must be untouched
     db_session.refresh(mesocycle)
@@ -385,8 +372,11 @@ def test_trained_lifter_gets_alternating_heavy_and_light_weeks(db_session, stren
     result = _progress(db_session, user, mesocycle, trained=True)
 
     assert result.scheme.scheme == "undulating"
-    # heavy weeks (1, 3) follow the +2.5%/week trend; light weeks (2, 4) sit 10 points below it
-    assert _loads_by_week(result) == {2: "62.5% 1RM", 3: "75% 1RM", 4: "67.5% 1RM"}
+    # heavy weeks (1, 3) follow the +2.5%/week trend; light weeks (2, 4) sit
+    # 10 points below it, with more reps at the same RIR
+    assert _weeks(result) == {
+        2: ("62.5% 1RM", "16", "1-2 RIR"), 3: ("75% 1RM", "10", "1-2 RIR"), 4: ("67.5% 1RM", "14", "1-2 RIR"),
+    }
     notes = {wp.week_number: wp.load_grounding_note for wp in result.updated_prescriptions}
     assert "convention" in notes[2] and "undulating progression" in notes[2]
     assert "undulating progression scheme" in notes[3]
@@ -397,9 +387,14 @@ def test_deload_week_is_only_added_when_chosen(db_session, strength_owner_and_pr
 
     result = _progress(db_session, user, mesocycle, include_deload=True)
 
-    assert _loads_by_week(result) == {2: "72.5% 1RM", 3: "75% 1RM", 4: "45% 1RM"}  # deload = 60% of peak
+    # deload = 60% of peak with week 1's reps, so its RIR is what changes;
+    # 45% is below the table's lightest row (50%), so the RIR is a floor
+    assert _weeks(result) == {
+        2: ("72.5% 1RM", "11", "1-2 RIR"), 3: ("75% 1RM", "10", "1-2 RIR"), 4: ("45% 1RM", "5", "~22+ RIR"),
+    }
     week4 = next(wp for wp in result.updated_prescriptions if wp.week_number == 4)
     assert "deload" in week4.load_grounding_note
+    assert "Nuzzo et al. 2024" in week4.rir_grounding_note
 
 
 def test_undulating_deload_is_taken_from_the_heavy_peak(db_session, strength_owner_and_prescription):
@@ -519,3 +514,20 @@ def test_frequency_ownership_enforced(mock_generate, mock_verify, db_session, ow
 
     assert exc_info.value.status_code == 404
     mock_generate.assert_not_called()
+
+
+def test_progressed_loads_stop_at_the_top_of_the_reps_table(db_session, strength_owner_and_prescription):
+    user, mesocycle = strength_owner_and_prescription
+    week1 = next(
+        wp for day in mesocycle.day_templates for s in day.exercise_slots for wp in s.weekly_prescriptions
+        if wp.week_number == 1
+    )
+    week1.load = "92.5% 1RM"
+
+    result = _progress(db_session, user, mesocycle)
+
+    weeks = _weeks(result)
+    assert [weeks[w][0] for w in (2, 3, 4)] == ["95% 1RM", "95% 1RM", "95% 1RM"]
+    assert all(int(weeks[w][1]) >= 1 for w in (2, 3, 4))  # never fewer than one rep
+    week4 = next(wp for wp in result.updated_prescriptions if wp.week_number == 4)
+    assert "Capped at 95% 1RM" in week4.load_grounding_note

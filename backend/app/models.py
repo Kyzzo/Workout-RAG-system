@@ -116,6 +116,13 @@ class WeeklyPrescription(Base):
     prescription_citations: Mapped[list["PrescriptionCitation"]] = relationship(back_populates="prescription", cascade="all, delete-orphan")
 
     @property
+    def load_fit_note(self) -> str | None:
+        # Computed on read: says so when this week's reps, load and RIR don't
+        # fit together (app/rep_max.py), whatever changed them.
+        from .rep_max import fit_note
+        return fit_note(self.reps, self.load, self.rir, self.exercise_slot.exercise_name)
+
+    @property
     def sets_citations(self) -> list["PrescriptionCitation"]:
         return _supported(pc for pc in self.prescription_citations if pc.field == "sets")
 

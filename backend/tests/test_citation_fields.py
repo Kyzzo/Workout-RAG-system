@@ -28,24 +28,34 @@ def _citation_fields(db_session, prescription_id):
     return sorted(row.field for row in rows)
 
 
+def _reps_rule(db_session):
+    citation = models.Citation(title="reps-table-paper", snippet="s", qdrant_point_id="nuzzo-1")
+    db_session.add(citation)
+    db_session.flush()
+    return SimpleNamespace(
+        grounding_note=None,
+        rule_citations=[SimpleNamespace(citation_id=citation.id, verification_status="primary_support")],
+    )
+
+
 @patch("app.routers.generation.verify_citation")
-@patch("app.routers.generation.generate_intensity_load")
 @patch("app.routers.generation.generate_volume_sets")
-def test_generating_load_keeps_sets_citations_and_note(mock_sets, mock_load, mock_verify, db_session, owner_and_prescription):
+def test_generating_load_keeps_sets_citations_and_note(mock_sets, mock_verify, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription
+    prescription.reps, prescription.rir = "8-12", "1-2 RIR"
     mock_sets.return_value = (_result(sets=12, chunk_ids=["vol-1"], grounding="fully_grounded"), _chunks("vol-1"))
-    mock_load.return_value = (_result(load="70% 1RM", chunk_ids=[], grounding="general_knowledge"), [])
     mock_verify.return_value = "primary_support"
 
     generate_volume(prescription_id=prescription.id, db=db_session, current_user=user)
-    result = generate_intensity(prescription_id=prescription.id, db=db_session, current_user=user)
+    with patch("app.routers.generation.justify_rule", return_value=_reps_rule(db_session)):
+        result = generate_intensity(prescription_id=prescription.id, db=db_session, current_user=user)
 
     # Before per-field tagging, this second call deleted the sets citation
     # and its caveat replaced the (empty) sets note.
-    assert _citation_fields(db_session, prescription.id) == ["sets"]
+    assert _citation_fields(db_session, prescription.id) == ["load", "sets"]
     assert [c.citation.title for c in result.sets_citations] == ["paper-vol-1"]
     assert result.sets_grounding_note is None
-    assert result.load_grounding_note is not None  # load's own honest caveat
+    assert result.load_grounding_note is not None  # where the estimate came from
 
 
 @patch("app.routers.generation.verify_citation")

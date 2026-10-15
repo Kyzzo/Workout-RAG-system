@@ -7,12 +7,24 @@ import type { WeeklyPrescription } from "./types";
 
 type Citation = { title: string; snippet: string; field: "sets" | "reps" | "load" | "rir" | null };
 
+type RebalanceField = "reps" | "load" | "rir";
+
+// Offered when a change to reps, load or RIR leaves the three not fitting:
+// each option keeps one of the other two and recalculates the last.
+type Rebalance = {
+  prescription_id: number;
+  changed_field: RebalanceField;
+  message: string;
+  options: { field: RebalanceField; value: string; label: string }[];
+};
+
 type ChatResponse = {
   mode: "adjust_prescription" | "discuss_prescription" | "answer_general_question";
   prescription: WeeklyPrescription | null;
   answer: string | null;
   citations: Citation[];
   grounding_note: string | null;
+  rebalance: Rebalance | null;
 };
 
 type ChatTurn =
@@ -137,6 +149,23 @@ export default function ChatWindow({
     }
   }
 
+  // Applies one rebalance option; the server recalculates it from the stored
+  // values. Returns the updated values, or throws with the server's reason.
+  async function applyRebalance(rebalance: Rebalance, field: RebalanceField): Promise<WeeklyPrescription> {
+    const token = await getToken();
+    const res = await fetch(`${API_URL}/weekly-prescriptions/${rebalance.prescription_id}/rebalance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ changed_field: rebalance.changed_field, apply_field: field }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail ?? `Request failed: ${res.status}`);
+    }
+    onPrescriptionUpdated?.();
+    return res.json();
+  }
+
   return (
     <div className="flex flex-col gap-4 w-full h-full">
       {fieldId !== null ? (
@@ -188,7 +217,9 @@ export default function ChatWindow({
               </div>
             );
           }
-          return <ChatTurnResult key={i} response={turn.response} />;
+          return (
+            <ChatTurnResult key={i} response={turn.response} onApplyRebalance={applyRebalance} />
+          );
         })}
       </div>
 
@@ -217,7 +248,13 @@ export default function ChatWindow({
   );
 }
 
-function ChatTurnResult({ response }: { response: ChatResponse }) {
+function ChatTurnResult({
+  response,
+  onApplyRebalance,
+}: {
+  response: ChatResponse;
+  onApplyRebalance: (rebalance: Rebalance, field: RebalanceField) => Promise<WeeklyPrescription>;
+}) {
   if (response.mode === "adjust_prescription" && response.prescription) {
     const p = response.prescription;
     return (
@@ -236,6 +273,7 @@ function ChatTurnResult({ response }: { response: ChatResponse }) {
             Fully supported by cited research.
           </p>
         )}
+        {response.rebalance && <RebalancePrompt rebalance={response.rebalance} onApply={onApplyRebalance} />}
       </div>
     );
   }
@@ -263,6 +301,67 @@ function ChatTurnResult({ response }: { response: ChatResponse }) {
         <p className="text-amber-600 text-xs mt-1">{response.grounding_note}</p>
       )}
       <CitationList citations={response.citations} />
+    </div>
+  );
+}
+
+// "Rebalance?": the change left reps, load and RIR not fitting together, so
+// offer the two table-calculated fixes, or keeping it as is.
+function RebalancePrompt({
+  rebalance,
+  onApply,
+}: {
+  rebalance: Rebalance;
+  onApply: (rebalance: Rebalance, field: RebalanceField) => Promise<WeeklyPrescription>;
+}) {
+  const [state, setState] = useState<
+    { kind: "open" } | { kind: "busy" } | { kind: "done"; text: string } | { kind: "kept" } | { kind: "error"; text: string }
+  >({ kind: "open" });
+
+  async function choose(field: RebalanceField) {
+    setState({ kind: "busy" });
+    try {
+      const updated = await onApply(rebalance, field);
+      setState({ kind: "done", text: describe(updated) });
+    } catch (err) {
+      setState({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return (
+    <div className="mt-2 border-t pt-2 text-xs">
+      <p className="text-amber-600">{rebalance.message}</p>
+      {state.kind === "done" ? (
+        <p className="mt-1 text-green-700 dark:text-green-500">Rebalanced: {state.text}.</p>
+      ) : state.kind === "kept" ? (
+        <p className="mt-1 text-zinc-500">Kept as is.</p>
+      ) : (
+        <>
+          <p className="mt-1 font-medium">Rebalance?</p>
+          <div className="flex flex-wrap gap-2 mt-1">
+            {rebalance.options.map((o) => (
+              <button
+                key={o.field}
+                type="button"
+                disabled={state.kind === "busy"}
+                onClick={() => choose(o.field)}
+                className="border rounded px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-50"
+              >
+                {o.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              disabled={state.kind === "busy"}
+              onClick={() => setState({ kind: "kept" })}
+              className="underline disabled:opacity-50"
+            >
+              Keep as is
+            </button>
+          </div>
+          {state.kind === "error" && <p className="text-red-600 mt-1">{state.text}</p>}
+        </>
+      )}
     </div>
   );
 }

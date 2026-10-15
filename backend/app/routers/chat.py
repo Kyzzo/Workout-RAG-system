@@ -30,6 +30,7 @@ from .generation import (
     _generate_and_persist,
     copy_fields_to_other_weeks,
     field_pipeline,
+    rebalance_for,
 )
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -187,6 +188,8 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
         mode="adjust_prescription",
         prescription=schemas.WeeklyPrescriptionOut.model_validate(updated),
         grounding_note=getattr(updated, f"{decision.target_field}_grounding_note"),
+        # Strength only: hypertrophy has no load to fit reps and RIR to.
+        rebalance=rebalance_for(updated, decision.target_field) if goal == "strength" else None,
     )
 
 

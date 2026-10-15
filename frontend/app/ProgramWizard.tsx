@@ -199,6 +199,14 @@ export default function ProgramWizard({
             ruleKeys={["strength_volume_efficiency_tiers"]}
           />
           <RuleSources
+            text={
+              "Loads: estimated from each exercise's reps and RIR using Nuzzo et al. 2024's table of reps to " +
+              "failure at each %1RM, so they fit together. People differ by about 2.5 reps at 80% 1RM, so treat " +
+              "the % as a starting weight and adjust it until sets end at the prescribed RIR."
+            }
+            ruleKeys={["reps_at_percent_1rm"]}
+          />
+          <RuleSources
             text="Frequency: strength gains rise with how often a lift is trained, with diminishing returns at higher frequencies."
             ruleKeys={["strength_frequency"]}
           />

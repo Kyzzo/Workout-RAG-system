@@ -287,6 +287,20 @@
       "publication": "journal"
     },
     {
+      "source": "nuzzo-etal-2024-reps-at-percent-1rm",
+      "citation": "Nuzzo et al. 2024",
+      "pdf": "lifting_science_dataset_strength/intensity-load/Nuzzo-etal-2024-reps-at-percent-1rm.pdf",
+      "categories": [
+        "intensity"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2024,
+      "publication": "journal",
+      "evidence_note": "measures repetitions to failure at each %1RM, not training outcomes"
+    },
+    {
       "source": "pareja-blanco-etal-2017-velocity-loss",
       "citation": "Pareja-Blanco et al. 2017",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/proximity_to_failure/Pareja-Blanco-etal-2017-velocity-loss.pdf",

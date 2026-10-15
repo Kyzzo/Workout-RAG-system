@@ -66,6 +66,7 @@ CASES = [
     ("rule: deload week", rule("deload_week"), {"coleman-etal-2024-deload"}),
     ("rule: hypertrophy rep progression",
      rule("hypertrophy_rep_progression"), {"plotkin-etal-2022-load-vs-reps-progression"}),
+    ("rule: reps at percent 1RM", rule("reps_at_percent_1rm"), {"nuzzo-etal-2024-reps-at-percent-1rm"}),
     ("rule: strength frequency",
      rule("strength_frequency"), {"pelland-etal-2025", "grgic-etal-2018-frequency-strength-meta"}),
     ("chat: optimal weekly sets for hypertrophy",

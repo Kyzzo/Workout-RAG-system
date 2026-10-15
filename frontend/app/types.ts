@@ -19,6 +19,8 @@ export type WeeklyPrescription = {
   reps_grounding_note: string | null;
   load_grounding_note: string | null;
   rir_grounding_note: string | null;
+  // Set when reps, load and RIR don't fit together (strength %1RM loads).
+  load_fit_note: string | null;
   sets_citations: SupportingCitation[];
   reps_citations: SupportingCitation[];
   load_citations: SupportingCitation[];

@@ -32,6 +32,9 @@ from ..auth import get_current_user
 from ..database import get_db
 from ..citations import get_or_create_citation
 from ..ownership import get_owned_exercise_slot, get_owned_prescription
+from ..rep_max import (
+    MAX_PERCENT, MIN_PERCENT, fit_note, is_bodyweight, rebalance_options, percent_for_reps, reps_to_failure, rir_midpoint, table_name, top_of_range,
+)
 from ..rag.exercise_selection import ExerciseSelectionError, classify_compound, select_additional_exercises
 from ..shared_answers import Answer, GeneratedAnswer, get_or_generate, shared_key
 
@@ -57,6 +60,28 @@ _UNDULATING_LIGHT_WEEK_NOTE = (
 _DELOAD_WEEK_NOTE = (
     "Optional deload week you chose: {percent:g}% of the block's peak load. The deload's size is a "
     "convention, not a cited number."
+)
+_LOAD_ESTIMATE_NOTE = (
+    "Estimated for {reps} reps at {rir} from Nuzzo et al. 2024's table of repetitions to failure at each "
+    "%1RM ({table} table). People differ by about 2.5 reps at 80% 1RM, so use it as a starting weight and "
+    "adjust it until your sets end at the prescribed RIR."
+)
+_BODYWEIGHT_NOTE = "Bodyweight exercise - no %1RM; effort is set by the reps and RIR."
+_NO_LOAD_NOTE = "No load estimate: the reps or RIR for this exercise couldn't be read."
+_PROGRESSION_REPS_NOTE = (
+    "Reps that keep this week's load at the block's {rir}, from Nuzzo et al. 2024's table of repetitions "
+    "to failure at each %1RM - so the load change doesn't change how hard the sets are."
+)
+_DELOAD_RIR_NOTE = (
+    "How far from failure the deload's lighter load leaves the same reps, from Nuzzo et al. 2024's table "
+    "of repetitions to failure at each %1RM."
+)
+_REBALANCED_NOTE = (
+    "Recalculated to fit the {changed} you set, from Nuzzo et al. 2024's table of repetitions to "
+    "failure at each %1RM."
+)
+_LOAD_CAP_NOTE = (
+    " Capped at {cap:g}% 1RM, the heaviest load the repetitions table covers."
 )
 _USER_OVERRIDE_NOTE = "Set by you - the current research corpus doesn't support this specific value."
 _SUPPORTED_STATUSES = models.SUPPORTED_VERIFICATION_STATUSES
@@ -369,8 +394,14 @@ def generate_intensity(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    # The load follows from this week's reps and RIR (app/rep_max.py) rather
+    # than a separate generation, so it can't contradict them.
     prescription = get_owned_prescription(prescription_id, db, current_user)
-    return _generate_and_persist(prescription, db, generate_intensity_load, build_intensity_query, "load")
+    rule = justify_rule(db, "reps_at_percent_1rm")
+    _estimate_load(prescription, prescription.exercise_slot.exercise_name, rule)
+    db.commit()
+    db.refresh(prescription)
+    return prescription
 
 
 def field_pipeline(field: str, exercise_name: str, preference: str = "moderate"):
@@ -416,10 +447,81 @@ def copy_fields_to_other_weeks(
         ]
 
 
+def rebalance_for(prescription: models.WeeklyPrescription, changed: str) -> schemas.RebalanceOut | None:
+    """The ways to fit a strength prescription's other two values to a
+    change in one, or None when they still fit (or can't be checked)."""
+    name = prescription.exercise_slot.exercise_name
+    args = (prescription.reps, prescription.load, prescription.rir, name)
+    options = rebalance_options(changed, *args)
+    if not options:
+        return None
+    return schemas.RebalanceOut(
+        prescription_id=prescription.id, changed_field=changed, message=fit_note(*args),
+        options=[schemas.RebalanceOption(field=f, value=v, label=label) for f, v, label in options],
+    )
+
+
+@router.post("/{prescription_id}/rebalance", response_model=schemas.WeeklyPrescriptionOut)
+def rebalance(
+    prescription_id: int,
+    request: schemas.RebalanceRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    # Applies one of the offered options. Recalculated here from the stored
+    # values, not taken from the browser, so only a value the table gives
+    # for the current prescription can be written.
+    prescription = get_owned_prescription(prescription_id, db, current_user)
+    name = prescription.exercise_slot.exercise_name
+    options = rebalance_options(request.changed_field, prescription.reps, prescription.load, prescription.rir, name)
+    match = next((o for o in options if o[0] == request.apply_field), None)
+    if match is None:
+        raise HTTPException(status_code=409, detail="These values already fit together - nothing to rebalance.")
+    field, value, _ = match
+    rule = justify_rule(db, "reps_at_percent_1rm")
+    _set_from_rule(prescription, field, value, _REBALANCED_NOTE.format(changed=request.changed_field), rule)
+    db.commit()
+    db.refresh(prescription)
+    return prescription
+
+
 def exercise_fields(goal: str) -> tuple[str, ...]:
-    # Hypertrophy prescribes effort (RIR) with no load; strength prescribes
-    # both a %1RM load and an RIR.
-    return ("reps", "load", "rir") if goal == "strength" else ("reps", "rir")
+    # The generated fields. Hypertrophy prescribes effort (RIR) with no load;
+    # strength also gets a %1RM load, derived from these two (_estimate_load)
+    # rather than generated, so the three always fit together.
+    return ("reps", "rir")
+
+
+def _set_from_rule(
+    wp: models.WeeklyPrescription, field: str, value: str, note: str, rule: models.RuleJustification,
+) -> None:
+    # A value calculated by a cited rule: the rule's verified citations back
+    # it (replacing whatever backed the field before), and if the corpus
+    # doesn't support the rule, its note says so.
+    setattr(wp, field, value)
+    setattr(wp, f"{field}_grounding_note", f"{note} {rule.grounding_note}" if rule.grounding_note else note)
+    wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != field] + [
+        models.PrescriptionCitation(
+            citation_id=rc.citation_id, field=field, verification_status=rc.verification_status,
+        )
+        for rc in rule.rule_citations
+    ]
+
+
+def _estimate_load(wp: models.WeeklyPrescription, exercise_name: str, rule: models.RuleJustification) -> None:
+    """A strength exercise's %1RM: where its top rep plus its RIR is the
+    average number of reps to failure (app/rep_max.py)."""
+    reps, rir = top_of_range(wp.reps), rir_midpoint(wp.rir)
+    if is_bodyweight(exercise_name) or reps is None or rir is None:
+        wp.load = "bodyweight" if is_bodyweight(exercise_name) else ""
+        wp.load_grounding_note = _BODYWEIGHT_NOTE if is_bodyweight(exercise_name) else _NO_LOAD_NOTE
+        wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != "load"]
+        return
+    percent = percent_for_reps(reps + rir, exercise_name)
+    note = _LOAD_ESTIMATE_NOTE.format(reps=reps, rir=wp.rir, table=table_name(exercise_name))
+    if reps + rir < reps_to_failure(MAX_PERCENT, exercise_name):
+        note += _LOAD_CAP_NOTE.format(cap=MAX_PERCENT)
+    _set_from_rule(wp, "load", f"{percent:g}% 1RM", note, rule)
 
 
 @exercise_slot_router.post("/{exercise_slot_id}/generate", response_model=schemas.ExerciseSlotOut)
@@ -445,13 +547,18 @@ def generate_exercise(
     program = slot.day_template.mesocycle.program
     fields = exercise_fields(program.goal)
     movement = _movement(slot, db)
-    # Every answer first, then apply: storing a new shared answer commits,
-    # and nothing half-applied should be pending when it does.
+    # Every answer first, then apply: storing a new shared answer (or a
+    # rule's first justification) commits, and nothing half-applied should
+    # be pending when it does.
     answers = {
         field: _exercise_answer(db, field, program.goal, program.volume_preference, movement) for field in fields
     }
+    load_rule = justify_rule(db, "reps_at_percent_1rm") if program.goal == "strength" else None
     for field, answer in answers.items():
         _apply_answer(base, field, answer, slot.muscle_group, program.goal)
+    if load_rule is not None:
+        _estimate_load(base, slot.exercise_name, load_rule)
+        fields += ("load",)
 
     copy_fields_to_other_weeks(base, rest, fields)
 
@@ -628,13 +735,17 @@ _DELOAD_FRACTION_OF_PEAK = 0.6  # standard deload convention: a significant,
 
 def _apply_progression(
     mesocycle: models.Mesocycle, muscle_group: str, scheme: str, include_deload: bool,
+    reps_rule: models.RuleJustification,
 ) -> list[models.WeeklyPrescription]:
     """Writes each week's load from week 1's baseline.
 
     Linear: +2.5% 1RM a week. Undulating (weekly): heavy and light weeks
     alternate - heavy weeks follow the same +2.5%/week trend, light weeks sit
-    10 points below it with the same sets and reps. Either way, an optional
-    deload makes the final week 60% of the block's peak.
+    10 points below it. Loads stop at the top of the reps-to-failure table
+    (95%). Each week's reps are recalculated for its load so the sets stay
+    at week 1's RIR (app/rep_max.py). An optional deload makes the final
+    week 60% of the block's peak with week 1's reps, so its RIR is
+    recalculated instead.
     """
     updated = []
     total_weeks = mesocycle.end_week - mesocycle.start_week + 1
@@ -655,6 +766,7 @@ def _apply_progression(
                 continue  # RPE-based, placeholder, or unparseable - nothing to progress from
 
             baseline_percent = float(match.group(1))
+            top_rep, rir = top_of_range(baseline_wp.reps), rir_midpoint(baseline_wp.rir)
             last_progressive_week = mesocycle.end_week - 1 if has_deload else mesocycle.end_week
             peak_percent = baseline_percent
 
@@ -667,22 +779,36 @@ def _apply_progression(
                 light = scheme == "undulating" and offset % 2 == 1
                 if light:
                     percent -= _LIGHT_WEEK_REDUCTION_PERCENT
+                capped = percent > MAX_PERCENT
+                percent = min(percent, MAX_PERCENT)
                 peak_percent = max(peak_percent, percent)
                 _set_derived_load(wp, f"{percent:g}% 1RM", scheme)
                 if light:
                     wp.load_grounding_note = _UNDULATING_LIGHT_WEEK_NOTE.format(
                         percent=_LIGHT_WEEK_REDUCTION_PERCENT,
                     )
+                if capped:
+                    wp.load_grounding_note += _LOAD_CAP_NOTE.format(cap=MAX_PERCENT)
+                if rir is not None:
+                    reps = max(1, round(reps_to_failure(percent, slot.exercise_name) - rir))
+                    _set_from_rule(wp, "reps", str(reps), _PROGRESSION_REPS_NOTE.format(rir=baseline_wp.rir), reps_rule)
+                    wp.rir = baseline_wp.rir
                 updated.append(wp)
 
             if has_deload:
                 deload_wp = prescriptions_by_week.get(mesocycle.end_week)
                 if deload_wp is not None:
-                    deload_percent = peak_percent * _DELOAD_FRACTION_OF_PEAK
+                    deload_percent = round(peak_percent * _DELOAD_FRACTION_OF_PEAK * 2) / 2
                     _set_derived_load(deload_wp, f"{deload_percent:g}% 1RM", scheme)
                     deload_wp.load_grounding_note = _DELOAD_WEEK_NOTE.format(
                         percent=_DELOAD_FRACTION_OF_PEAK * 100,
                     )
+                    if top_rep is not None:
+                        deload_wp.reps = baseline_wp.reps
+                        deload_rir = max(0, round(reps_to_failure(deload_percent, slot.exercise_name) - top_rep))
+                        # Below the table's lightest row the estimate is a floor.
+                        floor = "+" if deload_percent < MIN_PERCENT else ""
+                        _set_from_rule(deload_wp, "rir", f"~{deload_rir}{floor} RIR", _DELOAD_RIR_NOTE, reps_rule)
                     updated.append(deload_wp)
 
     return updated
@@ -727,6 +853,7 @@ def generate_progression_endpoint(
     # verified rule the wizard shows - not generated per program.
     scheme = "undulating" if program.trained else "linear"
     rule = justify_rule(db, "periodization_by_training_status")
+    reps_rule = justify_rule(db, "reps_at_percent_1rm")
 
     _delete_existing(db, models.ProgressionScheme, mesocycle.id, muscle_group)
 
@@ -745,7 +872,9 @@ def generate_progression_endpoint(
             verification_status=rule_citation.verification_status,
         ))
 
-    updated_prescriptions = _apply_progression(mesocycle, muscle_group, scheme, program.include_deload)
+    updated_prescriptions = _apply_progression(
+        mesocycle, muscle_group, scheme, program.include_deload, reps_rule,
+    )
 
     db.commit()
     db.refresh(scheme_record)
