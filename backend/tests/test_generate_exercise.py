@@ -257,3 +257,27 @@ def test_router_sees_only_recent_history_as_reference_text():
 def test_chat_history_is_capped():
     with pytest.raises(pydantic.ValidationError):
         schemas.ChatMessageRequest(message="m", history=[{"role": "user", "content": "x"}] * 21)
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+def test_strength_accessory_gets_the_trials_8_to_12_reps(_verify, db_session, owner_and_prescription):
+    # Generated, accessories got the main lifts' "1-5" (cited to findings
+    # about heavy loads for main lifts); the strength trials kept accessories
+    # at 8-12 repetition maximums and periodized only the main lifts.
+    user, prescription = owner_and_prescription
+    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"
+    slot = prescription.exercise_slot
+    slot.is_compound = False
+    slot.exercise_name = "Leg Curl"
+    fake, calls = _movement_gen(rir="2-3 RIR")
+
+    with patch("app.routers.generation.generate_for_movement", side_effect=fake), \
+         patch("app.routers.generation.justify_rule", return_value=_reps_rule(db_session)) as mock_rule:
+        result = generate_exercise(exercise_slot_id=slot.id, db=db_session, current_user=user)
+
+    assert [c[0] for c in calls] == ["rir"]  # reps aren't generated for it
+    assert [c.args[1] for c in mock_rule.call_args_list] == ["strength_accessory_reps", "reps_at_percent_1rm"]
+    week = schemas.ExerciseSlotOut.model_validate(result).weekly_prescriptions[0]
+    assert (week.reps, week.rir) == ("8-12", "2-3 RIR")
+    assert week.load == "70.5% 1RM"  # 12 + 2.5 RIR = 14.5 reps to failure on the main table
+    assert "Rhea et al. 2002" in week.reps_grounding_note

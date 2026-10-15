@@ -247,12 +247,22 @@ export default function ProgramWizard({
           ) : (
             <RuleSources
               text={
-                "Progression: linear (load rises 2.5% of 1RM a week - common practice, not a cited number). " +
-                "Undulating periodization's advantage over linear has been seen in trained lifters, not untrained."
+                "Progression: linear. Compound lifts move through phases of 8, then 6, then 4 reps across the " +
+                "block (the linear arms of Rhea et al. 2002 and Buford et al. 2007), each week's load set from " +
+                "its reps and RIR. Undulating periodization's advantage over linear has been seen in trained " +
+                "lifters, not untrained."
               }
-              ruleKeys={["periodization_by_training_status"]}
+              ruleKeys={["periodization_by_training_status", "linear_periodization_protocol"]}
+              secondHeading="The protocol the program follows"
             />
           )}
+          <RuleSources
+            text={
+              "Accessory lifts (single-joint exercises) stay at 8-12 reps every week, as in the strength " +
+              "trials, which periodized only the main lifts."
+            }
+            ruleKeys={["strength_accessory_reps"]}
+          />
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

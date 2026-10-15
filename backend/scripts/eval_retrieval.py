@@ -32,7 +32,7 @@ def field(field_name, query, category, goal):
 
 def rule(key, category=None):
     r = RULES[key]
-    return lambda: G._retrieve_chunks(r.query, category or r.categories[0], r.outcome)
+    return lambda: G._retrieve_chunks(r.query, category or r.categories[0], r.outcome, rerank=r.rerank)
 
 
 # (label, retrieve() -> chunks, papers that should be among them)
@@ -66,6 +66,9 @@ CASES = [
     ("rule: deload week", rule("deload_week"), {"coleman-etal-2024-deload"}),
     ("rule: daily undulating protocol",
      rule("daily_undulating_protocol"), {"rhea-etal-2002-linear-vs-daily-undulating"}),
+    ("rule: linear periodization protocol", rule("linear_periodization_protocol"),
+     {"rhea-etal-2002-linear-vs-daily-undulating", "buford-etal-2007-linear-daily-weekly-undulating"}),
+    ("rule: strength accessory reps", rule("strength_accessory_reps"), {"rhea-etal-2002-linear-vs-daily-undulating"}),
     ("rule: dup rep scheme", rule("dup_rep_scheme"), {"klemp-etal-2016-dup-high-vs-low-reps"}),
     ("rule: dup session order", rule("dup_session_order"), {"zourdos-etal-2016-dup-session-order"}),
     ("rule: weekly undulation not better",

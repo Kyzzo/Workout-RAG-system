@@ -22,6 +22,14 @@ type FrequencyResult = {
   days_added: unknown[];
 };
 
+// "constant": a muscle with only accessory lifts - the trials periodized
+// their main lifts only, so nothing is scheduled.
+function schemeLabel(scheme: string): string {
+  if (scheme === "constant") return "no scheduled progression (accessories only)";
+  if (scheme === "undulating") return "daily undulating progression";
+  return `${scheme} progression`;
+}
+
 type ProgressionResult = {
   scheme: { muscle_group: string; scheme: string; grounding_note: string | null };
   updated_prescriptions: unknown[];
@@ -189,10 +197,7 @@ export default function ProgramTree({
       });
       const updated = result.updated_prescriptions.length;
       return (
-        `${muscleGroup}: ${result.scheme.scheme} progression` +
-        (result.scheme.scheme === "linear"
-          ? ` - applied to ${updated} week${updated === 1 ? "" : "s"} (needs a week-1 load in %1RM to progress from).`
-          : " - no week-by-week loads applied (only linear is applied automatically).") +
+        `${muscleGroup}: ${schemeLabel(result.scheme.scheme)} - ${updated} week value${updated === 1 ? "" : "s"} updated.` +
         (result.scheme.grounding_note ? ` (${result.scheme.grounding_note})` : "")
       );
     });
@@ -409,7 +414,7 @@ export default function ProgramTree({
                           )}
                           {scheme && (
                             <span>
-                              {scheme.scheme} progression
+                              {schemeLabel(scheme.scheme)}
                               <SourcesBadge
                                 citations={scheme.supporting_citations}
                                 note={scheme.grounding_note}
@@ -464,8 +469,10 @@ export default function ProgramTree({
                         {scheme && openSources === schemeKey && (
                           <SourcesPanel
                             heading={
-                              `Why ${scheme.scheme} progression: ` +
-                              (program.trained ? "you've lifted consistently for 1+ year" : "you're newer to lifting")
+                              scheme.scheme === "constant"
+                                ? `Why ${group} has no scheduled progression`
+                                : `Why ${schemeLabel(scheme.scheme)}: ` +
+                                  (program.trained ? "you've lifted consistently for 1+ year" : "you're newer to lifting")
                             }
                             citations={scheme.supporting_citations}
                             note={scheme.grounding_note}

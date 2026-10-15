@@ -325,12 +325,14 @@ def _rerank(question: str, candidates: list[dict]) -> list[dict]:
     return [scored[i] for i in order]
 
 
-def _select(question: str, candidates: list[dict], top_k: int) -> list[dict]:
+def _select(question: str, candidates: list[dict], top_k: int, rerank: bool = True) -> list[dict]:
     """Rerank, then pick: excerpts that bear on the question first (spread
     across papers, max 2 per paper before backfill), and only if that leaves
     room, the best of the rest - so a weak excerpt from another paper never
-    displaces a strong second one from the same paper."""
-    reranked = _rerank(question, _usable(candidates))
+    displaces a strong second one from the same paper. Without reranking
+    (a claim about a trial's protocol, whose evidence is the methods the
+    reranker rightly scores low), similarity order."""
+    reranked = _rerank(question, _usable(candidates)) if rerank else _usable(candidates)
     relevant = [c for c in reranked if c.get("rerank_score", RERANK_MIN_SCORE) >= RERANK_MIN_SCORE]
     chosen = _select_diverse(relevant, top_k)
     if len(chosen) < top_k:
@@ -374,6 +376,7 @@ def search_text(field_name: str, goal: str | None) -> str | None:
 
 def _retrieve_chunks(
     query: str, category: str | None, outcome: str | None = None, search: str | None = None,
+    rerank: bool = True,
 ) -> list[dict]:
     """A generated field's (or rule's) evidence: its category's excerpts
     (category=None searches the whole corpus), limited to papers on the
@@ -393,7 +396,7 @@ def _retrieve_chunks(
     candidates = gather(outcome)
     if outcome is not None and not _enough_papers(candidates):
         candidates = gather(None)
-    return _select(query, candidates, GENERATION_TOP_K)
+    return _select(query, candidates, GENERATION_TOP_K, rerank)
 
 
 def _retrieve_general_chunks(topic: str) -> list[dict]:

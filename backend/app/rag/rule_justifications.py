@@ -26,6 +26,9 @@ class Rule:
     query: str  # how to retrieve candidate evidence for it
     categories: tuple[str, ...]
     outcome: str | None = None  # the outcome the claim is about, if one (retrieval filter)
+    # False for a claim about what a trial did: its evidence is the methods
+    # section, which the reranker (rightly, for findings) scores low.
+    rerank: bool = True
 
 
 RULES = {
@@ -112,6 +115,33 @@ RULES = {
         query="Daily undulating periodization 8, 6 and 4 repetition maximums each week versus linear periodization",
         categories=("progression",),
         outcome="strength",
+    ),
+    # Untrained lifters' strength programs (generation._apply_linear_periodization):
+    # the trials' linear arms.
+    "linear_periodization_protocol": Rule(
+        claim=(
+            "In trials comparing periodization models, linear periodization was programmed as three phases "
+            "of 3 sets of 8, then 6, then 4 repetition maximums, moving to the next phase every three to "
+            "four weeks."
+        ),
+        query="Linear periodization group 3 sets of 8RM then 6RM then 4RM across training weeks",
+        categories=("progression",),
+        outcome="strength",
+    ),
+    # Strength programs' accessory lifts (generation.generate_exercise).
+    "strength_accessory_reps": Rule(
+        claim=(
+            "In a strength trial comparing linear and daily undulating periodization in trained men, the "
+            "accessory exercises (biceps curls and lat pull-downs) were trained at 3 sets of 8-12 repetition "
+            "maximums, while only the bench press and leg press were periodized."
+        ),
+        query=(
+            "Training protocol: besides the periodized leg press and bench press, subjects performed biceps "
+            "curls (3 x 8-12 RM) and lat pull-downs (3 x 8-12 RM)"
+        ),
+        categories=("progression",),
+        outcome="strength",
+        rerank=False,
     ),
     # Shown with it: the exact repetitions within the rotation matter less
     # than the volume (so Rhea's numbers are one tested choice, not the only one).
@@ -209,7 +239,7 @@ def justify_rule(db: Session, key: str, refresh: bool = False) -> models.RuleJus
     # different ids, which would otherwise show up as duplicate excerpts.
     candidates = {}
     for category in rule.categories:
-        for chunk in _retrieve_chunks(rule.query, category, rule.outcome):
+        for chunk in _retrieve_chunks(rule.query, category, rule.outcome, rerank=rule.rerank):
             candidates.setdefault(" ".join(chunk["text"].split()), chunk)
 
     def judge(chunk):

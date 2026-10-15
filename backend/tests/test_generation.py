@@ -327,6 +327,7 @@ def _progress(db_session, user, mesocycle, trained=False, include_deload=False):
     expected = ["periodization_by_training_status", "reps_at_percent_1rm"]
     if trained:
         expected.append("daily_undulating_protocol")
+    expected.append("linear_periodization_protocol")
     assert [c.args[1] for c in mock_rule.call_args_list] == expected
     return result
 
@@ -368,6 +369,7 @@ def _undulate(db_session, user, mesocycle, include_deload=False):
         result = generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
     assert [c.args[1] for c in mock_rule.call_args_list] == [
         "periodization_by_training_status", "reps_at_percent_1rm", "daily_undulating_protocol",
+        "linear_periodization_protocol",
     ]
     return result
 
@@ -400,22 +402,15 @@ def test_untrained_lifter_gets_linear_progression(db_session, strength_owner_and
 
     assert result.scheme.scheme == "linear"
     assert [c.verification_status for c in result.scheme.supporting_citations] == ["primary_support"]
-    # +2.5%/week, no deload; reps drop as load rises so the sets stay at 1-2
-    # RIR (bench press table: ~12.8 reps to failure at 72.5%, minus 1.5 RIR)
+    # Rhea's and Buford's linear arms: phases of 8, 6 and 4 reps - 4 weeks
+    # split 2/1/1 - each load from its reps + 1.5 RIR on the bench press table
     assert _weeks(result) == {
-        2: ("72.5% 1RM", "11", "1-2 RIR"), 3: ("75% 1RM", "10", "1-2 RIR"), 4: ("77.5% 1RM", "9", "1-2 RIR"),
+        1: ("78.5% 1RM", "8", "1-2 RIR"), 2: ("78.5% 1RM", "8", "1-2 RIR"),
+        3: ("82.5% 1RM", "6", "1-2 RIR"), 4: ("86.5% 1RM", "4", "1-2 RIR"),
     }
-    week2 = next(wp for wp in result.updated_prescriptions if wp.week_number == 2)
-    assert "Nuzzo et al. 2024" in week2.reps_grounding_note
-    assert [c.verification_status for c in week2.reps_citations] == ["primary_support"]  # the rule's
-
-    # week 1's real baseline must be untouched
-    db_session.refresh(mesocycle)
-    week1 = next(
-        wp for day in mesocycle.day_templates for s in day.exercise_slots for wp in s.weekly_prescriptions
-        if wp.week_number == 1
-    )
-    assert week1.load == "70% 1RM"
+    week3 = next(wp for wp in result.updated_prescriptions if wp.week_number == 3)
+    assert "Phase 2 of 3" in week3.reps_grounding_note and "as evenly as possible" in week3.reps_grounding_note
+    assert [c.verification_status for c in week3.reps_citations] == ["primary_support"]  # the rule's
 
 
 def test_trained_lifter_gets_rheas_daily_undulation(db_session, strength_owner_and_prescription):
@@ -477,10 +472,11 @@ def test_deload_week_is_only_added_when_chosen(db_session, strength_owner_and_pr
 
     result = _progress(db_session, user, mesocycle, include_deload=True)
 
-    # deload = 60% of peak with week 1's reps, so its RIR is what changes;
-    # 45% is below the table's lightest row (50%), so the RIR is a floor
+    # three progressive weeks, one per phase; the deload keeps the last
+    # phase's reps at 60% of the peak load, so its RIR is what changes
     assert _weeks(result) == {
-        2: ("72.5% 1RM", "11", "1-2 RIR"), 3: ("75% 1RM", "10", "1-2 RIR"), 4: ("45% 1RM", "5", "~22+ RIR"),
+        1: ("78.5% 1RM", "8", "1-2 RIR"), 2: ("82.5% 1RM", "6", "1-2 RIR"),
+        3: ("86.5% 1RM", "4", "1-2 RIR"), 4: ("52% 1RM", "4", "~21 RIR"),
     }
     week4 = next(wp for wp in result.updated_prescriptions if wp.week_number == 4)
     assert "deload" in week4.load_grounding_note
@@ -598,18 +594,28 @@ def test_frequency_ownership_enforced(mock_generate, mock_verify, db_session, ow
     mock_generate.assert_not_called()
 
 
-def test_progressed_loads_stop_at_the_top_of_the_reps_table(db_session, strength_owner_and_prescription):
+def test_a_muscle_with_only_accessories_keeps_its_prescription(db_session, strength_owner_and_prescription):
+    # The smoke test's side delts: only lateral raises, which linear
+    # progression had pushed to 3 reps at 89.5% 1RM. The trials periodized
+    # their main lifts only.
     user, mesocycle = strength_owner_and_prescription
-    week1 = next(
-        wp for day in mesocycle.day_templates for s in day.exercise_slots for wp in s.weekly_prescriptions
-        if wp.week_number == 1
-    )
-    week1.load = "92.5% 1RM"
+    slot = mesocycle.day_templates[0].exercise_slots[0]
+    slot.exercise_name, slot.is_compound = "Dumbbell Lateral Raise", False
 
     result = _progress(db_session, user, mesocycle)
 
-    weeks = _weeks(result)
-    assert [weeks[w][0] for w in (2, 3, 4)] == ["95% 1RM", "95% 1RM", "95% 1RM"]
-    assert all(int(weeks[w][1]) >= 1 for w in (2, 3, 4))  # never fewer than one rep
-    week4 = next(wp for wp in result.updated_prescriptions if wp.week_number == 4)
-    assert "Capped at 95% 1RM" in week4.load_grounding_note
+    assert result.scheme.scheme == "constant"
+    assert "no compound lift" in result.scheme.grounding_note
+    assert result.updated_prescriptions == []
+
+
+def test_undulating_deload_also_lightens_accessories(db_session, strength_owner_and_prescription):
+    user, mesocycle = strength_owner_and_prescription
+    slots = _bench_days(db_session, mesocycle, 3)
+
+    result = _undulate(db_session, user, mesocycle, include_deload=True)
+
+    fly = next(s for s in slots if s.exercise_name == "Cable Fly")
+    fly_weeks = {wp.week_number: wp for wp in result.updated_prescriptions if wp.exercise_slot_id == fly.id}
+    assert list(fly_weeks) == [4]  # only the deload week changes for an accessory
+    assert fly_weeks[4].load == "52% 1RM"  # 60% of its 86.5%

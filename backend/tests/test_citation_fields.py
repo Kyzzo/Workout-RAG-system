@@ -163,6 +163,8 @@ def test_linear_progression_drops_stale_load_citations(mock_rule, db_session, st
     )
     # Week 2 already had a generated, cited load (and a cited sets value)
     # before progression overwrites its load mechanically.
+    for wp in week2.exercise_slot.weekly_prescriptions:
+        wp.rir = "1-2 RIR"
     for field in ("sets", "load"):
         citation = models.Citation(title=f"{field}-paper", snippet="s", qdrant_point_id=f"{field}-1")
         db_session.add(citation)
@@ -177,11 +179,13 @@ def test_linear_progression_drops_stale_load_citations(mock_rule, db_session, st
     generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
 
     db_session.refresh(week2)
-    assert week2.load == "72.5% 1RM"
-    # The old load citations never backed 72.5% - they're gone, the note
-    # says where the number came from, and the sets citation is untouched.
-    assert _citation_fields(db_session, week2.id) == ["sets"]
-    assert "linear progression" in week2.load_grounding_note
+    assert (week2.reps, week2.load) == ("8", "78.5% 1RM")  # linear phase 1 on the bench press table
+    # The old load citations never backed 78.5% - they're replaced by the
+    # reps-table rule's, the note says where the number came from, and the
+    # sets citation is untouched.
+    titles = {pc.field: pc.citation.title for pc in week2.prescription_citations}
+    assert titles["sets"] == "sets-paper" and titles["load"] != "load-paper"
+    assert "Nuzzo et al. 2024" in week2.load_grounding_note
 
 
 @patch("app.routers.chat.route_chat_message")
