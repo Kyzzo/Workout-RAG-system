@@ -120,25 +120,77 @@ def test_direction_not_honored_keeps_value_and_existing_citations(
     assert result.answer.startswith("Kept at 3")
 
 
-@pytest.mark.parametrize("new_load, expected", [
-    ("RPE 8", "RPE 8"),          # different unit: can't call it lower, accepted as a change
-    ("75% 1RM", "70% 1RM"),      # same unit, went UP on a decrease: kept
-    ("65% 1RM", "65% 1RM"),      # same unit, went down: applied
-])
-@patch("app.routers.generation.verify_citation", return_value="primary_support")
+# A strength load in chat is never generated: "heavier"/"lighter" moves one
+# 2.5% 1RM step (then the rebalance prompt offers to fit reps or RIR), and
+# "update it" re-derives it from the reps and RIR via the reps table.
+
+def _strength_load(prescription, load="70% 1RM", name="Barbell Back Squat"):
+    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"
+    prescription.exercise_slot.exercise_name = name
+    prescription.reps, prescription.load, prescription.rir = "5", load, "1-2 RIR"
+
+
 @patch("app.routers.chat.route_chat_message")
-def test_load_direction_only_compared_within_one_unit(
-    mock_route, _verify, new_load, expected, db_session, owner_and_prescription,
-):
-    user, prescription = owner_and_prescription  # load starts at "70% 1RM"
-    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"  # load is strength-only
+def test_lighter_load_moves_one_step_without_generating(mock_route, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    _strength_load(prescription)
     mock_route.return_value = _route(prescription, "load", "decrease")
-    generate = MagicMock(return_value=(SimpleNamespace(load=new_load, chunk_ids=[], grounding="general_knowledge"), []))
+    generate = MagicMock()
 
     with _patch_field("load", generate):
         result = _send(db_session, user, prescription)
 
-    assert result.prescription.load == expected
+    generate.assert_not_called()
+    assert result.prescription.load == "67.5% 1RM"
+    assert result.grounding_note.startswith("Changed by you from 70% 1RM to 67.5% 1RM")
+    # 67.5%: ~16 reps to failure, so 5 reps at 1-2 RIR no longer fits
+    assert [o.field for o in result.rebalance.options] == ["reps", "rir"]
+
+
+@patch("app.routers.chat.route_chat_message")
+def test_heavier_at_the_top_of_the_table_is_kept(mock_route, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    _strength_load(prescription, load="95% 1RM")
+    mock_route.return_value = _route(prescription, "load", "increase")
+
+    result = _send(db_session, user, prescription)
+
+    assert result.prescription.load == "95% 1RM"
+    assert result.answer.startswith("Kept at 95% 1RM")
+    assert result.rebalance is None
+
+
+@patch("app.routers.chat.route_chat_message")
+def test_update_load_rederives_it_from_reps_and_rir(mock_route, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    _strength_load(prescription, load="")  # nothing to move from: derive it
+    mock_route.return_value = _route(prescription, "load", "increase")
+    citation = models.Citation(title="reps-table-paper", snippet="s", qdrant_point_id="nuzzo-1")
+    db_session.add(citation)
+    db_session.flush()
+    rule = SimpleNamespace(
+        grounding_note=None,
+        rule_citations=[SimpleNamespace(citation_id=citation.id, verification_status="primary_support")],
+    )
+
+    with patch("app.routers.generation.justify_rule", return_value=rule):
+        result = _send(db_session, user, prescription)
+
+    assert result.prescription.load == "86.5% 1RM"  # 5 reps + 1.5 RIR on the main table
+    assert "fresh first sets" in result.grounding_note
+    assert result.rebalance is None  # derived from them, so it fits
+
+
+@patch("app.routers.chat.route_chat_message")
+def test_bodyweight_load_change_is_explained(mock_route, db_session, owner_and_prescription):
+    user, prescription = owner_and_prescription
+    _strength_load(prescription, load="bodyweight", name="Pull-Up")
+    mock_route.return_value = _route(prescription, "load", "increase")
+
+    result = _send(db_session, user, prescription)
+
+    assert result.prescription.load == "bodyweight"
+    assert "bodyweight exercise" in result.answer
 
 
 @patch("app.routers.generation.verify_citation", return_value="primary_support")

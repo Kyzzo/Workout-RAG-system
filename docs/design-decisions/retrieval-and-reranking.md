@@ -110,6 +110,23 @@ generator and judge still see the full question, so what counts as an
 answer is unchanged. With it, every affected check passes, including the
 previous miss.
 
+## Same outcome isn't the same question
+
+With 35 papers, the small reranker model started rewarding excerpts that
+shared the question's outcome but not its subject: a muscle-damage study
+scored 10/10 for a question about deload weeks, and a trial's methods
+section ranked above its results. The rubric now says an excerpt must be
+about what the question is about — a finding on a different training
+variable scores 1–3 even for the same outcome — and the reranker is the
+full-size model: on those cases it dropped the damage study to ~2 and put
+the results first, where the small model with the same rubric did not.
+It costs about five times as much per excerpt. To offset that, chat (which
+searches the whole corpus) now takes the best two excerpts from the 15
+best-matching papers rather than three from every paper: 110-120 excerpts
+per question became ~56, about $0.05 a question, with every chat check
+still passing. A generation question reranks ~50 excerpts (~$0.04), paid
+once per shared answer.
+
 ## Cost
 
 A few small-model calls per retrieval (one per batch of 15 candidates, in
@@ -149,7 +166,5 @@ its excerpts. That changes three things:
 - **Thin categories.** Reranking can't conjure evidence that isn't there.
   Rep ranges and progression each rested on one paper until the corpus
   grew to 26; recovery still rests on two.
-- **The reranker is generous.** It sometimes scores a hypertrophy finding
-  highly for a strength question. That's tolerable because the judge, not
-  the reranker, decides what counts as support — reranking only decides
-  what the judge gets to see.
+- **The reranker is still a filter, not a judge.** It decides what the
+  judge gets to see; the judge decides what counts as support.

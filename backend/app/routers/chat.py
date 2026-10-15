@@ -28,6 +28,7 @@ from .generation import (
     _UNSUBSTANTIATED_NOTE,
     AdjustmentNotHonored,
     _generate_and_persist,
+    adjust_strength_load,
     copy_fields_to_other_weeks,
     field_pipeline,
     rebalance_for,
@@ -133,6 +134,21 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
                 "Hypertrophy programs don't prescribe a load - effort is set by RIR (reps in reserve) "
                 'instead. Try e.g. "take it closer to failure" or "make it 1-2 RIR".'
             ),
+        )
+    # A strength load comes from the reps-to-failure table, never a separate
+    # generation that could contradict the reps and RIR; only an exact value
+    # the user names is taken as given (their override).
+    if decision.target_field == "load" and decision.adjustment_kind != "set_value":
+        adjustment = _build_adjustment(decision, prescription, raw_message)  # None: nothing to move from
+        reason = adjust_strength_load(db, prescription, adjustment.kind if adjustment else None)
+        db.commit()
+        db.refresh(prescription)
+        return schemas.ChatResponse(
+            mode="adjust_prescription",
+            prescription=schemas.WeeklyPrescriptionOut.model_validate(prescription),
+            answer=reason,
+            grounding_note=prescription.load_grounding_note,
+            rebalance=None if reason else rebalance_for(prescription, "load"),
         )
     if _ADJUST_FIELDS[decision.target_field] is None:
         generate_fn, query_fn = field_pipeline(

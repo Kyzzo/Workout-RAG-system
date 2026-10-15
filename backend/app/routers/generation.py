@@ -75,7 +75,8 @@ _DELOAD_WEEK_NOTE = (
 _LOAD_ESTIMATE_NOTE = (
     "Estimated for {reps} reps at {rir} from Nuzzo et al. 2024's table of repetitions to failure at each "
     "%1RM ({table} table). People differ by about 2.5 reps at 80% 1RM, so use it as a starting weight and "
-    "adjust it until your sets end at the prescribed RIR."
+    "adjust it until your sets end at the prescribed RIR. The table comes from fresh first sets: with "
+    "several sets at the same weight, later sets will end closer to failure."
 )
 _BODYWEIGHT_NOTE = "Bodyweight exercise - no %1RM; effort is set by the reps and RIR."
 _NO_LOAD_NOTE = "No load estimate: the reps or RIR for this exercise couldn't be read."
@@ -90,6 +91,10 @@ _DELOAD_RIR_NOTE = (
 _REBALANCED_NOTE = (
     "Recalculated to fit the {changed} you set, from Nuzzo et al. 2024's table of repetitions to "
     "failure at each %1RM."
+)
+_LOAD_STEP_PERCENT = 2.5  # a chat "heavier"/"lighter": one step of 1RM - a convention
+_LOAD_STEPPED_NOTE = (
+    "Changed by you from {old} to {new} ({step:g}% 1RM step - common practice, not a cited number)."
 )
 _LOAD_CAP_NOTE = (
     " Capped at {cap:g}% 1RM, the heaviest load the repetitions table covers."
@@ -470,6 +475,34 @@ def rebalance_for(prescription: models.WeeklyPrescription, changed: str) -> sche
         prescription_id=prescription.id, changed_field=changed, message=fit_note(*args),
         options=[schemas.RebalanceOption(field=f, value=v, label=label) for f, v, label in options],
     )
+
+
+def adjust_strength_load(
+    db: Session, prescription: models.WeeklyPrescription, kind: str | None,
+) -> str | None:
+    """A chat change to a strength load, without generating one: re-derived
+    from the reps and RIR (kind None, "update it from the research"), or
+    moved one step ("increase"/"decrease"; the rebalance prompt then offers to
+    fit the reps or RIR). Returns a reason when nothing could be changed."""
+    name = prescription.exercise_slot.exercise_name
+    if is_bodyweight(name):
+        return "This is a bodyweight exercise, so it has no %1RM load - change the reps or RIR instead."
+    if kind is None:
+        _estimate_load(prescription, name, justify_rule(db, "reps_at_percent_1rm"))
+        return None
+    current = parse_percent(prescription.load)
+    if current is None:
+        return "There's no %1RM load here to move - ask to update it from the research first."
+    step = _LOAD_STEP_PERCENT if kind == "increase" else -_LOAD_STEP_PERCENT
+    new = min(max(current + step, MIN_PERCENT), MAX_PERCENT)
+    if new == current:
+        bound = "heaviest" if kind == "increase" else "lightest"
+        return f"Kept at {prescription.load} - that's the {bound} load the repetitions table covers."
+    old = prescription.load
+    prescription.load = f"{new:g}% 1RM"
+    prescription.load_grounding_note = _LOAD_STEPPED_NOTE.format(old=old, new=prescription.load, step=abs(step))
+    prescription.prescription_citations = [pc for pc in prescription.prescription_citations if pc.field != "load"]
+    return None
 
 
 @router.post("/{prescription_id}/rebalance", response_model=schemas.WeeklyPrescriptionOut)

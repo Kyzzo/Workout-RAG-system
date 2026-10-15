@@ -188,18 +188,17 @@ def test_linear_progression_drops_stale_load_citations(mock_rule, db_session, st
 @patch("app.routers.chat._generate_and_persist")
 def test_chat_adjust_returns_the_target_fields_note(mock_persist, mock_route, db_session, owner_and_prescription):
     user, prescription = owner_and_prescription
-    prescription.exercise_slot.day_template.mesocycle.program.goal = "strength"  # load is strength-only
     prescription.sets_grounding_note = "sets caveat"
     prescription.load_grounding_note = "load caveat"
     mock_persist.return_value = prescription
     mock_route.return_value = SimpleNamespace(
-        tool="adjust_prescription", field_id=prescription.id, target_field="load",
+        tool="adjust_prescription", field_id=prescription.id, target_field="sets",
         adjustment_kind="regenerate", requested_value=None,
         requested_change=None, question=None, topic=None,
     )
 
     result = send_chat_message(
-        request=schemas.ChatMessageRequest(message="update my load"), db=db_session, current_user=user
+        request=schemas.ChatMessageRequest(message="update my sets"), db=db_session, current_user=user
     )
 
-    assert result.grounding_note == "load caveat"
+    assert result.grounding_note == "sets caveat"

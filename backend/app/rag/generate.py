@@ -120,12 +120,18 @@ def _build_response_schema(
 GENERATION_TOP_K = 10
 GENERATION_CANDIDATES = 40
 GENERAL_TOP_K = 15
-GENERAL_CANDIDATES = 60
+GENERAL_CANDIDATES = 40
 # Plus the best few chunks from EACH paper, so a paper whose wording is far
 # from the question still reaches the reranker (the RIR meta-analyses never
 # made a top-40 dominated by three papers).
 CANDIDATES_PER_PAPER = 3
 MAX_PAPERS = 40
+# Chat searches the whole corpus, so taking 3 from every paper sent 110-120
+# excerpts to the reranker - most from papers unrelated to the question, and
+# ~$0.10 a question once the reranker became the full-size model. Papers are
+# taken in order of their best match, so the 15 most relevant still all get in.
+GENERAL_CANDIDATES_PER_PAPER = 2
+GENERAL_MAX_PAPERS = 15
 # Per paper before backfilling. Without a cap one paper fills most slots
 # (weekly volume got 3 of 5 excerpts from one 8-week study and none from the
 # Pelland 2025 meta-analysis); but it's a preference, not a limit, since a
@@ -245,7 +251,12 @@ def _select_diverse(ranked: list[dict], top_k: int, max_per_paper: int = MAX_CHU
 # (model, reasoning effort). gpt-4o-mini scored a directly relevant finding
 # ('no significant difference between failure and non-failure') as 0;
 # gpt-4.1-mini scored it 6 in ~2.5s (gpt-5-mini similar but 4-15s).
-RERANK_MODEL = ("gpt-4.1-mini", None)
+# gpt-4.1, not -mini: -mini scored a muscle-damage study 10/10 for a deload
+# question (same outcome, different variable) and ranked Zourdos 2016's
+# methods above its results. On those cases gpt-4.1 with the "must be about
+# what the question is about" rule fixed both; gpt-5-mini (minimal) did not.
+# About 5x the cost of -mini - a few cents per retrieval.
+RERANK_MODEL = ("gpt-4.1", None)
 RERANK_MIN_SCORE = 4  # below: same topic but no finding that bears on the question
 _RERANK_PROMPT = (
     "You rank research excerpts by how well they answer a question, for a system that cites them as "
@@ -257,7 +268,10 @@ _RERANK_PROMPT = (
     "how many words it shares with the question - a statistical result can answer the question "
     "directly. Each excerpt is labeled with its paper, study type, outcome and population: when "
     "excerpts answer about equally well, score meta-analyses above single studies and reviews, and "
-    "findings for the question's outcome and population above others. Score every excerpt once."
+    "findings for the question's outcome and population above others. The excerpt must be about what "
+    "the question is about: a finding on a different training variable or intervention (e.g. muscle "
+    "damage when the question is about deload weeks) scores 1-3 even if it reports the same outcome. "
+    "Score every excerpt once."
 )
 
 
@@ -400,7 +414,8 @@ def _retrieve_general_chunks(topic: str) -> list[dict]:
         whole_corpus = _build_filter(None, outcome_filter)
         ranked += storage.search(query_vector, top_k=GENERAL_CANDIDATES, query_filter=whole_corpus)
         ranked += storage.search_per_source(
-            query_vector, per_source=CANDIDATES_PER_PAPER, sources=MAX_PAPERS, query_filter=whole_corpus,
+            query_vector, per_source=GENERAL_CANDIDATES_PER_PAPER, sources=GENERAL_MAX_PAPERS,
+            query_filter=whole_corpus,
         )
         return ranked
 
