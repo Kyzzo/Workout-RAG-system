@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .citations import get_or_create_citation
 
-ANSWER_VERSION = "2026-10-15d"  # d: summary judge at minimal effort, checking each figure's unit
+ANSWER_VERSION = "2026-10-15e"  # e: statement judge at minimal effort, checking each detail of prose claims
 
 
 @dataclass

@@ -73,6 +73,6 @@ def checked_summary(label: str, excerpt: str, attempts: int = 2) -> str | None:
             summary = write_summary(label, excerpt)
         except Exception:
             continue
-        if verify_citation(_QUESTION, summary, evidence, judge=STATEMENT_JUDGE) == "primary_support":
+        if verify_citation(_QUESTION, summary, evidence, judge=STATEMENT_JUDGE, prose=True) == "primary_support":
             return summary
     return None

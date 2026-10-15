@@ -247,7 +247,7 @@ def justify_rule(db: Session, key: str, refresh: bool = False) -> models.RuleJus
         # its candidates are judged in parallel, since a first request (or a
         # fresh database) runs this pass while the user waits.
         try:
-            return judge_citation(rule.query, rule.claim, evidence_text(chunk), judge=STATEMENT_JUDGE).outcome
+            return judge_citation(rule.query, rule.claim, evidence_text(chunk), judge=STATEMENT_JUDGE, prose=True).outcome
         except Exception:
             return "unresolved"
 

@@ -40,7 +40,7 @@ from types import SimpleNamespace
 from app.rag import verification
 from app.rag.corpus import evidence_text, paper
 from app.rag.generate import VOLUME_BANDS, build_reps_query, build_rir_query, build_volume_query
-from app.rag.verification import STATEMENT_JUDGE, Judge, judge_citation
+from app.rag.verification import Judge, judge_citation
 
 EXCERPTS = json.loads((Path(__file__).parent / "eval_fixtures" / "judge_excerpts.json").read_text(encoding="utf-8"))
 SUPPORTED = {"primary_support", "contextual_support"}
@@ -142,6 +142,21 @@ JUDGE_CASES = [
     JudgeCase("theory presented as fact", "schoenfeld_continuum_intro", "What rep range is best for hypertrophy?",
               "8 to 12 repetitions per set at 60% to 80% of 1RM is optimal for muscle hypertrophy.",
               "statement", "rejected", "the view's claim stated as a finding"),
+    # Study details: a live chat answer put Aube 2022 'over 9 weeks' in
+    # 'highly trained males' and was accepted as direct support. The
+    # excerpt says an 8-week block in subjects who squat over twice their
+    # body mass, sex not stated.
+    JudgeCase("faithful study details", "aube_conclusion", CHAT_QUESTION,
+              "Over an 8-week block, 12 to 24 weekly sets produced similar lower-body muscle growth in "
+              "resistance-trained individuals who could squat more than twice their body mass.",
+              "statement", "supported", "length and population as the excerpt states them"),
+    JudgeCase("wrong study length", "aube_conclusion", CHAT_QUESTION,
+              "Over 9 weeks, 12 to 24 weekly sets produced similar lower-body muscle growth in "
+              "resistance-trained individuals who could squat more than twice their body mass.",
+              "statement", "rejected", "the excerpt says an 8-week block"),
+    JudgeCase("population not stated", "aube_conclusion", CHAT_QUESTION,
+              "In highly trained men, 12 to 24 weekly sets produced similar lower-body muscle growth over "
+              "an 8-week block.", "statement", "rejected", "the excerpt never says the subjects were men"),
 ]
 
 @dataclass(frozen=True)
@@ -234,17 +249,22 @@ GENERATION_CASES = [
 
 
 def _run_judge_case(case: JudgeCase) -> tuple[bool, str]:
-    # Read at call time, so --generation-judge (which swaps it module-wide,
-    # generation cases included) applies here too.
-    judge = STATEMENT_JUDGE if case.judge == "statement" else verification.GENERATION_JUDGE
+    # Read at call time, so --generation-judge and --statement-judge (which
+    # swap them module-wide) apply here too. Statements are prose, judged
+    # detail by detail as the app judges them.
+    statement = case.judge == "statement"
+    judge = verification.STATEMENT_JUDGE if statement else verification.GENERATION_JUDGE
+    start = time.perf_counter()
     try:
-        verdict = judge_citation(case.question, case.answer, EXCERPTS[case.excerpt]["text"], judge=judge)
+        verdict = judge_citation(case.question, case.answer, EXCERPTS[case.excerpt]["text"], judge=judge,
+                                 prose=statement)
     except Exception as e:  # an error is a failed run, not a crash of the whole check
         return False, f"error: {type(e).__name__}"
+    detail = f"{verdict.outcome} {time.perf_counter() - start:.1f}s"
     if case.expect == "not_direct":
-        return verdict.outcome != "primary_support", verdict.outcome
+        return verdict.outcome != "primary_support", detail
     supported = verdict.outcome in SUPPORTED
-    return supported == (case.expect == "supported"), verdict.outcome
+    return supported == (case.expect == "supported"), detail
 
 
 def _run_summary_case(case: SummaryCase) -> tuple[bool, str]:
@@ -334,6 +354,10 @@ def main():
         help="try a different judge for generated values, e.g. gpt-5-mini:low (default: the app's)",
     )
     parser.add_argument(
+        "--statement-judge", metavar="MODEL[:EFFORT]",
+        help="try a different judge for prose statements, e.g. gpt-5:minimal (default: the app's)",
+    )
+    parser.add_argument(
         "--summary-judge", metavar="MODEL[:EFFORT]",
         help="try a different judge for chat's lead summary, e.g. gpt-5:minimal (default: the app's)",
     )
@@ -345,6 +369,9 @@ def main():
     if args.generation_judge:
         model, _, effort = args.generation_judge.partition(":")
         verification.GENERATION_JUDGE = Judge(model, effort or None)
+    if args.statement_judge:
+        model, _, effort = args.statement_judge.partition(":")
+        verification.STATEMENT_JUDGE = Judge(model, effort or None)
     if args.summary_judge:
         model, _, effort = args.summary_judge.partition(":")
         verification.SUMMARY_JUDGE = Judge(model, effort or None)
@@ -365,7 +392,7 @@ def main():
         return 0
 
     logging.disable(logging.INFO)
-    print(f"judges: statement={STATEMENT_JUDGE}, generation={verification.GENERATION_JUDGE}, "
+    print(f"judges: statement={verification.STATEMENT_JUDGE}, generation={verification.GENERATION_JUDGE}, "
           f"summary={verification.SUMMARY_JUDGE}; {args.repeats} runs per case")
     ok = True
     judge_cases = [c for c in JUDGE_CASES if args.judge_cases in ("all", c.judge)]

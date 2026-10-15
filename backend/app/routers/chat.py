@@ -444,7 +444,7 @@ def _verify_statements(question: str, parsed, sources: dict[str, dict]):
 
     def judge(pair):
         text, source = pair
-        return verify_citation(question, text, evidence_text(source), judge=STATEMENT_JUDGE)
+        return verify_citation(question, text, evidence_text(source), judge=STATEMENT_JUDGE, prose=True)
 
     summary = getattr(parsed, "summary", None)
     summary_sources = (

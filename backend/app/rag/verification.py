@@ -23,6 +23,43 @@ class JudgeVerdict(pydantic.BaseModel):
     outcome: Literal["primary_support", "contextual_support", "contradicted"]
 
 
+class DetailCheck(pydantic.BaseModel):
+    detail: str
+    excerpt_says: str
+    matches: bool
+
+
+class StatementVerdict(pydantic.BaseModel):
+    # For prose (chat statements, rule claims, citation summaries): every
+    # specific detail is set beside the excerpt before the verdict. A chat
+    # statement put Aube 2022's 8-week study in 'highly trained males' 'over
+    # 9 weeks' (the paper: 'resistance-trained individuals') and was accepted
+    # as direct support - the gist matched, the details were never compared.
+    asserts: str
+    kind: ExcerptKind
+    details: list[DetailCheck]
+    outcome: Literal["primary_support", "contextual_support", "contradicted"]
+
+
+_DETAILS_INSTRUCTIONS = """
+
+The answer here is prose, so before the `outcome`, list in `details` every \
+specific detail it states: each number or range with its unit, study length, \
+who was studied (training status, sex, age), the outcome (hypertrophy or \
+strength), the muscle or exercise, named studies, and how strong the claim is \
+(its wording, e.g. 'optimal', 'an upper limit', 'may', 'similar', 'no \
+detectable superiority'). For each, write what \
+the excerpt or its Source label says about it (`excerpt_says`), or 'not \
+stated', and whether they match (`matches`). A detail matches only if the \
+excerpt states the same thing: a narrower or different group than the excerpt \
+names ('men' where it says 'individuals', 'trained' where it says 'mixed'), \
+a different number, or a stronger claim ('an upper limit' or 'optimal' where \
+it says 'no detectable superiority beyond X'; 'better' where it says \
+'similar') does not match. A detail that conflicts with the excerpt, \
+or that neither the excerpt nor its Source label states, makes the answer \
+contradicted - however well the rest matches."""
+
+
 _JUDGE_SYSTEM_PROMPT = f"""You are verifying whether a specific research excerpt \
 supports a specific generated answer. You will be given a question, a generated \
 answer (a number, a range, or a specific category/recommendation), and one \
@@ -142,16 +179,23 @@ class Judge(NamedTuple):
 GENERATION_JUDGE = Judge("gpt-5", reasoning_effort="low")
 # Changing a judge or its prompt? Run scripts/eval_judge.py first, and bump
 # shared_answers.ANSWER_VERSION so stored answers are re-judged.
-# Low, not default (medium), effort since Oct 15, 2026, measured with the
-# structured verdict (asserts/kind before outcome) and the theory-vs-finding
-# rule: 76/76 on the known-trap cases, including 10/10 'hedged ceiling',
-# which medium failed 1 in 3. Against stored rule verdicts it agreed on
-# 158/175: 6 differences come from the theory rule, 11 (~6%) are borderline
-# related-evidence calls in both directions, and none is a false 'states
-# this directly'. Median check 4.0s vs 9.0s, $0.0045 vs $0.0098.
-# Not measured at low: the citation-summary check (citation_summaries.py) -
-# the eval has no case for it.
-STATEMENT_JUDGE = Judge("gpt-5", reasoning_effort="low")
+# Minimal effort, judging prose with StatementVerdict's details list (prose=
+# True), since Oct 15, 2026. Measured on the 15 statement cases, 5 runs each
+# (scripts/eval_judge.py --judge-cases statement):
+#   low, no details list:     hedged ceiling 4/5, wrong study length 1/5,
+#                             population not stated 0/5; 4.8s, $0.0048 a check
+#   minimal + details list:   5/5, 4/5, 0/5; 4.5s, $0.0047 a check
+#   low + details list:       5/5, 5/5, 5/5; 19.3s, $0.0090 a check
+# All other cases passed 5/5 in each. Minimal + the list is at least as
+# accurate as low without it on every case, at the same speed and cost; low
+# + the list closes every case but is ~4x slower per check (~25s more per
+# chat answer). Open: 'men' read as matching 'individuals' (the writer is
+# told to use the excerpt's own words for who was studied). Before this:
+# low, not default (medium), effort - 76/76 on the trap cases vs medium's
+# 'hedged ceiling' 1-in-3 miss, median 4.0s vs 9.0s.
+# Not measured: the citation-summary check (citation_summaries.py) - the
+# eval has no case for it.
+STATEMENT_JUDGE = Judge("gpt-5", reasoning_effort="minimal")
 # Chat's lead summary, judged against all of its excerpts at once - at low
 # effort the slowest check in an answer (11.4s of a 24.6s answer, Oct 15,
 # 2026), which set how long judging took. Minimal effort since Oct 15, 2026,
@@ -165,22 +209,31 @@ STATEMENT_JUDGE = Judge("gpt-5", reasoning_effort="low")
 SUMMARY_JUDGE = Judge("gpt-5", reasoning_effort="minimal")
 
 
-def judge_citation(query: str, value: int | str, chunk_text: str, judge: Judge | None = None) -> JudgeVerdict:
+def judge_citation(
+    query: str, value: int | str, chunk_text: str, judge: Judge | None = None, prose: bool = False,
+) -> JudgeVerdict | StatementVerdict:
+    """`prose`: the answer is a sentence (chat statement, rule claim,
+    citation summary), so its details are checked one by one
+    (StatementVerdict). Generated values are bare numbers and keep
+    JudgeVerdict."""
     judge = judge or GENERATION_JUDGE  # looked up per call, so it can be swapped (scripts/eval_judge.py)
     # gpt-5 is a reasoning model, which rejects a temperature setting
     options = {"reasoning_effort": judge.reasoning_effort} if judge.reasoning_effort else {}
+    # The details instructions go after the shared prompt, so both kinds of
+    # call keep the same cacheable prefix.
+    system = _JUDGE_SYSTEM_PROMPT + (_DETAILS_INSTRUCTIONS if prose else "")
     completion = client.chat.completions.parse(
         model=judge.model,
         **options,
         messages=[
-            {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
+            {"role": "system", "content": system},
             {
                 "role": "user",
                 "content": f"Question: {query}\nGenerated answer: {value}\n\n"
                 f"Cited excerpt:\n{chunk_text}",
             },
         ],
-        response_format=JudgeVerdict,
+        response_format=StatementVerdict if prose else JudgeVerdict,
     )
     message = completion.choices[0].message
     if message.refusal:
@@ -269,7 +322,9 @@ def verify_summary(question: str, summary: str, excerpts: list[str], judge: Judg
         return False
 
 
-def verify_citation(query: str, value: int | str, chunk_text: str, judge: Judge | None = None) -> str:
+def verify_citation(
+    query: str, value: int | str, chunk_text: str, judge: Judge | None = None, prose: bool = False,
+) -> str:
     # Every citation goes to the judge. An accept-only range check used to
     # approve a value without it whenever the excerpt contained a sets range
     # covering the value - which skips every qualifier check: it approved 18
@@ -277,6 +332,6 @@ def verify_citation(query: str, value: int | str, chunk_text: str, judge: Judge 
     # while the judge rejected the citation, since Aube's 18 is a strength
     # (squat 1RM) finding. Removed Oct 4, 2026.
     try:
-        return judge_citation(query, value, chunk_text, judge=judge).outcome
+        return judge_citation(query, value, chunk_text, judge=judge, prose=prose).outcome
     except Exception:
         return "unresolved"
