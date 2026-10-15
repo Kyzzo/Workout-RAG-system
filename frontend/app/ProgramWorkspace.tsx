@@ -117,7 +117,7 @@ function Workspace() {
     const name = await dialogs.prompt({
       title: "Rename program",
       label: "Name",
-      defaultValue: target.name ?? "",
+      defaultValue: programTitle(target),
       placeholder: "e.g. Summer strength block",
     });
     if (name === null || !name.trim()) return;
@@ -213,8 +213,7 @@ function Workspace() {
           <>
             <header className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
-                <p className="eyebrow">Program #{program.id}</p>
-                <div className="mt-1 flex items-center gap-1">
+                <div className="flex items-center gap-1">
                   <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
                     {programTitle(program)}
                   </h1>

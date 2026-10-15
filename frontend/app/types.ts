@@ -100,15 +100,15 @@ export type ProgramSummary = {
   name?: string | null;
 };
 
-// The program's name, or "Strength program" / "Hypertrophy program" when
-// unnamed - the same title the program view shows.
+// The program's name, or "Program #22" until it's renamed (like a new
+// playlist's default name) - the same title the program view shows.
 export function programTitle(p: ProgramSummary): string {
-  return p.name || `${p.goal.charAt(0).toUpperCase()}${p.goal.slice(1)} program`;
+  return p.name || `Program #${p.id}`;
 }
 
-// "#22 · Summer cut" - the title with its number, for the program list.
+// "Summer cut (strength)" - the title and goal, for the program list.
 export function programLabel(p: ProgramSummary): string {
-  return `#${p.id} · ${programTitle(p)}`;
+  return `${programTitle(p)} (${p.goal})`;
 }
 
 export type VolumePreference = "minimal" | "moderate" | "high";
