@@ -13,14 +13,23 @@ load_dotenv()
 QDRANT_URL = os.environ["QDRANT_URL"]
 QDRANT_API_KEY = os.environ["QDRANT_API_KEY"]
 
+# Which deployment this is. Local and production have separate Postgres
+# databases (each numbering users from 1) but share this Qdrant cluster, so
+# anything per-user stored here is tagged with the environment and the
+# user's Clerk ID - never the Postgres user id, which means a different
+# person in each environment. Railway sets RAILWAY_ENVIRONMENT_NAME.
+ENVIRONMENT = os.getenv("RAILWAY_ENVIRONMENT_NAME", "local")
+
 # Qdrant Cloud's strict mode refuses to filter on a payload field at all
 # unless it has an index — each collection needs the fields its retrieval
 # filtering actually depends on: "literature" filters by research
 # categories, outcome, paper (source) and section (to leave bibliographies
-# out); "user_context" will filter by user_id (the privacy boundary).
+# out); "user_context" (users' own documents) by environment + owner (the
+# privacy boundary: owner is the Clerk user id) and document (to delete
+# one document's excerpts).
 REQUIRED_PAYLOAD_INDEXES = {
     "literature": ("categories", "outcome", "source", "section"),
-    "user_context": ("user_id",),
+    "user_context": ("environment", "owner", "document_id"),
 }
 
 # Paper-level tags stored on every excerpt (corpus/papers.json), plus the

@@ -108,7 +108,9 @@ PHASE 6 — Chat interface + remaining product surface  <- CURRENT PHASE
 4. Conversational Q&A mode — retrieval + citation, no structured-output
    step — DONE, with claim-level citations verified per claim
 5. User document upload -> user_context collection, user_id-filtered
-   retrieval — not started
+   retrieval — DEFERRED (future expansion, Oct 14 2026): designed but cut
+   for cost. Full design and cost model in notes/v2_considerations.txt,
+   "USER DOCUMENT UPLOAD".
 6. (added) Manual structure builder — DONE: list programs, add block /
    day / exercise from the UI (placeholder prescriptions auto-created per
    week), per-field generate buttons, delete program / day / exercise (cascades, with
