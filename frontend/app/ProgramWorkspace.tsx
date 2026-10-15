@@ -6,7 +6,7 @@ import { DialogProvider, useDialogs } from "./Dialogs";
 import { Pencil, Plus, Trash } from "./Icons";
 import ProgramTree from "./ProgramTree";
 import ProgramWizard from "./ProgramWizard";
-import { programLabel, volumeLabel, type Program, type ProgramSummary, type WeeklyPrescription } from "./types";
+import { programLabel, programTitle, volumeLabel, type Program, type ProgramSummary, type WeeklyPrescription } from "./types";
 import { Menu, Notice, Skeleton } from "./ui";
 import { useApi } from "./useApi";
 
@@ -214,9 +214,21 @@ function Workspace() {
             <header className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <p className="eyebrow">Program #{program.id}</p>
-                <h1 className="mt-1 truncate text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
-                  {program.name || `${program.goal === "strength" ? "Strength" : "Hypertrophy"} program`}
-                </h1>
+                <div className="mt-1 flex items-center gap-1">
+                  <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
+                    {programTitle(program)}
+                  </h1>
+                  <button
+                    type="button"
+                    onClick={handleRename}
+                    disabled={wizardRunning}
+                    className="icon-btn"
+                    aria-label="Rename program"
+                    title="Rename program"
+                  >
+                    <Pencil className="size-4" />
+                  </button>
+                </div>
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   <span className="chip border-transparent bg-accent-soft font-medium capitalize text-accent-text">
                     {program.goal}

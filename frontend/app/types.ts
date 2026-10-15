@@ -100,9 +100,15 @@ export type ProgramSummary = {
   name?: string | null;
 };
 
-// "#22 Summer cut (strength)" or "#22 - strength" when unnamed.
+// The program's name, or "Strength program" / "Hypertrophy program" when
+// unnamed - the same title the program view shows.
+export function programTitle(p: ProgramSummary): string {
+  return p.name || `${p.goal.charAt(0).toUpperCase()}${p.goal.slice(1)} program`;
+}
+
+// "#22 · Summer cut" - the title with its number, for the program list.
 export function programLabel(p: ProgramSummary): string {
-  return p.name ? `#${p.id} ${p.name} (${p.goal})` : `#${p.id} - ${p.goal}`;
+  return `#${p.id} · ${programTitle(p)}`;
 }
 
 export type VolumePreference = "minimal" | "moderate" | "high";
