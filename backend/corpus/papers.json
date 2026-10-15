@@ -15,6 +15,63 @@
       "publication": "journal"
     },
     {
+      "source": "apel-etal-2011-linear-vs-weekly-undulating",
+      "citation": "Apel et al. 2011",
+      "pdf": "lifting_science_dataset_strength/progression/Apel-etal-2011-linear-vs-weekly-undulating.pdf",
+      "categories": [
+        "progression"
+      ],
+      "study_type": "randomized-trial",
+      "outcome": "strength",
+      "population": "trained",
+      "year": 2011,
+      "publication": "journal",
+      "evidence_note": "42 recreationally active men with 6-11 months of lifting, 12 weeks; 10RM tested",
+      "text_fixes": [
+        {
+          "find": "/C211",
+          "replace": "©",
+          "min_count": 1
+        },
+        {
+          "find": "\\s?/C1 wk21",
+          "replace": "·wk⁻¹",
+          "regex": true,
+          "min_count": 44
+        },
+        {
+          "find": "\\bp # (?=0\\.\\d)",
+          "replace": "p ≤ ",
+          "regex": true,
+          "min_count": 28
+        },
+        {
+          "find": "(?<=\\d) 6 (?=\\d+\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 9
+        },
+        {
+          "find": "(?<=\\d–\\d\\d) 3 (?=\\d\\b)|(?<=\\d–\\d) 3 (?=\\d\\b)",
+          "replace": " × ",
+          "regex": true,
+          "min_count": 207
+        },
+        {
+          "find": "\\s?/C1 (\\w+?)21",
+          "replace": "·\\1⁻¹",
+          "regex": true,
+          "min_count": 11
+        },
+        {
+          "find": "\\s?/C1 \\.wk21",
+          "replace": "·wk⁻¹",
+          "regex": true,
+          "min_count": 1
+        }
+      ]
+    },
+    {
       "source": "aube-etal-2022-volume",
       "citation": "Aube et al. 2022",
       "pdf": "lifting_science_dataset_hypertrophy/volume/Aube et al. 2022.pdf",
@@ -26,6 +83,83 @@
       "population": "trained",
       "year": 2022,
       "publication": "journal"
+    },
+    {
+      "source": "buford-etal-2007-linear-daily-weekly-undulating",
+      "citation": "Buford et al. 2007",
+      "pdf": "lifting_science_dataset_strength/progression/Buford-etal-2007-linear-daily-weekly-undulating.pdf",
+      "categories": [
+        "progression"
+      ],
+      "study_type": "randomized-trial",
+      "outcome": "strength",
+      "population": "untrained",
+      "year": 2007,
+      "publication": "journal",
+      "evidence_note": "28 recreational lifters, detrained (no training in the prior 2 months), 9 weeks",
+      "text_fixes": [
+        {
+          "find": "/H11006",
+          "replace": "± ",
+          "min_count": 79
+        },
+        {
+          "find": "/H11005",
+          "replace": "= ",
+          "min_count": 49
+        },
+        {
+          "find": "/H11003",
+          "replace": "× ",
+          "min_count": 18
+        },
+        {
+          "find": "/H11021",
+          "replace": "< ",
+          "min_count": 10
+        },
+        {
+          "find": "/H11022",
+          "replace": "> ",
+          "min_count": 2
+        },
+        {
+          "find": "/H11002",
+          "replace": "−",
+          "min_count": 2
+        },
+        {
+          "find": "/H11625",
+          "replace": "^",
+          "min_count": 2
+        },
+        {
+          "find": "/H17015",
+          "replace": "© ",
+          "min_count": 1
+        },
+        {
+          "find": "/H92572",
+          "replace": "η²",
+          "min_count": 1
+        },
+        {
+          "find": "/H14062",
+          "replace": "_",
+          "min_count": 1
+        },
+        {
+          "find": "/H9257\\s2",
+          "replace": "η²",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "/H9004",
+          "replace": "Δ ",
+          "min_count": 2
+        }
+      ]
     },
     {
       "source": "coleman-etal-2024-deload",
@@ -231,6 +365,32 @@
         {
           "find": "6.1 6 0.6",
           "replace": "6.1 ± 0.6"
+        }
+      ]
+    },
+    {
+      "source": "klemp-etal-2016-dup-high-vs-low-reps",
+      "citation": "Klemp et al. 2016",
+      "pdf": "lifting_science_dataset_strength/progression/Klemp-etal-2016-dup-high-vs-low-reps.pdf",
+      "categories": [
+        "progression"
+      ],
+      "study_type": "randomized-trial",
+      "outcome": "both",
+      "population": "trained",
+      "year": 2016,
+      "publication": "journal",
+      "evidence_note": "16 resistance-trained men (2+ years of lifting), 8 weeks",
+      "text_fixes": [
+        {
+          "find": "/H9004",
+          "replace": "Δ",
+          "min_count": 8
+        },
+        {
+          "find": "/H11011",
+          "replace": "~",
+          "min_count": 3
         }
       ]
     },
@@ -459,6 +619,83 @@
       ]
     },
     {
+      "source": "rhea-etal-2002-linear-vs-daily-undulating",
+      "citation": "Rhea et al. 2002",
+      "pdf": "lifting_science_dataset_strength/progression/Rhea-etal-2002-linear-vs-daily-undulating.pdf",
+      "categories": [
+        "progression"
+      ],
+      "study_type": "randomized-trial",
+      "outcome": "strength",
+      "population": "trained",
+      "year": 2002,
+      "publication": "journal",
+      "evidence_note": "20 recreationally trained men (2+ years of lifting), 12 weeks",
+      "text_fixes": [
+        {
+          "find": "®",
+          "replace": "fi",
+          "min_count": 36
+        },
+        {
+          "find": " ̄",
+          "replace": "fl",
+          "min_count": 1
+        },
+        {
+          "find": "±",
+          "replace": "–",
+          "min_count": 43
+        },
+        {
+          "find": " ́week21",
+          "replace": "·week⁻¹",
+          "min_count": 1
+        },
+        {
+          "find": "\\b(n|age|R|p) 5 (?=\\d)",
+          "replace": "\\1 = ",
+          "regex": true,
+          "min_count": 6
+        },
+        {
+          "find": "\\b(LP|DUP|RM|P) 5 (?=[a-z])",
+          "replace": "\\1 = ",
+          "regex": true,
+          "min_count": 7
+        },
+        {
+          "find": "\\bp \\. (?=0\\.\\d)",
+          "replace": "p > ",
+          "regex": true,
+          "min_count": 2
+        },
+        {
+          "find": "\\bp # (?=0\\.\\d)",
+          "replace": "p ≤ ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\bp , (?=0\\.\\d)",
+          "replace": "p < ",
+          "regex": true,
+          "min_count": 4
+        },
+        {
+          "find": "(?<=\\d) 6 (?=\\d+\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 2
+        },
+        {
+          "find": "(3 3 8",
+          "replace": "(3 × 8",
+          "min_count": 1
+        }
+      ]
+    },
+    {
       "source": "robinson-etal-2024-proximity-to-failure",
       "citation": "Robinson et al. 2024",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/proximity_to_failure/Exploring the Dose–Response Relationship Between Estimated.pdf",
@@ -566,6 +803,57 @@
       "population": "mixed",
       "year": 2026,
       "publication": "journal"
+    },
+    {
+      "source": "zourdos-etal-2016-dup-session-order",
+      "citation": "Zourdos et al. 2016",
+      "pdf": "lifting_science_dataset_strength/progression/Zourdos-etal-2016-dup-session-order.pdf",
+      "categories": [
+        "progression"
+      ],
+      "study_type": "randomized-trial",
+      "outcome": "strength",
+      "population": "trained",
+      "year": 2016,
+      "publication": "journal",
+      "evidence_note": "18 collegiate powerlifters, 6 weeks",
+      "text_fixes": [
+        {
+          "find": "/C211",
+          "replace": "©",
+          "min_count": 1
+        },
+        {
+          "find": "\\bp \\. (?=0\\.\\d)",
+          "replace": "p > ",
+          "regex": true,
+          "min_count": 9
+        },
+        {
+          "find": "\\bp # (?=0\\.\\d)",
+          "replace": "p ≤ ",
+          "regex": true,
+          "min_count": 8
+        },
+        {
+          "find": "\\bp , (?=0\\.\\d)",
+          "replace": "p < ",
+          "regex": true,
+          "min_count": 8
+        },
+        {
+          "find": "(?<=\\d) 6 (?=\\d+\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 16
+        },
+        {
+          "find": "(?<=\\d) 6 (?=\\d{1,3},\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 5
+        }
+      ]
     }
   ]
 }

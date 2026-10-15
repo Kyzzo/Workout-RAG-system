@@ -324,8 +324,60 @@ def _progress(db_session, user, mesocycle, trained=False, include_deload=False):
     request = schemas.GenerateProgressionRequest(muscle_group="chest")
     with patch("app.routers.generation.justify_rule", return_value=_fake_rule(db_session)) as mock_rule:
         result = generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
-    assert [c.args[1] for c in mock_rule.call_args_list] == ["periodization_by_training_status", "reps_at_percent_1rm"]
+    expected = ["periodization_by_training_status", "reps_at_percent_1rm"]
+    if trained:
+        expected.append("daily_undulating_protocol")
+    assert [c.args[1] for c in mock_rule.call_args_list] == expected
     return result
+
+
+def _bench_days(db_session, mesocycle, days):
+    # The block's chest work for a trained lifter: Barbell Bench Press on each
+    # of `days` days (compound), plus a Cable Fly (isolation) on the first;
+    # week 1 as generated: 1-5 reps at 1-2 RIR, a derived 86.5% load.
+    mesocycle.program.trained = True
+    for day in list(mesocycle.day_templates):
+        db_session.delete(day)
+    db_session.flush()
+    slots = []
+    for order in range(1, days + 1):
+        day = models.DayTemplate(mesocycle_id=mesocycle.id, name=f"Day {order}", order=order)
+        db_session.add(day)
+        db_session.flush()
+        names = [("Barbell Bench Press", True)] + ([("Cable Fly", False)] if order == 1 else [])
+        for i, (name, compound) in enumerate(names, start=1):
+            slot = models.ExerciseSlot(
+                day_template_id=day.id, exercise_name=name, muscle_group="chest", is_compound=compound, order=i,
+            )
+            slot.weekly_prescriptions = [
+                models.WeeklyPrescription(week_number=w, sets=3, reps="1-5", load="86.5% 1RM", rir="1-2 RIR")
+                for w in range(1, 5)
+            ]
+            db_session.add(slot)
+            slots.append(slot)
+    db_session.flush()
+    db_session.expire(mesocycle)
+    return slots
+
+
+def _undulate(db_session, user, mesocycle, include_deload=False):
+    mesocycle.program.include_deload = include_deload
+    db_session.flush()
+    request = schemas.GenerateProgressionRequest(muscle_group="chest")
+    with patch("app.routers.generation.justify_rule", return_value=_fake_rule(db_session)) as mock_rule:
+        result = generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
+    assert [c.args[1] for c in mock_rule.call_args_list] == [
+        "periodization_by_training_status", "reps_at_percent_1rm", "daily_undulating_protocol",
+    ]
+    return result
+
+
+def _by_day(result, slots):
+    # (reps, load, rir) per bench slot (day order), each as {week: ...}
+    by_slot = {}
+    for wp in result.updated_prescriptions:
+        by_slot.setdefault(wp.exercise_slot_id, {})[wp.week_number] = (wp.reps, wp.load, wp.rir)
+    return [by_slot.get(s.id) for s in slots if s.exercise_name == "Barbell Bench Press"]
 
 
 @patch("app.routers.generation.justify_rule")
@@ -366,20 +418,58 @@ def test_untrained_lifter_gets_linear_progression(db_session, strength_owner_and
     assert week1.load == "70% 1RM"
 
 
-def test_trained_lifter_gets_alternating_heavy_and_light_weeks(db_session, strength_owner_and_prescription):
+def test_trained_lifter_gets_rheas_daily_undulation(db_session, strength_owner_and_prescription):
+    # Rhea et al. 2002: each week's three sessions at 8, 6 and 4 reps,
+    # heaviest last. Each day's load comes from its reps + the RIR on the
+    # bench press table (9.5 / 7.5 / 5.5 reps to failure); every week the same.
     user, mesocycle = strength_owner_and_prescription
+    slots = _bench_days(db_session, mesocycle, 3)
 
-    result = _progress(db_session, user, mesocycle, trained=True)
+    result = _undulate(db_session, user, mesocycle)
 
     assert result.scheme.scheme == "undulating"
-    # heavy weeks (1, 3) follow the +2.5%/week trend; light weeks (2, 4) sit
-    # 10 points below it, with more reps at the same RIR
-    assert _weeks(result) == {
-        2: ("62.5% 1RM", "16", "1-2 RIR"), 3: ("75% 1RM", "10", "1-2 RIR"), 4: ("67.5% 1RM", "14", "1-2 RIR"),
-    }
-    notes = {wp.week_number: wp.load_grounding_note for wp in result.updated_prescriptions}
-    assert "convention" in notes[2] and "undulating progression" in notes[2]
-    assert "undulating progression scheme" in notes[3]
+    days = _by_day(result, slots)
+    for day, (reps, load) in zip(days, [("8", "78.5% 1RM"), ("6", "82.5% 1RM"), ("4", "86.5% 1RM")]):
+        assert day == {w: (reps, load, "1-2 RIR") for w in range(1, 5)}
+    fly = next(s for s in slots if s.exercise_name == "Cable Fly")
+    assert all(wp.reps == "1-5" for wp in fly.weekly_prescriptions)  # accessories don't undulate
+    day1_week1 = next(wp for wp in result.updated_prescriptions if wp.exercise_slot_id == slots[0].id)
+    assert "Rhea et al. 2002" in day1_week1.reps_grounding_note
+    assert "starting weight" in day1_week1.load_grounding_note
+
+
+def test_two_sessions_use_the_ends_of_the_rotation(db_session, strength_owner_and_prescription):
+    user, mesocycle = strength_owner_and_prescription
+    slots = _bench_days(db_session, mesocycle, 2)
+
+    result = _undulate(db_session, user, mesocycle)
+
+    assert [day[1][0] for day in _by_day(result, slots)] == ["8", "4"]
+    note = next(wp for wp in result.updated_prescriptions if wp.exercise_slot_id == slots[0].id).reps_grounding_note
+    assert "adapted" in note and "convention" in note
+
+
+def test_one_session_a_week_falls_back_to_linear(db_session, strength_owner_and_prescription):
+    user, mesocycle = strength_owner_and_prescription
+    _bench_days(db_session, mesocycle, 1)
+
+    result = _undulate(db_session, user, mesocycle)
+
+    assert result.scheme.scheme == "linear"
+    assert "at least two days a week" in result.scheme.grounding_note
+
+
+def test_undulating_deload_lightens_each_day(db_session, strength_owner_and_prescription):
+    user, mesocycle = strength_owner_and_prescription
+    slots = _bench_days(db_session, mesocycle, 3)
+
+    result = _undulate(db_session, user, mesocycle, include_deload=True)
+
+    days = _by_day(result, slots)
+    # week 4: 60% of each day's load, same reps, RIR recalculated
+    assert [day[4][:2] for day in days] == [("8", "47% 1RM"), ("6", "49.5% 1RM"), ("4", "52% 1RM")]
+    assert days[2][4][2] == "~21 RIR"  # 52%: ~25.5 reps to failure on the bench press, minus 4 reps
+    assert days[0][3] == ("8", "78.5% 1RM", "1-2 RIR")  # earlier weeks unchanged
 
 
 def test_deload_week_is_only_added_when_chosen(db_session, strength_owner_and_prescription):
@@ -395,14 +485,6 @@ def test_deload_week_is_only_added_when_chosen(db_session, strength_owner_and_pr
     week4 = next(wp for wp in result.updated_prescriptions if wp.week_number == 4)
     assert "deload" in week4.load_grounding_note
     assert "Nuzzo et al. 2024" in week4.rir_grounding_note
-
-
-def test_undulating_deload_is_taken_from_the_heavy_peak(db_session, strength_owner_and_prescription):
-    user, mesocycle = strength_owner_and_prescription
-
-    result = _progress(db_session, user, mesocycle, trained=True, include_deload=True)
-
-    assert _loads_by_week(result) == {2: "62.5% 1RM", 3: "75% 1RM", 4: "45% 1RM"}
 
 
 def test_progression_shows_the_rule_note_when_unsupported(db_session, strength_owner_and_prescription):

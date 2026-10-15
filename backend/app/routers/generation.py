@@ -33,7 +33,8 @@ from ..database import get_db
 from ..citations import get_or_create_citation
 from ..ownership import get_owned_exercise_slot, get_owned_prescription
 from ..rep_max import (
-    MAX_PERCENT, MIN_PERCENT, fit_note, is_bodyweight, rebalance_options, percent_for_reps, reps_to_failure, rir_midpoint, table_name, top_of_range,
+    MAX_PERCENT, MIN_PERCENT, fit_note, is_bodyweight, parse_percent, percent_for_reps,
+    rebalance_options, reps_to_failure, rir_midpoint, table_name, top_of_range,
 )
 from ..rag.exercise_selection import ExerciseSelectionError, classify_compound, select_additional_exercises
 from ..shared_answers import Answer, GeneratedAnswer, get_or_generate, shared_key
@@ -52,10 +53,20 @@ _PROGRESSION_DERIVED_NOTE = (
     "Calculated from week 1's load by the block's {scheme} progression scheme "
     "- the scheme is cited, this specific week's number is not."
 )
-_UNDULATING_LIGHT_WEEK_NOTE = (
-    "A lighter week in the block's undulating progression: the research supports undulating over "
-    "linear periodization for trained lifters, but this week-to-week heavy/light pattern and the "
-    "{percent:g}-point lighter load are a convention, not a cited number."
+_DUP_REPS_NOTE = (
+    "Session {position} of {sessions} this week for this lift: {reps} reps, from Rhea et al. 2002's daily "
+    "undulating protocol (8, 6 and 4 repetitions across the week's three sessions, heaviest last)."
+)
+_DUP_ADAPTED_NOTE = (
+    " Rhea tested three sessions a week; with {sessions}, the rotation is adapted (the first and last "
+    "of its days for two, repeated for more) - a convention."
+)
+_DUP_WEEKLY_NOTE = (
+    " The same reps and RIR every week: as you get stronger, the weight that hits them rises "
+    "(Rhea's lifters trained at repetition maximums)."
+)
+_DUP_NOT_POSSIBLE_NOTE = (
+    "Linear progression: daily undulation needs this muscle's compound lifts on at least two days a week."
 )
 _DELOAD_WEEK_NOTE = (
     "Optional deload week you chose: {percent:g}% of the block's peak load. The deload's size is a "
@@ -725,48 +736,55 @@ def generate_frequency_endpoint(
 
 
 _LOAD_PERCENT_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*%")
-_WEEKLY_INCREMENT_PERCENT = 2.5  # a standard, uncontroversial convention -
+_WEEKLY_INCREMENT_PERCENT = 2.5  # linear progression: a standard convention,
 # not itself a research claim needing its own citation
-_LIGHT_WEEK_REDUCTION_PERCENT = 10  # convention: an undulating light week's
-# load, this many points of 1RM below the heavy-week trend
 _DELOAD_FRACTION_OF_PEAK = 0.6  # standard deload convention: a significant,
 # clearly-below-peak reduction in the block's final week
 
+# Daily undulation for trained lifters: Rhea et al. 2002's protocol - each
+# week's three sessions for a lift at 8, 6 and 4 repetitions, heaviest last
+# (it beat changing the reps every 4 weeks in trained men). Only compound
+# lifts undulate, as only Rhea's main lifts did; accessories stayed at 8-12.
+_DUP_ROTATION = (8, 6, 4)
 
-def _apply_progression(
-    mesocycle: models.Mesocycle, muscle_group: str, scheme: str, include_deload: bool,
+
+def _dup_reps_by_session(sessions: int) -> list[int] | None:
+    """Reps for each of a muscle's weekly sessions, in day order. Three
+    sessions is Rhea's protocol; two use its first and last day (8 and 4); four or
+    more repeat the rotation (both adaptations, said so in the note). One
+    session a week can't undulate daily: None."""
+    if sessions < 2:
+        return None
+    if sessions == 2:
+        return [_DUP_ROTATION[0], _DUP_ROTATION[-1]]
+    return [_DUP_ROTATION[i % len(_DUP_ROTATION)] for i in range(sessions)]
+
+
+def _apply_linear_progression(
+    mesocycle: models.Mesocycle, muscle_group: str, include_deload: bool,
     reps_rule: models.RuleJustification,
 ) -> list[models.WeeklyPrescription]:
-    """Writes each week's load from week 1's baseline.
-
-    Linear: +2.5% 1RM a week. Undulating (weekly): heavy and light weeks
-    alternate - heavy weeks follow the same +2.5%/week trend, light weeks sit
-    10 points below it. Loads stop at the top of the reps-to-failure table
-    (95%). Each week's reps are recalculated for its load so the sets stay
-    at week 1's RIR (app/rep_max.py). An optional deload makes the final
-    week 60% of the block's peak with week 1's reps, so its RIR is
-    recalculated instead.
-    """
+    """Linear (untrained lifters): +2.5% 1RM a week from week 1's load,
+    stopping at the top of the reps-to-failure table (95%). Each week's reps
+    are recalculated for its load so the sets stay at week 1's RIR
+    (app/rep_max.py)."""
     updated = []
-    total_weeks = mesocycle.end_week - mesocycle.start_week + 1
-    has_deload = include_deload and total_weeks >= 3  # too short a block for
-    # progression AND a separate deload week to both make sense
+    has_deload = include_deload and _block_weeks(mesocycle) >= 3
 
     for day in mesocycle.day_templates:
         for slot in day.exercise_slots:
             if slot.muscle_group != muscle_group:
                 continue
-
             prescriptions_by_week = {wp.week_number: wp for wp in slot.weekly_prescriptions}
             baseline_wp = prescriptions_by_week.get(mesocycle.start_week)
             if baseline_wp is None:
                 continue
             match = _LOAD_PERCENT_PATTERN.match(baseline_wp.load.strip())
             if not match:
-                continue  # RPE-based, placeholder, or unparseable - nothing to progress from
+                continue  # bodyweight, placeholder, or unparseable - nothing to progress from
 
             baseline_percent = float(match.group(1))
-            top_rep, rir = top_of_range(baseline_wp.reps), rir_midpoint(baseline_wp.rir)
+            rir = rir_midpoint(baseline_wp.rir)
             last_progressive_week = mesocycle.end_week - 1 if has_deload else mesocycle.end_week
             peak_percent = baseline_percent
 
@@ -774,19 +792,11 @@ def _apply_progression(
                 wp = prescriptions_by_week.get(week)
                 if wp is None:
                     continue
-                offset = week - mesocycle.start_week
-                percent = baseline_percent + offset * _WEEKLY_INCREMENT_PERCENT
-                light = scheme == "undulating" and offset % 2 == 1
-                if light:
-                    percent -= _LIGHT_WEEK_REDUCTION_PERCENT
+                percent = baseline_percent + (week - mesocycle.start_week) * _WEEKLY_INCREMENT_PERCENT
                 capped = percent > MAX_PERCENT
                 percent = min(percent, MAX_PERCENT)
                 peak_percent = max(peak_percent, percent)
-                _set_derived_load(wp, f"{percent:g}% 1RM", scheme)
-                if light:
-                    wp.load_grounding_note = _UNDULATING_LIGHT_WEEK_NOTE.format(
-                        percent=_LIGHT_WEEK_REDUCTION_PERCENT,
-                    )
+                _set_derived_load(wp, f"{percent:g}% 1RM", "linear")
                 if capped:
                     wp.load_grounding_note += _LOAD_CAP_NOTE.format(cap=MAX_PERCENT)
                 if rir is not None:
@@ -798,20 +808,94 @@ def _apply_progression(
             if has_deload:
                 deload_wp = prescriptions_by_week.get(mesocycle.end_week)
                 if deload_wp is not None:
-                    deload_percent = round(peak_percent * _DELOAD_FRACTION_OF_PEAK * 2) / 2
-                    _set_derived_load(deload_wp, f"{deload_percent:g}% 1RM", scheme)
-                    deload_wp.load_grounding_note = _DELOAD_WEEK_NOTE.format(
-                        percent=_DELOAD_FRACTION_OF_PEAK * 100,
-                    )
-                    if top_rep is not None:
-                        deload_wp.reps = baseline_wp.reps
-                        deload_rir = max(0, round(reps_to_failure(deload_percent, slot.exercise_name) - top_rep))
-                        # Below the table's lightest row the estimate is a floor.
-                        floor = "+" if deload_percent < MIN_PERCENT else ""
-                        _set_from_rule(deload_wp, "rir", f"~{deload_rir}{floor} RIR", _DELOAD_RIR_NOTE, reps_rule)
+                    _apply_deload(deload_wp, baseline_wp.reps, peak_percent, slot.exercise_name, reps_rule)
                     updated.append(deload_wp)
 
     return updated
+
+
+def _block_weeks(mesocycle: models.Mesocycle) -> int:
+    # Too short a block (< 3 weeks) for progression AND a separate deload.
+    return mesocycle.end_week - mesocycle.start_week + 1
+
+
+def _apply_deload(
+    wp: models.WeeklyPrescription, reps: str, peak_percent: float, exercise_name: str,
+    reps_rule: models.RuleJustification,
+) -> None:
+    # The optional final week: 60% of the peak load with the same reps, so
+    # its RIR is what changes (below the table's lightest row, a floor).
+    deload_percent = round(peak_percent * _DELOAD_FRACTION_OF_PEAK * 2) / 2
+    wp.load = f"{deload_percent:g}% 1RM"
+    wp.load_grounding_note = _DELOAD_WEEK_NOTE.format(percent=_DELOAD_FRACTION_OF_PEAK * 100)
+    wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != "load"]
+    top_rep = top_of_range(reps)
+    if top_rep is None:
+        return
+    wp.reps = reps
+    deload_rir = max(0, round(reps_to_failure(deload_percent, exercise_name) - top_rep))
+    floor = "+" if deload_percent < MIN_PERCENT else ""
+    _set_from_rule(wp, "rir", f"~{deload_rir}{floor} RIR", _DELOAD_RIR_NOTE, reps_rule)
+
+
+def _apply_daily_undulation(
+    mesocycle: models.Mesocycle, muscle_group: str, include_deload: bool,
+    reps_rule: models.RuleJustification, dup_rule: models.RuleJustification,
+) -> list[models.WeeklyPrescription] | None:
+    """Daily undulation (trained lifters): the muscle's compound lifts take
+    the reps of their day in the week's rotation, every week, at the
+    exercise's RIR, with each day's load estimated from those reps and RIR.
+    Week to week the targets stay the same - the weight rises as the lifter
+    does (Rhea's sessions were repetition maximums). None when the muscle's
+    compound lifts are trained on fewer than 2 days a week."""
+    days = sorted(
+        (day for day in mesocycle.day_templates
+         if any(s.muscle_group == muscle_group and s.is_compound for s in day.exercise_slots)),
+        key=lambda d: d.order,
+    )
+    rotation = _dup_reps_by_session(len(days))
+    if rotation is None:
+        return None
+    has_deload = include_deload and _block_weeks(mesocycle) >= 3
+    adapted = "" if len(days) == 3 else _DUP_ADAPTED_NOTE.format(sessions=len(days))
+    updated = []
+
+    for position, (day, reps) in enumerate(zip(days, rotation), start=1):
+        for slot in day.exercise_slots:
+            if slot.muscle_group != muscle_group or not slot.is_compound:
+                continue
+            weeks = sorted(slot.weekly_prescriptions, key=lambda wp: wp.week_number)
+            if not weeks:
+                continue
+            rir = weeks[0].rir
+            reps_note = _DUP_REPS_NOTE.format(position=position, sessions=len(days), reps=reps) + adapted
+            for wp in weeks:
+                deload = has_deload and wp.week_number == mesocycle.end_week
+                _set_from_rule(wp, "reps", str(reps), reps_note, dup_rule)
+                wp.rir = rir
+                _estimate_load(wp, slot.exercise_name, reps_rule)
+                if not deload and _LOAD_PERCENT_PATTERN.match(wp.load):
+                    wp.load_grounding_note += _DUP_WEEKLY_NOTE
+                if deload:
+                    percent = parse_percent(wp.load)
+                    if percent is not None:
+                        _apply_deload(wp, str(reps), percent, slot.exercise_name, reps_rule)
+                updated.append(wp)
+
+    return updated
+
+
+def _add_scheme_citations(db: Session, scheme_record: models.ProgressionScheme, *rules) -> None:
+    seen = set()
+    for rule in rules:
+        for rule_citation in rule.rule_citations:
+            if rule_citation.citation_id in seen:
+                continue
+            seen.add(rule_citation.citation_id)
+            db.add(models.ProgressionSchemeCitation(
+                scheme_id=scheme_record.id, citation_id=rule_citation.citation_id,
+                verification_status=rule_citation.verification_status,
+            ))
 
 
 @mesocycle_router.post("/{mesocycle_id}/generate-progression", response_model=schemas.GenerateProgressionResponse)
@@ -850,31 +934,38 @@ def generate_progression_endpoint(
 
     # The scheme follows from the lifter's training status (undulating beat
     # linear for 1RM in trained lifters only), cited through the same
-    # verified rule the wizard shows - not generated per program.
-    scheme = "undulating" if program.trained else "linear"
+    # verified rules the wizard shows - not generated per program. Every
+    # rule is justified before anything is written: a first justification
+    # commits.
     rule = justify_rule(db, "periodization_by_training_status")
     reps_rule = justify_rule(db, "reps_at_percent_1rm")
+    dup_rule = justify_rule(db, "daily_undulating_protocol") if program.trained else None
 
     _delete_existing(db, models.ProgressionScheme, mesocycle.id, muscle_group)
 
+    updated_prescriptions = None
+    if dup_rule is not None:
+        updated_prescriptions = _apply_daily_undulation(
+            mesocycle, muscle_group, program.include_deload, reps_rule, dup_rule,
+        )
+    if updated_prescriptions is None:
+        scheme, rules = "linear", (rule,)
+        note = rule.grounding_note
+        if program.trained:
+            note = _DUP_NOT_POSSIBLE_NOTE + (f" {note}" if note else "")
+        updated_prescriptions = _apply_linear_progression(
+            mesocycle, muscle_group, program.include_deload, reps_rule,
+        )
+    else:
+        scheme, rules = "undulating", (rule, dup_rule)
+        note = " ".join(n for n in (rule.grounding_note, dup_rule.grounding_note) if n) or None
+
     scheme_record = models.ProgressionScheme(
-        mesocycle_id=mesocycle.id,
-        muscle_group=muscle_group,
-        scheme=scheme,
-        grounding_note=rule.grounding_note,
+        mesocycle_id=mesocycle.id, muscle_group=muscle_group, scheme=scheme, grounding_note=note,
     )
     db.add(scheme_record)
     db.flush()  # populate scheme_record.id before it's used as a FK below
-
-    for rule_citation in rule.rule_citations:
-        db.add(models.ProgressionSchemeCitation(
-            scheme_id=scheme_record.id, citation_id=rule_citation.citation_id,
-            verification_status=rule_citation.verification_status,
-        ))
-
-    updated_prescriptions = _apply_progression(
-        mesocycle, muscle_group, scheme, program.include_deload, reps_rule,
-    )
+    _add_scheme_citations(db, scheme_record, *rules)
 
     db.commit()
     db.refresh(scheme_record)

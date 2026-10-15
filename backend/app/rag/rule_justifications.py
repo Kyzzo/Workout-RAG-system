@@ -100,6 +100,55 @@ RULES = {
         categories=("progression",),
         outcome="strength",
     ),
+    # The protocol trained lifters' strength programs follow
+    # (generation._apply_daily_undulation): each lift's weekly sessions at
+    # 8, 6 and 4 repetitions, heaviest last.
+    "daily_undulating_protocol": Rule(
+        claim=(
+            "In recreationally trained men, rotating 3 sets of 8, 6 and 4 repetition maximums across the "
+            "three training sessions of each week produced greater strength gains than changing from 8 to "
+            "6 to 4 repetition maximums every four weeks, with training volume and intensity equated."
+        ),
+        query="Daily undulating periodization 8, 6 and 4 repetition maximums each week versus linear periodization",
+        categories=("progression",),
+        outcome="strength",
+    ),
+    # Shown with it: the exact repetitions within the rotation matter less
+    # than the volume (so Rhea's numbers are one tested choice, not the only one).
+    "dup_rep_scheme": Rule(
+        claim=(
+            "In resistance-trained men, volume-equated daily undulating programs using 12, 10 and 8 "
+            "repetitions or 6, 4 and 2 repetitions per session produced similar gains in squat and bench "
+            "press strength and in muscle thickness."
+        ),
+        query="Volume-equated high-repetition versus low-repetition daily undulating programs for strength and hypertrophy",
+        categories=("progression",),
+    ),
+    # Why the heaviest session comes last, not straight after the
+    # highest-volume one.
+    "dup_session_order": Rule(
+        claim=(
+            "In trained powerlifters, ordering each week's daily undulating sessions as hypertrophy, then "
+            "power, then strength produced greater bench press strength gains than placing the strength "
+            "session directly after the hypertrophy session."
+        ),
+        query=(
+            "Modified daily undulating periodization: hypertrophy, power, strength (HPS) versus hypertrophy, "
+            "strength, power (HSP) order and 1RM bench press gains in powerlifters"
+        ),
+        categories=("progression",),
+        outcome="strength",
+    ),
+    # Why the undulation is daily, not weekly.
+    "weekly_undulation_not_better": Rule(
+        claim=(
+            "Weekly undulating periodization did not produce greater strength gains than linear "
+            "periodization when training volume and intensity were equated."
+        ),
+        query="Weekly undulating versus linear periodization strength gains with equated volume and intensity",
+        categories=("progression",),
+        outcome="strength",
+    ),
     # Why the deload week is an opt-in rather than the default.
     "deload_week": Rule(
         claim=(

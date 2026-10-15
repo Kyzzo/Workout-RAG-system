@@ -219,14 +219,40 @@ export default function ProgramWizard({
             />
             I&apos;ve lifted consistently for 1+ year
           </label>
-          <RuleSources
-            text={
-              (trained ? "Progression: undulating (heavy and light weeks alternate). " : "Progression: linear (load rises each week). ") +
-              "Undulating periodization has produced larger 1RM gains than linear in trained lifters, with no clear " +
-              "difference in untrained lifters. The weekly heavy/light pattern and the 2.5%/week step are common practice."
-            }
-            ruleKeys={["periodization_by_training_status"]}
-          />
+          {trained ? (
+            <>
+              <RuleSources
+                text={
+                  "Progression: daily undulating. Each compound lift's sessions in the week rotate 8, 6 and 4 reps, " +
+                  "heaviest last (Rhea et al. 2002's protocol), with each day's load set from its reps and RIR; the " +
+                  "weight rises as you get stronger. Undulating periodization has produced larger 1RM gains than " +
+                  "linear in trained lifters."
+                }
+                ruleKeys={["periodization_by_training_status", "daily_undulating_protocol"]}
+                secondHeading="The protocol the program follows"
+              />
+              <RuleSources
+                text="Why daily, not weekly: undulating week to week hasn't beaten linear progression in trials."
+                ruleKeys={["weekly_undulation_not_better"]}
+              />
+              <RuleSources
+                text={
+                  "The heaviest session comes last, not straight after the highest-volume one, and the exact rep " +
+                  "numbers matter less than the volume - Rhea's 8/6/4 is one tested option."
+                }
+                ruleKeys={["dup_session_order", "dup_rep_scheme"]}
+                secondHeading="Why the exact reps matter less"
+              />
+            </>
+          ) : (
+            <RuleSources
+              text={
+                "Progression: linear (load rises 2.5% of 1RM a week - common practice, not a cited number). " +
+                "Undulating periodization's advantage over linear has been seen in trained lifters, not untrained."
+              }
+              ruleKeys={["periodization_by_training_status"]}
+            />
+          )}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
