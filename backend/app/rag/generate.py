@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
 
+from ..progress import report
 from .corpus import evidence_label
 from .data_loader import embed_texts
 from .qdrant_storage import QdrantStorage
@@ -425,6 +426,7 @@ def _retrieve_general_chunks(topic: str) -> list[dict]:
     ranked = gather(outcome)
     if outcome is not None and not _enough_papers(ranked):
         ranked = gather(None)
+    report(f"Ranking {len(_usable(ranked))} excerpts by relevance")
     return _select(topic, ranked, GENERAL_TOP_K)
 
 
@@ -888,7 +890,9 @@ def _answer_in_statements(
 def answer_general_question(topic: str) -> tuple[pydantic.BaseModel, list[dict]]:
     # General Q&A (chat mode 3): not tied to one dosage category, so
     # it searches the whole corpus. Returns a summary and statements to verify.
+    report("Searching the papers")
     chunks = _retrieve_general_chunks(topic)
+    report("Writing the answer")
     context_block = "\n\n".join(f"[{c['id']}] ({evidence_label(c)}) {c['text']}" for c in chunks)
     parsed = _answer_in_statements(
         _QA_SYSTEM_PROMPT, f"Context:\n{context_block}\n\nQuestion: {topic}", [c["id"] for c in chunks],

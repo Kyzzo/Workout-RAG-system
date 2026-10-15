@@ -1,12 +1,21 @@
+import json
+import logging
+import queue
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import changes, models, schemas
 from ..auth import get_current_user
-from ..database import get_db
+from ..database import SessionLocal, get_db
+from ..progress import report, reporting
+from ..shared_answers import shared_key
 from ..ownership import get_owned_prescription
 from ..rag.chat_routing import route_chat_message
 from ..rag.generate import (
@@ -36,6 +45,31 @@ from .generation import (
 )
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+logger = logging.getLogger(__name__)
+
+# The chat's suggested general questions (mirrors GENERAL_PROMPTS in
+# frontend/app/ChatWindow.tsx). Everyone asks them word for word, so each
+# one's verified answer is stored once (in shared_answers, keyed with
+# ANSWER_VERSION like every shared answer) and reused: instant and free
+# after the first time. Typed questions always run the full pipeline.
+PRESET_GENERAL_QUESTIONS = {
+    "How many sets per week should I do per muscle?",
+    "How close to failure should I train?",
+    "Does training a muscle 3x a week beat 2x?",
+    "Should I add reps or add weight to progress?",
+    "How many sets per week build strength?",
+    "Do I need to train to failure to get stronger?",
+    "Is undulating periodization better than linear?",
+    "Should I take a deload week?",
+}
+
+
+def _normalize_question(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+_PRESET_KEYS = {_normalize_question(q) for q in PRESET_GENERAL_QUESTIONS}
+_preset_locks: dict[str, threading.Lock] = {key: threading.Lock() for key in _PRESET_KEYS}
 
 # adjust_prescription reuses Phase 4/5's own generation/verification
 # pipeline unchanged (phase6_chat_routing_concepts.txt section 4) - this
@@ -58,14 +92,7 @@ def send_chat_message(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    decision = route_chat_message(request.message, request.field_id, request.history)
-
-    if decision.tool == "adjust_prescription":
-        response = _handle_adjust(decision, db, current_user, request.message)
-    elif decision.tool == "discuss_prescription":
-        response = _handle_discuss(decision, db, current_user, request.message)
-    else:
-        response = _handle_general_question(decision, request.message)
+    response = _respond(request, db, current_user)
 
     # Saved history: the message and the full response, so a reload renders
     # the conversation as it was. A failed request isn't saved.
@@ -76,6 +103,90 @@ def send_chat_message(
     db.add(models.ChatMessage(user_id=current_user.id, role="assistant", content=response.model_dump(mode="json")))
     db.commit()
     return response
+
+
+def _respond(request: schemas.ChatMessageRequest, db: Session, current_user: models.User) -> schemas.ChatResponse:
+    # A suggested general question (not about an exercise) needs no routing:
+    # it's a general question, answered from the store when it can be.
+    preset = _normalize_question(request.message)
+    if request.field_id is None and preset in _PRESET_KEYS:
+        return _answer_preset(preset, request.message, db)
+
+    report("Understanding your question")
+    decision = route_chat_message(request.message, request.field_id, request.history)
+    if decision.tool == "adjust_prescription":
+        report("Previewing the swap" if decision.target_field == "exercise" else "Working on the change")
+        return _handle_adjust(decision, db, current_user, request.message)
+    if decision.tool == "discuss_prescription":
+        report("Reading this prescription's sources")
+        return _handle_discuss(decision, db, current_user, request.message)
+    return _handle_general_question(decision, request.message)
+
+
+def _answer_preset(preset: str, message: str, db: Session) -> schemas.ChatResponse:
+    key = shared_key("chat", preset)
+    # One at a time per question: a second asker waits for the first answer
+    # instead of paying for the same pipeline run.
+    with _preset_locks[preset]:
+        stored = db.query(models.SharedAnswer).filter(models.SharedAnswer.key == key).first()
+        if stored is not None:
+            report("Found a saved answer")
+            return schemas.ChatResponse.model_validate_json(stored.value)
+
+        response = _handle_general_question(SimpleNamespace(topic=message), message)
+        # Only a verified answer is stored (one with cited statements), so
+        # an unlucky draw is retried by the next asker, never kept.
+        if response.citations:
+            try:
+                with db.begin_nested():
+                    db.add(models.SharedAnswer(key=key, field="chat", value=response.model_dump_json()))
+            except IntegrityError:
+                pass  # stored meanwhile by another instance - same answer
+        return response
+
+
+# The chat as a stream of newline-delimited JSON: {"type": "stage", "label"}
+# as each step starts, then {"type": "result", "response"} or {"type":
+# "error", "status", "detail"}. Same work and saved history as /message;
+# the stages are what make a ~45s answer bearable to wait for.
+_session_factory = SessionLocal
+
+
+@router.post("/message/stream")
+def stream_chat_message(
+    request: schemas.ChatMessageRequest,
+    current_user: models.User = Depends(get_current_user),
+):
+    user_id = current_user.id
+    events: queue.Queue = queue.Queue()
+
+    def work():
+        # Its own session: the request's is closed once the response starts.
+        db = _session_factory()
+        try:
+            with reporting(lambda label: events.put({"type": "stage", "label": label})):
+                response = send_chat_message(request, db, db.get(models.User, user_id))
+            events.put({"type": "result", "response": response.model_dump(mode="json")})
+        except HTTPException as exc:
+            events.put({"type": "error", "status": exc.status_code, "detail": exc.detail})
+        except Exception:
+            logger.exception("Streamed chat message failed")
+            events.put({"type": "error", "status": 500, "detail": "Something went wrong answering that - please try again."})
+        finally:
+            db.close()
+            events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def lines():
+        while (event := events.get()) is not None:
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(
+        lines(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 _HISTORY_LIMIT = 100  # turns returned on load (oldest first)
@@ -315,6 +426,9 @@ def _verify_statements(question: str, parsed, sources: dict[str, dict]):
     )
 
     pairs = [(text, source) for text, _, found in checks for source in found]
+    to_check = sum(1 for _, _, found in checks if found) + (1 if summary_sources else 0)
+    if to_check:
+        report(f"Checking {to_check} statement{'' if to_check == 1 else 's'} against their sources")
     statuses, summary_ok = [], False
     if pairs or summary_sources:
         with ThreadPoolExecutor(max_workers=min(len(pairs) + 1, 16)) as pool:
@@ -441,6 +555,7 @@ def _handle_general_question(decision, raw_message: str) -> schemas.ChatResponse
     topic = decision.topic or raw_message
     parsed, kept, removed, summary = _attempt_general_question(topic)
     if not kept and not summary and parsed.grounding != "general_knowledge":
+        report("Nothing held up against the sources - trying once more")
         parsed, kept, removed, summary = _attempt_general_question(topic)
 
     answer, citations = _compose(kept, summary=summary)

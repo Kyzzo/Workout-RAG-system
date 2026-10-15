@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import models
@@ -46,13 +47,20 @@ def get_current_user(
     if payload.get("azp") not in CLERK_ALLOWED_ORIGINS:
         raise HTTPException(status_code=401, detail="Token issued for an unrecognized origin")
 
-    clerk_user_id = payload["sub"]
+    return get_or_create_user(db, payload["sub"])
 
+
+def get_or_create_user(db: Session, clerk_user_id: str) -> models.User:
+    """The app's user for a Clerk account, created on its first request. A
+    new account's first page load sends several requests at once, each
+    finding no user yet: one insert wins, the rest hit the unique
+    constraint - they load the row the winner created instead of failing."""
     user = db.query(models.User).filter(models.User.clerk_user_id == clerk_user_id).first()
-    if user is None:
-        user = models.User(clerk_user_id=clerk_user_id)
-        db.add(user)
+    if user is not None:
+        return user
+    db.add(models.User(clerk_user_id=clerk_user_id))
+    try:
         db.commit()
-        db.refresh(user)
-
-    return user
+    except IntegrityError:
+        db.rollback()
+    return db.query(models.User).filter(models.User.clerk_user_id == clerk_user_id).one()

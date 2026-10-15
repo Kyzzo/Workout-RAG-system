@@ -97,6 +97,33 @@ function anchoredPrompts(hasPercentLoad: boolean): { ask: string[]; change: stri
   };
 }
 
+type StreamEvent =
+  | { type: "stage"; label: string }
+  | { type: "result"; response: ChatResponse }
+  | { type: "error"; status: number; detail: string };
+
+// Reads the chat stream (one JSON object per line), reporting each stage,
+// and returns the response - or throws with the server's error.
+async function readStream(body: ReadableStream<Uint8Array>, onStage: (label: string) => void): Promise<ChatResponse> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    buffered += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const lines = buffered.split("\n");
+    buffered = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line) as StreamEvent;
+      if (event.type === "stage") onStage(event.label);
+      else if (event.type === "result") return event.response;
+      else throw new Error(event.detail);
+    }
+    if (done) throw new Error("The answer was cut off - please try again.");
+  }
+}
+
 function describe(p: WeeklyPrescription): string {
   return [`${p.sets} sets`, `${p.reps || "n/a"} reps`, ...(p.load ? [p.load] : []), p.rir || "effort n/a"].join(", ");
 }
@@ -156,6 +183,9 @@ export default function ChatWindow({
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [sending, setSending] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  // What the server is doing right now ("Checking 9 statements..."), from
+  // the streamed stages.
+  const [stage, setStage] = useState<string | null>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
@@ -281,7 +311,9 @@ export default function ChatWindow({
 
     try {
       const token = await getToken();
-      const res = await fetch(`${API_URL}/chat/message`, {
+      // Streamed: stage lines while it works, then the result (see
+      // stream_chat_message in backend/app/routers/chat.py).
+      const res = await fetch(`${API_URL}/chat/message/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -295,7 +327,7 @@ export default function ChatWindow({
         }),
       });
 
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         const detail = await res.text();
         setTurns((prev) => [
           ...prev,
@@ -304,7 +336,7 @@ export default function ChatWindow({
         return;
       }
 
-      const data: ChatResponse = await res.json();
+      const data = await readStream(res.body, setStage);
       const status: ChangeStatus | null = data.swap?.pending ? "pending" : changeIdOf(data) ? "applied" : null;
       setTurns((prev) => [...prev, { role: "assistant", response: data, status }]);
       if (data.mode === "adjust_prescription") onPrescriptionUpdated?.();
@@ -315,6 +347,7 @@ export default function ChatWindow({
       ]);
     } finally {
       setSending(false);
+      setStage(null);
     }
   }
 
@@ -424,7 +457,9 @@ export default function ChatWindow({
                 />
               ))}
             </span>
-            Reading the research...
+            <span key={stage ?? ""} className="animate-in">
+              {stage ? `${stage}...` : "Reading the research..."}
+            </span>
           </div>
         )}
       </div>

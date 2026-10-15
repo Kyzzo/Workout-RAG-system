@@ -34,7 +34,8 @@ def main():
             for answer in query:
                 papers = sorted({c.citation.title for c in answer.citations
                                  if c.verification_status in models.SUPPORTED_VERIFICATION_STATUSES})
-                print(f"{answer.value:>18}  {answer.key}  ({', '.join(papers)})")
+                value = "(chat answer)" if answer.field == "chat" else answer.value
+                print(f"{value:>18}  {answer.key}  ({', '.join(papers)})")
             return
         if args.key:
             query = query.filter(models.SharedAnswer.key == args.key)
