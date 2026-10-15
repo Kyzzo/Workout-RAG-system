@@ -5,7 +5,7 @@ import { runBlockGeneration } from "./blockGeneration";
 import { CaveatNote, SourcesBadge, SourcesPanel } from "./Citations";
 import { useDialogs } from "./Dialogs";
 import GenerationProgress from "./GenerationProgress";
-import { Alert, ChevronRight, Layers, Message, Pencil, Refresh, Swap, Trash, Undo, Zap } from "./Icons";
+import { Alert, ChevronDown, ChevronRight, Layers, Message, Pencil, Refresh, Swap, Trash, Undo, Zap } from "./Icons";
 import ProgressionGuide from "./ProgressionGuide";
 import { RuleSources } from "./RuleSources";
 import { AddDayForm, AddExerciseForm, AddMesocycleForm } from "./StructureForms";
@@ -56,6 +56,13 @@ type ProgressionResult = {
 };
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// "12" or "11–14" for a list of numbers.
+function range(values: number[]) {
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  return low === high ? `${low}` : `${low}–${high}`;
+}
 
 // sets=0 with an empty load is the backend's "not generated yet" placeholder
 // state (see create_exercise_slot / _clone_day_for_muscle_group).
@@ -461,6 +468,14 @@ export default function ProgramTree({
         const muscleGroups = muscleGroupsIn(mesocycle);
         const slots = mesocycle.day_templates.flatMap((d) => d.exercise_slots);
         const ungenerated = slots.some((s) => s.weekly_prescriptions.some(isPlaceholder));
+        // A preview of the dosing table, shown on its collapsed row.
+        const suggested = mesocycle.muscle_group_volumes
+          .filter((v) => muscleGroups.includes(v.muscle_group))
+          .map((v) => v.weekly_sets);
+        const trainedPerWeek = muscleGroups.map((g) => daysTraining(mesocycle, g));
+        const belowTarget = mesocycle.muscle_group_volumes.filter(
+          (v) => muscleGroups.includes(v.muscle_group) && deliveredSets(mesocycle, v.muscle_group) < v.weekly_sets,
+        ).length;
         return (
           <section key={mesocycle.id} className="card flex flex-col">
             <header className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-line px-5 py-4">
@@ -516,16 +531,36 @@ export default function ProgramTree({
               )}
 
               {muscleGroups.length > 0 && (
-                <details className="group rounded-xl border border-line">
-                  <summary className="flex cursor-pointer items-center gap-2.5 px-4 py-3 select-none">
-                    <Layers className="size-4 text-fg-subtle" />
-                    <span className="text-sm font-medium">Per-muscle dosing</span>
-                    <span className="hidden flex-1 truncate text-xs text-fg-subtle sm:block">
-                      Volume, frequency{strength ? " and progression" : ""} for {muscleGroups.length} muscle
-                      {muscleGroups.length === 1 ? "" : "s"}
+                // Styled as a summary panel, not another day row, with a
+                // preview of what's inside and a labelled expand control.
+                <details className="group rounded-xl border border-accent/25 bg-gradient-to-br from-accent-soft to-transparent">
+                  <summary className="flex cursor-pointer items-center gap-3 px-4 py-3.5 select-none">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
+                      <Layers className="size-4" />
                     </span>
-                    <span className="flex-1 sm:hidden" />
-                    <ChevronRight className="size-4 text-fg-subtle transition-transform duration-200 group-open:rotate-90" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold">Per-muscle dosing</span>
+                      <span className="mt-1.5 flex flex-wrap gap-1.5">
+                        <span className="chip">
+                          {muscleGroups.length} muscle{muscleGroups.length === 1 ? "" : "s"}
+                        </span>
+                        {suggested.length > 0 && (
+                          <span className="chip tabular-nums">{range(suggested)} sets/wk suggested</span>
+                        )}
+                        <span className="chip tabular-nums">trained {range(trainedPerWeek)}x/wk</span>
+                        {belowTarget > 0 && (
+                          <span className="chip border-transparent bg-warn-soft text-warn">
+                            <Alert className="size-3" />
+                            {belowTarget} below target
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                    <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text">
+                      <span className="hidden sm:inline sm:group-open:hidden">Show all</span>
+                      <span className="hidden sm:group-open:inline">Hide</span>
+                      <ChevronDown className="size-4 transition-transform duration-200 group-open:rotate-180" />
+                    </span>
                   </summary>
                   <div className="animate-in border-t border-line">
                     {/* Hypertrophy frequency isn't a generated number: with weekly
