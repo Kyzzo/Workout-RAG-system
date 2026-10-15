@@ -164,21 +164,29 @@ def justify_rule(db: Session, key: str, refresh: bool = False) -> models.RuleJus
     with ThreadPoolExecutor(max_workers=max(1, min(len(chunks), 10))) as pool:
         verdicts = list(zip(chunks, pool.map(judge, chunks)))
 
-    if record is None:
-        record = models.RuleJustification(rule_key=key, claim=rule.claim)
-        db.add(record)
-    record.claim = rule.claim
     any_supported = any(status in models.SUPPORTED_VERIFICATION_STATUSES for _, status in verdicts)
-    record.grounding_note = None if any_supported else NO_SUPPORT_NOTE
-    record.rule_citations = [
-        models.RuleCitation(citation_id=get_or_create_citation(db, chunk).id, verification_status=status)
-        for chunk, status in verdicts
-    ]
     try:
+        # Citations first: their lookups autoflush, which would otherwise
+        # insert a new record before the commit below.
+        citations = [
+            models.RuleCitation(citation_id=get_or_create_citation(db, chunk).id, verification_status=status)
+            for chunk, status in verdicts
+        ]
+        if record is None:
+            record = models.RuleJustification(rule_key=key, claim=rule.claim)
+            db.add(record)
+        record.claim = rule.claim
+        record.grounding_note = None if any_supported else NO_SUPPORT_NOTE
+        record.rule_citations = citations
         db.commit()
     except IntegrityError:
-        # Another request justified the same rule first; use its result.
+        # Parallel requests (a block's progression runs per muscle at once)
+        # justify an uncached rule together; the first to commit wins - on
+        # the record or on a shared citation - and the rest use its result.
         db.rollback()
-        return db.query(models.RuleJustification).filter_by(rule_key=key).one()
+        existing = db.query(models.RuleJustification).filter_by(rule_key=key).first()
+        if existing is None:
+            raise
+        return existing
     db.refresh(record)
     return record

@@ -82,3 +82,28 @@ def test_same_excerpt_from_a_double_ingested_paper_is_judged_once(mock_retrieve,
 
     assert mock_judge.call_count == 1
     assert len(record.supporting_citations) == 1
+
+
+@patch("app.rag.rule_justifications.judge_citation")
+@patch("app.rag.rule_justifications._retrieve_chunks")
+def test_a_parallel_request_that_justified_the_rule_first_wins(mock_retrieve, mock_judge, db_session):
+    # A block's progression runs per muscle at once, so the first use of an
+    # uncached rule is justified by several requests together. One commits
+    # its record while this one is still judging; this one must use it, not
+    # fail on the unique rule key (it did, during a citation lookup's
+    # autoflush, before the commit that handled the clash).
+    _clear(db_session)
+
+    def retrieve_while_another_request_commits(query, category, outcome=None):
+        if not db_session.query(models.RuleJustification).filter_by(rule_key="even_session_split").first():
+            db_session.add(models.RuleJustification(rule_key="even_session_split", claim="c", grounding_note="theirs"))
+            db_session.commit()
+        return _chunks(f"{category}-1")
+
+    mock_retrieve.side_effect = retrieve_while_another_request_commits
+    mock_judge.return_value = SimpleNamespace(outcome="primary_support", reasoning="")
+
+    record = justify_rule(db_session, "even_session_split")
+
+    assert record.grounding_note == "theirs"
+    assert db_session.query(models.RuleJustification).filter_by(rule_key="even_session_split").count() == 1
