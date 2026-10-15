@@ -1,4 +1,7 @@
-import { Alert, Book, Close } from "./Icons";
+"use client";
+
+import { useState } from "react";
+import { Alert, Book, ChevronRight, Close } from "./Icons";
 import type { RuleJustification, SupportingCitation } from "./types";
 
 // The two verification outcomes that count as evidence read differently to
@@ -56,8 +59,30 @@ function CitationItems({ citations }: { citations: SupportingCitation[] }) {
   return (
     <>
       {citations.map((c, i) => (
-        <figure key={i} className="flex flex-col gap-1.5">
-          <figcaption className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <CitationItem key={i} citation={c} />
+      ))}
+    </>
+  );
+}
+
+// One source: title and status, then its excerpt folded to a two-line
+// preview - a panel can hold several long excerpts. Clicking the title row
+// (or the preview) shows the whole excerpt.
+function CitationItem({ citation: c }: { citation: SupportingCitation }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <figure className="flex flex-col gap-1.5">
+      <figcaption>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="group/cite flex w-full items-start gap-1.5 text-start"
+        >
+          <ChevronRight
+            className={`mt-[3px] size-3.5 shrink-0 text-fg-subtle transition-transform duration-200 group-hover/cite:text-fg ${open ? "rotate-90" : ""}`}
+          />
+          <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="font-medium text-fg">{c.citation.title}</span>
             <span
               className={`rounded-full px-1.5 py-px text-[11px] font-medium ${
@@ -66,13 +91,18 @@ function CitationItems({ citations }: { citations: SupportingCitation[] }) {
             >
               {STATUS_LABEL[c.verification_status]}
             </span>
-          </figcaption>
-          <blockquote className="scroll-thin max-h-36 overflow-y-auto whitespace-pre-line border-s-2 border-line-strong ps-3 leading-relaxed text-fg-muted">
-            {c.citation.snippet}
-          </blockquote>
-        </figure>
-      ))}
-    </>
+          </span>
+        </button>
+      </figcaption>
+      <blockquote
+        onClick={open ? undefined : () => setOpen(true)}
+        className={`ms-5 whitespace-pre-line border-s-2 border-line-strong ps-3 leading-relaxed text-fg-muted ${
+          open ? "animate-in" : "line-clamp-2 cursor-pointer"
+        }`}
+      >
+        {c.citation.snippet}
+      </blockquote>
+    </figure>
   );
 }
 
