@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .citations import get_or_create_citation
 
-ANSWER_VERSION = "2026-10-15j"  # j: chat summary opens with the answer alone on its own line, in total sets
+ANSWER_VERSION = "2026-10-15k"  # k: summaries use only figures the sources state, lead with the efficient range; two rewrites
 
 
 @dataclass

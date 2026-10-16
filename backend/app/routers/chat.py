@@ -483,27 +483,37 @@ def _states_only_prescription(text: str, prescription_values: str) -> bool:
     return set(_NUMBER.findall(text)) <= allowed
 
 
+# Rewrites of a rejected summary before it's dropped. Each costs a writer
+# and a judge call at minimal effort (~$0.02-0.03, ~5-8s), paid only when
+# the summary before it was rejected.
+SUMMARY_REWRITES = 2
+
+
 def _retry_summary(question: str, summary, verdict, chunks: list[dict], sources: dict[str, dict]):
-    """One rewrite of a rejected summary - only the summary, from the same
-    excerpts - told what the judge flagged, then judged again. The summary
-    carries the answer's one clear assertion, so dropping it left answers
-    with findings but no answer. Returns (summary, sources, ok); on any
-    failure the rejected summary comes back with ok False and is dropped."""
-    report("Rewriting the summary")
-    problems = [
-        f"{f.figure}: the summary words it as {f.unit_in_summary}; the excerpts report {f.unit_in_excerpts}"
-        for f in (verdict.figures if verdict is not None else []) if not f.same_unit
-    ]
-    try:
-        rewritten = rewrite_summary(question, chunks, summary.text, problems)
-    except Exception:
-        rewritten = None
-    if rewritten is None:
-        return summary, [], False
-    new_sources = [sources[src] for src in dict.fromkeys(rewritten.sources) if src in sources]
-    second = check_summary(question, rewritten.text, [evidence_text(s) for s in new_sources])
-    if second is not None and second.outcome == "supported":
-        return rewritten, new_sources, True
+    """Rewrites a rejected summary - only the summary, from the same
+    excerpts - up to SUMMARY_REWRITES times, each told what the judge
+    flagged in the one before, and judges each again. The summary carries
+    the answer's one clear assertion, so dropping it left answers with
+    findings but no answer. Returns (summary, sources, ok); if every
+    rewrite fails, the summary comes back with ok False and is dropped."""
+    rejected = summary
+    for _ in range(SUMMARY_REWRITES):
+        report("Rewriting the summary")
+        problems = [
+            f"{f.figure}: the summary words it as {f.unit_in_summary}; the excerpts report {f.unit_in_excerpts}"
+            for f in (verdict.figures if verdict is not None else []) if not f.same_unit
+        ]
+        try:
+            rewritten = rewrite_summary(question, chunks, rejected.text, problems)
+        except Exception:
+            rewritten = None
+        if rewritten is None:
+            break
+        new_sources = [sources[src] for src in dict.fromkeys(rewritten.sources) if src in sources]
+        verdict = check_summary(question, rewritten.text, [evidence_text(s) for s in new_sources])
+        if verdict is not None and verdict.outcome == "supported":
+            return rewritten, new_sources, True
+        rejected = rewritten
     return summary, [], False
 
 

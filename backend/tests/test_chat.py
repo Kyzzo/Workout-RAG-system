@@ -420,3 +420,36 @@ def test_a_rejected_summary_is_rewritten_once_with_what_was_flagged(
     problems = mock_rewrite.call_args.args[3]
     assert problems == ["10-30: the summary words it as sets; the excerpts report fractional sets"]
     assert mock_rewrite.call_count == 1 and mock_check.call_count == 2  # one rewrite, judged again
+
+
+@patch("app.routers.chat.rewrite_summary")
+@patch("app.routers.chat.check_summary")
+@patch("app.routers.chat.verify_citation", return_value="primary_support")
+@patch("app.routers.chat.answer_general_question")
+@patch("app.routers.chat.route_chat_message")
+def test_a_summary_gets_a_second_rewrite_and_is_dropped_only_after_both_fail(
+    mock_route, mock_answer, _verify, mock_check, mock_rewrite, db_session, owner_and_prescription,
+):
+    user, _ = owner_and_prescription
+    mock_route.return_value = _route("answer_general_question", topic="sets for chest?")
+    mock_answer.return_value = (
+        _with_summary(_answer(("Growth rose with weekly sets.", ["a"])), "Roughly 12-20 sets.", ["a"]),
+        _chunks("a"),
+    )
+    rejected, passed = SimpleNamespace(outcome="contradicted", figures=[]), SimpleNamespace(outcome="supported", figures=[])
+    mock_rewrite.side_effect = [SimpleNamespace(text="Roughly 10-30 sets.", sources=["a"]),
+                                SimpleNamespace(text="For most lifters: about 5-18 sets.", sources=["a"])]
+
+    mock_check.side_effect = [rejected, rejected, passed]  # first summary, first rewrite, second rewrite
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="sets for chest?"), db=db_session,
+                               current_user=user)
+    assert result.answer.startswith("For most lifters: about 5-18 sets. [1]")
+    # The second rewrite is shown what was rejected the first time round.
+    assert mock_rewrite.call_args_list[1].args[2] == "Roughly 10-30 sets."
+
+    mock_rewrite.side_effect = [SimpleNamespace(text="Roughly 10-30 sets.", sources=["a"])] * 2
+    mock_check.side_effect = [rejected] * 3
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="sets for chest?"), db=db_session,
+                               current_user=user)
+    assert result.answer == "Growth rose with weekly sets. [1]"  # every rewrite failed: dropped as before
+    assert "1 statement was removed" in result.grounding_note
