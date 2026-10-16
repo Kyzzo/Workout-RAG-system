@@ -861,17 +861,22 @@ _STATEMENT_RULES = (
 )
 
 _SUMMARY_RULES = (
-    " Then write `summary`: the direct, practical answer to the question in "
-    "three or four short, plain sentences (under about 100 words), the way a knowledgeable coach "
-    "would sum up the research for a lifter. Its FIRST sentence is ONE "
-    "clear assertion that answers the question - a concrete number or range "
-    "in the unit asked for, e.g. 'For most lifters, roughly 5-18 sets per "
-    "muscle per week'. Right after it, give the reasoning: the key findings "
-    "behind the answer in plain words (e.g. growth rises with weekly sets "
-    "but each extra set adds less), then anything the lifter needs to apply "
-    "it (how sets are counted, what happens above or below, who it applies "
-    "to). Keep the reasoning - just say it tightly, without repeating "
-    "yourself. Be honest about how firm it is, briefly, in one clause: if the "
+    " Then write `summary`: the direct, practical answer to the question, "
+    "the way a knowledgeable coach would sum up the research for a lifter, "
+    "laid out to be skimmed. Its FIRST LINE is the answer alone: ONE clear "
+    "assertion in the unit the lifter counts in, with no jargon or symbols "
+    "- e.g. 'For most lifters: about 11-18 sets per week for chest.' For a "
+    "muscle that also gets indirect sets, state the total with its "
+    "assumption in a few words (e.g. 'about 14 sets a week, if 8 of them "
+    "are bench presses'). Then ONE line break - never a blank line - and "
+    "the reasoning in two or three short sentences, in this order: how to "
+    "count it (e.g. 'Count every chest press and flye set: chest work is "
+    "direct, so this matches the research's fractional count'), the key "
+    "findings behind the answer in plain words (e.g. growth rises with "
+    "weekly sets but each extra set adds less), who should adjust, and how "
+    "firm it is. Under about 100 words in all. Keep the reasoning - just "
+    "say it tightly, without repeating yourself or using symbols like '≈'. "
+    "Be honest about how firm it is, briefly, in one clause: if the "
     "research shows a range or diminishing returns rather than one best "
     "value, if your answer is a pick within that range, or if the evidence "
     "is thin or mixed, say so (e.g. 'the research shows a range, not one "
@@ -899,10 +904,10 @@ _SUMMARY_RULES = (
     "each set where it only assists as a half' - and never so it could read "
     "as 'half sets' or as each set being halved. "
     "Lifters count TOTAL sets - every set that trains the muscle as 1 - "
-    "so a question about sets that doesn't say 'fractional' gets its final "
-    "answer in total sets, with fractional explained: give the fractional "
-    "figure, then convert it - total sets = fractional sets + half the "
-    "indirect sets. Which exercises are which (the research's own "
+    "so a question about sets that doesn't say 'fractional' gets its answer "
+    "line in total sets, and the reasoning gives the fractional figure and "
+    "how it converts - total sets = fractional sets + half the indirect "
+    "sets. Which exercises are which (the research's own "
     "classification): chest, quadriceps and hamstrings get almost only "
     "direct sets (presses and flyes; squats, leg presses and extensions; leg "
     "curls), so their total equals their fractional count; triceps get "
@@ -972,7 +977,7 @@ def _statement_schema(source_ids: list[str], with_summary: bool = False) -> type
         # already laid out rather than writing the conclusion first.
         summary = pydantic.create_model(
             "Summary",
-            text=(str, pydantic.Field(description="The practical answer, three or four short sentences.")),
+            text=(str, pydantic.Field(description="The answer alone on the first line, then one line break and the reasoning.")),
             sources=(list[source_type], ...),
         )
         fields["summary"] = (summary | None, ...)
@@ -1033,7 +1038,7 @@ def rewrite_summary(topic: str, chunks: list[dict], rejected: str, problems: lis
     source_type = Literal[tuple(c["id"] for c in chunks)] if chunks else str
     summary = pydantic.create_model(
         "Summary",
-        text=(str, pydantic.Field(description="The practical answer, three or four short sentences.")),
+        text=(str, pydantic.Field(description="The answer alone on the first line, then one line break and the reasoning.")),
         sources=(list[source_type], ...),
     )
     schema = pydantic.create_model("SummaryAnswer", summary=(summary | None, ...))
