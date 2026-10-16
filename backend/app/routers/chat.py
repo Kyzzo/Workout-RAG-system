@@ -28,10 +28,11 @@ from ..rag.generate import (
     generate_intensity_load,
     generate_volume_sets,
     max_sets_per_exercise,
+    rewrite_summary,
     search_general,
 )
 from ..rag.corpus import evidence_label, evidence_text
-from ..rag.verification import STATEMENT_JUDGE, verify_citation, verify_summary
+from ..rag.verification import STATEMENT_JUDGE, check_summary, verify_citation
 from .generation import (
     _GENERAL_KNOWLEDGE_NOTE,
     _SUPPORTED_STATUSES,
@@ -482,7 +483,34 @@ def _states_only_prescription(text: str, prescription_values: str) -> bool:
     return set(_NUMBER.findall(text)) <= allowed
 
 
-def _verify_statements(question: str, parsed, sources: dict[str, dict], prescription_values: str | None = None):
+def _retry_summary(question: str, summary, verdict, chunks: list[dict], sources: dict[str, dict]):
+    """One rewrite of a rejected summary - only the summary, from the same
+    excerpts - told what the judge flagged, then judged again. The summary
+    carries the answer's one clear assertion, so dropping it left answers
+    with findings but no answer. Returns (summary, sources, ok); on any
+    failure the rejected summary comes back with ok False and is dropped."""
+    report("Rewriting the summary")
+    problems = [
+        f"{f.figure}: the summary words it as {f.unit_in_summary}; the excerpts report {f.unit_in_excerpts}"
+        for f in (verdict.figures if verdict is not None else []) if not f.same_unit
+    ]
+    try:
+        rewritten = rewrite_summary(question, chunks, summary.text, problems)
+    except Exception:
+        rewritten = None
+    if rewritten is None:
+        return summary, [], False
+    new_sources = [sources[src] for src in dict.fromkeys(rewritten.sources) if src in sources]
+    second = check_summary(question, rewritten.text, [evidence_text(s) for s in new_sources])
+    if second is not None and second.outcome == "supported":
+        return rewritten, new_sources, True
+    return summary, [], False
+
+
+def _verify_statements(
+    question: str, parsed, sources: dict[str, dict], prescription_values: str | None = None,
+    summary_chunks: list[dict] | None = None,
+):
     """Checks every statement against each source it cites with the same
     judge as everything else, keeping a statement only if at least one of
     its research sources supports it AS WRITTEN (the judge rejects changed
@@ -515,15 +543,18 @@ def _verify_statements(question: str, parsed, sources: dict[str, dict], prescrip
     to_check = sum(1 for _, _, found in checks if found) + (1 if summary_sources else 0)
     if to_check:
         report(f"Checking {to_check} statement{'' if to_check == 1 else 's'} against their sources")
-    statuses, summary_ok = [], False
+    statuses, verdict = [], None
     if pairs or summary_sources:
         with ThreadPoolExecutor(max_workers=min(len(pairs) + 1, 16)) as pool:
             summary_check = (
-                pool.submit(verify_summary, question, summary.text, [evidence_text(s) for s in summary_sources])
+                pool.submit(check_summary, question, summary.text, [evidence_text(s) for s in summary_sources])
                 if summary_sources else None
             )
             statuses = list(pool.map(judge, pairs))
-            summary_ok = summary_check.result() if summary_check else False
+            verdict = summary_check.result() if summary_check else None
+    summary_ok = verdict is not None and verdict.outcome == "supported"
+    if summary and not summary_ok and summary_chunks:
+        summary, summary_sources, summary_ok = _retry_summary(question, summary, verdict, summary_chunks, sources)
     status_iter = iter(statuses)
 
     kept, removed = [], 0
@@ -633,7 +664,7 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
 
 def _attempt_general_question(topic: str, candidates: list[dict] | None = None):
     parsed, chunks = answer_general_question(topic, candidates)
-    kept, removed, summary = _verify_statements(topic, parsed, {c["id"]: c for c in chunks})
+    kept, removed, summary = _verify_statements(topic, parsed, {c["id"]: c for c in chunks}, summary_chunks=chunks)
     return parsed, kept, removed, summary
 
 

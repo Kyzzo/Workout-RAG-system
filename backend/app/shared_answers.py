@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .citations import get_or_create_citation
 
-ANSWER_VERSION = "2026-10-15h"  # h: one clear assertion first, statements as its evidence; shorter and plainer
+ANSWER_VERSION = "2026-10-15i"  # i: tight reasoning after the assertion; a rejected summary is rewritten once
 
 
 @dataclass

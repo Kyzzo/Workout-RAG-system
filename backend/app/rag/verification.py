@@ -327,15 +327,25 @@ def judge_summary(question: str, summary: str, excerpts: list[str], judge: Judge
     return verdict
 
 
+def check_summary(
+    question: str, summary: str, excerpts: list[str], judge: Judge | None = None,
+) -> SummaryVerdict | None:
+    """The summary judge's verdict - with the figures it compared, so a
+    rejected summary's rewrite can be told what to fix - or None if no
+    verdict could be had (which counts as not verified)."""
+    if not excerpts:
+        return None
+    try:
+        return judge_summary(question, summary, excerpts, judge)
+    except Exception:
+        return None
+
+
 def verify_summary(question: str, summary: str, excerpts: list[str], judge: Judge | None = None) -> bool:
     """Whether a cross-source summary is a fair consensus of its cited
     excerpts. Any failure to get a verdict counts as not verified."""
-    if not excerpts:
-        return False
-    try:
-        return judge_summary(question, summary, excerpts, judge).outcome == "supported"
-    except Exception:
-        return False
+    verdict = check_summary(question, summary, excerpts, judge)
+    return verdict is not None and verdict.outcome == "supported"
 
 
 def verify_citation(

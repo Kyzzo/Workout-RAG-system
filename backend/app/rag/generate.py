@@ -818,7 +818,7 @@ def build_frequency_query(muscle_group: str | None, goal: str) -> str:
 # (Aube 2022) with a hypertrophy threshold in fractional sets (Pelland via
 # Remmert 2025) into a range neither study states.
 _STATEMENT_RULES = (
-    "Write your answer as a list of at most three statements - the "
+    "Write your answer as a list of at most five statements - the "
     "findings that matter most for the question, not everything the "
     "excerpts contain. Each statement is ONE "
     "factual claim in one short sentence (under about 30 words), in plain "
@@ -862,13 +862,16 @@ _STATEMENT_RULES = (
 
 _SUMMARY_RULES = (
     " Then write `summary`: the direct, practical answer to the question in "
-    "two or three short, plain sentences (under about 70 words), the way a knowledgeable coach "
+    "three or four short, plain sentences (under about 100 words), the way a knowledgeable coach "
     "would sum up the research for a lifter. Its FIRST sentence is ONE "
     "clear assertion that answers the question - a concrete number or range "
     "in the unit asked for, e.g. 'For most lifters, roughly 5-18 sets per "
-    "muscle per week' - and everything after it supports that assertion "
-    "(how sets are counted, what happens above or below, who it applies "
-    "to). Be honest about how firm it is, briefly, in one clause: if the "
+    "muscle per week'. Right after it, give the reasoning: the key findings "
+    "behind the answer in plain words (e.g. growth rises with weekly sets "
+    "but each extra set adds less), then anything the lifter needs to apply "
+    "it (how sets are counted, what happens above or below, who it applies "
+    "to). Keep the reasoning - just say it tightly, without repeating "
+    "yourself. Be honest about how firm it is, briefly, in one clause: if the "
     "research shows a range or diminishing returns rather than one best "
     "value, if your answer is a pick within that range, or if the evidence "
     "is thin or mixed, say so (e.g. 'the research shows a range, not one "
@@ -969,7 +972,7 @@ def _statement_schema(source_ids: list[str], with_summary: bool = False) -> type
         # already laid out rather than writing the conclusion first.
         summary = pydantic.create_model(
             "Summary",
-            text=(str, pydantic.Field(description="The practical answer, one to three sentences.")),
+            text=(str, pydantic.Field(description="The practical answer, three or four short sentences.")),
             sources=(list[source_type], ...),
         )
         fields["summary"] = (summary | None, ...)
@@ -1010,6 +1013,50 @@ def answer_general_question(
         with_summary=True,
     )
     return parsed, chunks
+
+
+_SUMMARY_ONLY_PROMPT = (
+    "You answer research questions using only the provided context. Each "
+    "context excerpt is labeled with a bracketed ID like [abc-123]. Write "
+    "only the summary."
+    + _SUMMARY_RULES
+)
+
+
+def rewrite_summary(topic: str, chunks: list[dict], rejected: str, problems: list[str]) -> pydantic.BaseModel | None:
+    """A second summary for an answer whose first one was rejected - only the
+    summary is rewritten, from the same excerpts. The writer sees the
+    rejected text and the figures the judge flagged, so it knows what to
+    fix. None if it writes none (the answer then shows its statements)."""
+    context_block = "\n\n".join(f"[{c['id']}] ({context_label(c)}) {c['text']}" for c in chunks)
+    flagged = "\n".join(f"- {p}" for p in problems) or "- (no specific figure flagged)"
+    source_type = Literal[tuple(c["id"] for c in chunks)] if chunks else str
+    summary = pydantic.create_model(
+        "Summary",
+        text=(str, pydantic.Field(description="The practical answer, three or four short sentences.")),
+        sources=(list[source_type], ...),
+    )
+    schema = pydantic.create_model("SummaryAnswer", summary=(summary | None, ...))
+    model, effort = STATEMENT_ANSWER_MODEL
+    completion = client.chat.completions.parse(
+        model=model,
+        **({"reasoning_effort": effort} if effort else {}),
+        messages=[
+            {"role": "system", "content": _SUMMARY_ONLY_PROMPT},
+            {"role": "user", "content": (
+                f"Context:\n{context_block}\n\nQuestion: {topic}\n\n"
+                f"A previous summary was rejected by a checker as not a fair consensus of these excerpts:\n"
+                f"{rejected}\n\nFigures it flagged:\n{flagged}\n\n"
+                "Write a new summary that fixes this: every figure must be one the excerpts support, in "
+                "its own unit or openly converted, and no range the excerpts don't cover."
+            )},
+        ],
+        response_format=schema,
+    )
+    message = completion.choices[0].message
+    if message.refusal or message.parsed is None:
+        return None
+    return message.parsed.summary
 
 
 PRESCRIPTION_SOURCE = "prescription"

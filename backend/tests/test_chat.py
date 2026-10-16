@@ -344,7 +344,7 @@ def _with_summary(parsed, text, sources):
     return parsed
 
 
-@patch("app.routers.chat.verify_summary", return_value=True)
+@patch("app.routers.chat.check_summary", return_value=SimpleNamespace(outcome="supported", figures=[]))
 @patch("app.routers.chat.verify_citation", return_value="primary_support")
 @patch("app.routers.chat.answer_general_question")
 @patch("app.routers.chat.route_chat_message")
@@ -371,11 +371,13 @@ def test_verified_summary_leads_the_answer(mock_route, mock_answer, _verify, moc
     assert result.grounding_note is None
 
 
-@patch("app.routers.chat.verify_summary", return_value=False)
+@patch("app.routers.chat.rewrite_summary", return_value=None)
+@patch("app.routers.chat.check_summary", return_value=SimpleNamespace(outcome="contradicted", figures=[]))
 @patch("app.routers.chat.verify_citation", return_value="primary_support")
 @patch("app.routers.chat.answer_general_question")
 @patch("app.routers.chat.route_chat_message")
-def test_rejected_summary_is_dropped_and_counted(mock_route, mock_answer, _verify, _summary, db_session, owner_and_prescription):
+def test_rejected_summary_is_dropped_and_counted(mock_route, mock_answer, _verify, _summary, _rewrite, db_session,
+                                                 owner_and_prescription):
     user, _ = owner_and_prescription
     mock_route.return_value = _route("answer_general_question", topic="t")
     mock_answer.return_value = (
@@ -387,3 +389,34 @@ def test_rejected_summary_is_dropped_and_counted(mock_route, mock_answer, _verif
 
     assert result.answer == "Cited claim. [1]"
     assert "1 statement was removed" in result.grounding_note
+
+
+@patch("app.routers.chat.rewrite_summary")
+@patch("app.routers.chat.check_summary")
+@patch("app.routers.chat.verify_citation", return_value="primary_support")
+@patch("app.routers.chat.answer_general_question")
+@patch("app.routers.chat.route_chat_message")
+def test_a_rejected_summary_is_rewritten_once_with_what_was_flagged(
+    mock_route, mock_answer, _verify, mock_check, mock_rewrite, db_session, owner_and_prescription,
+):
+    # The summary carries the answer's one clear assertion; dropping it left
+    # answers with findings but no answer.
+    user, _ = owner_and_prescription
+    mock_route.return_value = _route("answer_general_question", topic="sets for chest?")
+    mock_answer.return_value = (
+        _with_summary(_answer(("Growth rose with weekly sets.", ["a"])), "Roughly 10-30 sets is optimal.", ["a"]),
+        _chunks("a"),
+    )
+    flagged = SimpleNamespace(figure="10-30", unit_in_summary="sets", unit_in_excerpts="fractional sets", same_unit=False)
+    mock_check.side_effect = [SimpleNamespace(outcome="contradicted", figures=[flagged]),
+                              SimpleNamespace(outcome="supported", figures=[])]
+    mock_rewrite.return_value = SimpleNamespace(text="For most lifters, roughly 5-18 fractional sets.", sources=["a"])
+
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="sets for chest?"), db=db_session,
+                               current_user=user)
+
+    assert result.answer.startswith("For most lifters, roughly 5-18 fractional sets. [1]")
+    assert result.grounding_note is None  # the rewrite passed: nothing removed
+    problems = mock_rewrite.call_args.args[3]
+    assert problems == ["10-30: the summary words it as sets; the excerpts report fractional sets"]
+    assert mock_rewrite.call_count == 1 and mock_check.call_count == 2  # one rewrite, judged again
