@@ -247,6 +247,60 @@ SUMMARY_CASES = [
     SummaryCase("failure overclaimed", ("refalo_key_points",), _FAILURE_QUESTION,
                 "Training to failure produces clearly more muscle growth than stopping short, so every set should "
                 "go to failure.", "rejected", "Refalo found similar growth"),
+    # From the Oct 15 end-to-end chat audit: every unfaithful claim was a
+    # lead summary adding advice no excerpt gives. The four summaries are
+    # verbatim; each has a faithful counterpart from the same excerpts.
+    # KNOWN GAP: the current summary judge passes the three advice traps
+    # (Oct 16: 1/5, 0/5, 0/5 correct). A separate advice judge at low effort
+    # catches them 5/5 but adds ~15s per answer - see
+    # notes/design_choices/chat_speed_cost_accuracy.txt section 8.
+    SummaryCase("advice moved to beginners", ("lopez_conclusions", "aube_conclusion"),
+                "Do trained lifters need more volume than beginners?",
+                "For most lifters: more weekly sets help, but trained lifters don't clearly need more than beginners.\n"
+                "Count every set that trains the muscle; size and strength both rise with volume, but each extra set "
+                "helps less. In trained people, several studies report no extra hypertrophy from very high weekly "
+                "sets versus moderate work, while beginners tend to grow more and may benefit from simply training "
+                "more often. Use moderate volumes first, then add sets only if progress stalls.",
+                "rejected", "Lopez found more sessions helped those WITH training experience, not beginners"),
+    SummaryCase("faithful training status", ("lopez_conclusions", "aube_conclusion"),
+                "Do trained lifters need more volume than beginners?",
+                "Not clearly: in very strong lifters, 12 to 24 weekly sets produced similar muscle growth.\n"
+                "Across studies, untrained participants grew more, while those with training experience gained more "
+                "from doing more sessions. Evidence on how much more volume trained lifters need is limited.",
+                "supported", "each finding with its own population"),
+    SummaryCase("study intake as a target", ("refalo_nutrition",), "How much protein do I need per day to build muscle?",
+                "For most lifters aiming to gain: about 2.3 to 2.5 grams of protein per kilogram of body weight each "
+                "day.\nCount grams per kilogram over the whole day; in trained lifters here, average protein intakes "
+                "were 2.5 g/kg for men and 2.3 g/kg for women during successful hypertrophy training. These intakes "
+                "supported muscle gain in the included trials; adjust up or down if you're smaller, larger, or "
+                "struggling to hit calories. Evidence here reports what was used, not a single best target.",
+                "rejected", "what one trial's participants ate, turned into a recommendation"),
+    SummaryCase("faithful study intake", ("refalo_nutrition",), "How much protein do I need per day to build muscle?",
+                "This research doesn't set a protein target.\nIn one trial, resistance-trained men averaged about 2.5 "
+                "and women about 2.3 grams of protein per kilogram of body weight a day while training; that is what "
+                "they ate, not a tested requirement.",
+                "supported", "the intake reported as a study condition"),
+    SummaryCase("advice on an uncovered topic", ("schoenfeld_strength_zone",), "Should I stretch before lifting?",
+                "Yes, but keep it short and specific to your lifts.\nA brief warm-up and light dynamic stretching that "
+                "matches the movement helps, and heavy loading is what drives strength, especially for 1RM. If long "
+                "static stretching makes you feel sluggish, skip it before heavy sets. Evidence here focuses on "
+                "loading and specificity, not stretching per se, so treat this as practical guidance.",
+                "rejected", "the excerpt never mentions stretching or warm-ups"),
+    # The order case was first written as an unsupported-advice trap; the
+    # Refalo excerpt does tie exercise order to which muscle grows, so
+    # order advice drawn from it is supported when labeled as that finding.
+    SummaryCase("faithful order from a related finding", ("kassiano_variation", "refalo_fatigue"),
+                "should I do this before or after my bench press?",
+                "Do first the exercise for the muscle you most want to grow.\nIn one trial, an exercise done after "
+                "another taken to failure grew its target muscle less, so order within a session can shift which "
+                "muscle benefits. That was shown for the quadriceps, not these exercises, so treat it as a guide.",
+                "supported", "Refalo ties order to muscle-specific growth; population and exercises labeled"),
+    SummaryCase("faithful range with a general hedge", _VOLUME, CHAT_QUESTION,
+                "For most lifters: roughly 5 to 18 fractional sets per muscle per week.\nFractional sets count each "
+                "set where the muscle is the main mover as 1 and each set where it only assists as a half. Growth "
+                "rises with weekly sets but each extra set adds less. Start in that range and adjust based on your "
+                "recovery and progress; the research shows a range, not one best number.",
+                "supported", "a general 'adjust by recovery' hedge needs no excerpt"),
 ]
 
 

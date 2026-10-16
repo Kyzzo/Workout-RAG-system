@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .citations import get_or_create_citation
 
-ANSWER_VERSION = "2026-10-15k"  # k: summaries use only figures the sources state, lead with the efficient range; two rewrites
+ANSWER_VERSION = "2026-10-16a"  # a: summary writer gives only advice a finding supports; declines when no excerpt answers
 
 
 @dataclass
