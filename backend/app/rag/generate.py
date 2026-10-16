@@ -818,10 +818,14 @@ def build_frequency_query(muscle_group: str | None, goal: str) -> str:
 # (Aube 2022) with a hypertrophy threshold in fractional sets (Pelland via
 # Remmert 2025) into a range neither study states.
 _STATEMENT_RULES = (
-    "Write your answer as a list of at most five statements - the "
+    "Write your answer as a list of at most three statements - the "
     "findings that matter most for the question, not everything the "
     "excerpts contain. Each statement is ONE "
-    "factual claim in one or two sentences, and its `sources` lists the "
+    "factual claim in one short sentence (under about 30 words), in plain "
+    "words: give the finding, not the statistics - no effect sizes, "
+    "percentages of change, intervals, p-values or model terms (PUOS, "
+    "SDES, ES, CrI); training numbers a lifter uses (sets, reps, %1RM) are "
+    "fine. Its `sources` lists the "
     "IDs of the excerpts that state or report that exact claim. Every "
     "statement is checked against its sources and removed if they don't "
     "support it as written, so: do not write uncited statements, "
@@ -858,15 +862,19 @@ _STATEMENT_RULES = (
 
 _SUMMARY_RULES = (
     " Then write `summary`: the direct, practical answer to the question in "
-    "two to four short, plain sentences, the way a knowledgeable coach "
-    "would sum up the research for a lifter. Its FIRST sentence answers the "
-    "question outright with a concrete number or rough range in the unit "
-    "asked for - e.g. 'For most lifters, roughly 5-18 sets per muscle per "
-    "week' - and the rest explains it (how sets are counted, what happens "
-    "above or below, who it applies to). If the research shows diminishing "
-    "returns rather than one best value, say so in a few words but still "
-    "give the practical range it supports; never end with only an "
-    "explanation and no clear answer. No "
+    "two or three short, plain sentences (under about 70 words), the way a knowledgeable coach "
+    "would sum up the research for a lifter. Its FIRST sentence is ONE "
+    "clear assertion that answers the question - a concrete number or range "
+    "in the unit asked for, e.g. 'For most lifters, roughly 5-18 sets per "
+    "muscle per week' - and everything after it supports that assertion "
+    "(how sets are counted, what happens above or below, who it applies "
+    "to). Be honest about how firm it is, briefly, in one clause: if the "
+    "research shows a range or diminishing returns rather than one best "
+    "value, if your answer is a pick within that range, or if the evidence "
+    "is thin or mixed, say so (e.g. 'the research shows a range, not one "
+    "best number' or 'evidence here is limited') - without hedging the "
+    "assertion itself into vagueness. Never end with only an explanation "
+    "and no clear answer. No "
     "statistics or study jargon (no 'PUOS', 'SDES', confidence intervals); "
     "explain a term like 'fractional sets' in a few words if you use it. It is shown "
     "first, with the statements after it as the evidence. Its `sources` "
@@ -898,14 +906,19 @@ _SUMMARY_RULES = (
     "indirect sets from presses, biceps from rows and pulldowns, front "
     "delts from presses, so their total is higher - show it with an example "
     "(10 fractional triceps sets = 6 pushdowns + 8 bench sets = 14 total "
-    "sets). Never halve a fractional count to get total sets. Always name "
+    "sets) - but only for a muscle the question is about; keep the counting "
+    "explanation to one short clause. Never halve a fractional count to get "
+    "total sets. Always name "
     "the unit of every set count. Set summary to null "
     "if the excerpts don't support a practical answer."
 )
 
 _QA_SYSTEM_PROMPT = (
     "You answer research questions using only the provided context. Each "
-    "context excerpt is labeled with a bracketed ID like [abc-123]. "
+    "context excerpt is labeled with a bracketed ID like [abc-123]. Decide "
+    "first on the ONE clear answer you will give in the summary; the "
+    "statements are its evidence - choose the findings that most directly "
+    "support or qualify that answer, strongest first. "
     + _STATEMENT_RULES
     + _SUMMARY_RULES
 )
@@ -947,7 +960,7 @@ def _statement_schema(source_ids: list[str], with_summary: bool = False) -> type
     source_type = Literal[tuple(source_ids)] if source_ids else str
     statement = pydantic.create_model(
         "Statement",
-        text=(str, pydantic.Field(description="One factual claim, one or two sentences.")),
+        text=(str, pydantic.Field(description="One factual claim in one short, plain sentence.")),
         sources=(list[source_type], ...),
     )
     fields = {"statements": (list[statement], ...)}

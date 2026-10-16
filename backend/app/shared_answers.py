@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .citations import get_or_create_citation
 
-ANSWER_VERSION = "2026-10-15g"  # g: summaries lead with a direct answer; anchored best-amount questions get full answers
+ANSWER_VERSION = "2026-10-15h"  # h: one clear assertion first, statements as its evidence; shorter and plainer
 
 
 @dataclass
