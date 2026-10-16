@@ -291,16 +291,20 @@ unit; a summary that names a different one ('total' or 'direct' for \
 fractional, per session for per week) does not. Any figure with same_unit \
 false makes the summary contradicted.
 
-Conversions between set counts are allowed when done openly. A fixed fact you \
-may rely on even if no excerpt states it: fractional sets = direct sets + half \
-of indirect sets (sets where the muscle only assists), so direct sets equal \
-fractional sets when all of the muscle's work targets it directly, and are \
-fewer when some of it comes from assisting. A converted figure is fine - list \
-it with same_unit true - only if the summary also gives the source figure in \
-its own unit and says how it converts (e.g. '5-18 fractional sets, which is \
-5-18 direct sets if all your chest work targets the chest directly'), and the \
-conversion follows from that fact. A figure stated in another unit without \
-its source figure and conversion, or converted wrongly, has same_unit false. \
+Conversions between set counts are allowed when done openly. Fixed facts you \
+may rely on even if no excerpt states them: fractional sets = direct sets + \
+half of indirect sets (sets where the muscle only assists), and total sets = \
+direct + indirect sets, so total sets = fractional sets + half the indirect \
+sets; total, fractional and direct counts are equal when all of a muscle's \
+work is direct. In the research's classification, chest, quadriceps and \
+hamstrings get almost only direct sets, while triceps get indirect sets from \
+presses, biceps from rows and pulldowns, and front delts from presses. A \
+converted figure is fine - list it with same_unit true - only if the summary \
+also gives the source figure in its own unit and says how it converts (e.g. \
+'5-18 fractional sets, which is 5-18 total sets for chest, since presses and \
+flyes are direct'), and the conversion follows from these facts. A figure \
+stated in another unit without its source figure and conversion, or \
+converted wrongly (e.g. halving a fractional count), has same_unit false. \
 Then give the `outcome`."""
 
 

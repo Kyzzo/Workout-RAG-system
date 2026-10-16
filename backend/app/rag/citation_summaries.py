@@ -88,10 +88,13 @@ fine.
 session), and how strong the finding is ('similar', 'no significant \
 difference', 'a trend'). Never call something optimal or a limit unless an \
 excerpt does.
-- This app counts sets fractionally (a set where the muscle only assists \
-counts as half), so whenever you state a number of sets - the program's or a \
-study's - write 'fractional sets' if the excerpts count them that way, or the \
-unit they do use. Never leave a set count's unit unstated.
+- This app counts sets fractionally: a weighted total of all the sets that \
+train the muscle, where a set in which it's the main mover adds 1 and a set \
+in which it only assists adds a half. Whenever you state a number of sets - \
+the program's or a study's - write 'fractional sets' if the excerpts count \
+them that way, or the unit they do use, and never leave a set count's unit \
+unstated. If you mention fractional sets, define them in plain words as that \
+weighted total, never so they could read as 'half sets'.
 - Plain words: 'muscle growth' not 'hypertrophy', 'strength (1-rep max)' not \
 '1RM' alone. Don't name 'the excerpts' or number them, and don't give advice \
 beyond what they support."""

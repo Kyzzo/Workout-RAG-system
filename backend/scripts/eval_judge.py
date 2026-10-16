@@ -196,13 +196,23 @@ SUMMARY_CASES = [
     SummaryCase("unit changed", _VOLUME, CHAT_QUESTION,
                 "About 5 to 10 total sets per muscle per week is the most efficient range for growth, and 11 to 18 "
                 "total sets is intermediate.", "rejected", "the tiers are fractional sets, presented as total sets"),
-    # Answering in the user's unit: an open, correct conversion from
-    # fractional to direct sets passes; a wrong one doesn't.
-    SummaryCase("faithful conversion to direct sets", _VOLUME, "How many sets per week should I do for chest?",
-                "Roughly 5 to 18 fractional sets per muscle per week is an efficient range, with smaller gains above "
-                "it. Since fractional sets count a set where the muscle only assists as half, that is 5 to 18 direct "
-                "sets if all of your chest work targets the chest directly, and fewer direct sets if compound lifts "
-                "also train it.", "supported", "the source figure, its unit and an open, correct conversion"),
+    # Answering in the user's unit (total sets, as lifters count): an open,
+    # correct conversion from fractional passes; a wrong one doesn't.
+    SummaryCase("faithful conversion to total sets (chest)", _VOLUME, "How many sets per week should I do for chest?",
+                "Research counts fractional sets: a direct set counts as 1 and a set where the muscle only assists as "
+                "half. Roughly 5 to 18 fractional sets per week is an efficient range, with smaller gains above it. "
+                "Chest work - presses and flyes - is direct, so that is also 5 to 18 total chest sets per week.",
+                "supported", "the source figure, its unit and an open, correct conversion"),
+    SummaryCase("faithful conversion to total sets (triceps)", _VOLUME,
+                "How many sets per week should I do for triceps?",
+                "Research counts fractional sets: a direct set counts as 1 and a set where the muscle only assists as "
+                "half. Roughly 5 to 18 fractional sets per week is an efficient range. Presses train the triceps "
+                "indirectly, so total sets run higher: for example 10 fractional sets could be 6 pushdowns plus 8 "
+                "bench sets, which is 14 total sets.", "supported", "total = fractional + half the indirect sets"),
+    SummaryCase("halved conversion", _VOLUME, "How many sets per week should I do for chest?",
+                "Roughly 5 to 18 fractional sets per week is an efficient range; since a fractional set is half a "
+                "normal set, that works out to about 2.5 to 9 total chest sets per week.", "rejected",
+                "fractional counts aren't halved - for chest they equal total sets"),
     SummaryCase("wrong conversion", _VOLUME, "How many sets per week should I do for chest?",
                 "Roughly 5 to 18 fractional sets per muscle per week is an efficient range, which works out to about "
                 "10 to 36 direct sets per week.", "rejected",
