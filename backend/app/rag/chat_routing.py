@@ -38,7 +38,10 @@ _ROUTER_SYSTEM_PROMPT = (
     "research ('update based on the latest research').\n"
     "- discuss_prescription: the user is asking ABOUT a specific already-"
     "generated value in their program without asking to change it, e.g. "
-    "'why is this 8-10 reps' or 'what's the evidence behind this'. Only when "
+    "'why is this 8-10 reps' or 'what's the evidence behind this'. If they "
+    "ask why this exercise was chosen rather than about one of its values "
+    "('why this exercise?', 'why was this picked?'), set target_field to "
+    "'exercise' (a request to replace it is adjust_prescription). Only when "
     "the message is anchored to a field: a follow-up about an earlier "
     "answer in this conversation (e.g. 'what is that in ordinary sets?') is "
     "answer_general_question.\n"
@@ -82,9 +85,11 @@ class ChatRouteDecision(pydantic.BaseModel):
     )
     target_field: Literal["sets", "reps", "load", "rir", "exercise"] | None = pydantic.Field(
         default=None,
-        description="For adjust_prescription only: which value the user "
-        "wants changed - 'sets', 'reps', 'load' (%1RM), 'rir' (effort), or "
-        "'exercise' to swap the exercise for another.",
+        description="For adjust_prescription: which value the user wants "
+        "changed - 'sets', 'reps', 'load' (%1RM), 'rir' (effort), or "
+        "'exercise' to swap the exercise for another. For "
+        "discuss_prescription: 'exercise' only when they ask why this "
+        "exercise was chosen, otherwise null.",
     )
     adjustment_kind: Literal["set_value", "increase", "decrease", "regenerate"] | None = pydantic.Field(
         default=None,

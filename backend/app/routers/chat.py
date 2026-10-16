@@ -630,6 +630,8 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
         )
 
     prescription = get_owned_prescription(decision.field_id, db, current_user)
+    if getattr(decision, "target_field", None) == "exercise":
+        return _exercise_choice_reply(prescription)
 
     # No new retrieval: the excerpts are the prescription's stored citations
     # that already passed verification for their values (only primary/
@@ -669,6 +671,32 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
         answer=answer or "The sources on file for this prescription don't answer that question.",
         citations=citations,
         grounding_note=" ".join(notes) or None,
+    )
+
+
+# "Why this exercise?" has no research answer: the corpus has no
+# exercise-selection studies and citations attach to numbers, not to which
+# exercise was picked (exercise_selection.py). Sent to the discussion
+# writer, it answered a nearby question instead - a cited defence of the
+# reps and RIR. Fixed text from the slot itself: no claim to cite or check.
+def _exercise_choice_reply(prescription: models.WeeklyPrescription) -> schemas.ChatResponse:
+    slot = prescription.exercise_slot
+    secondary = slot.secondary_muscle_groups or []
+    also = ""
+    if secondary:
+        names = secondary[0] if len(secondary) == 1 else ", ".join(secondary[:-1]) + " and " + secondary[-1]
+        also = f" It also trains your {names}, and each set counts as half a set toward those muscles' weekly volume."
+    answer = (
+        f"{slot.exercise_name} is in your program to train your {slot.muscle_group}.{also} "
+        "The choice of exercise isn't research-cited: the papers behind this app study how many sets, how many "
+        "reps and how close to failure to train, not which exercises to use. The sets, reps and effort shown "
+        "for it are cited. If you'd rather use a different exercise, ask me to swap it, for example "
+        "'swap this exercise' or 'swap this for' a movement you prefer."
+    )
+    return schemas.ChatResponse(
+        mode="discuss_prescription",
+        prescription=schemas.WeeklyPrescriptionOut.model_validate(prescription),
+        answer=answer,
     )
 
 

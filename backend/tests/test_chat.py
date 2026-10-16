@@ -164,6 +164,45 @@ def test_discuss_statement_that_misrepresents_its_excerpt_is_removed(
     assert "1 statement was removed" in result.grounding_note
 
 
+@patch("app.routers.chat.answer_prescription_discussion")
+@patch("app.routers.chat.route_chat_message")
+def test_asking_why_this_exercise_gets_a_plain_reply_without_research(
+    mock_route, mock_answer, db_session, owner_and_prescription,
+):
+    # 'why this exercise selection?' used to get a cited answer about the
+    # reps and RIR instead: exercise choice isn't research-cited.
+    user, prescription = owner_and_prescription
+    prescription.exercise_slot.secondary_muscle_groups = ["front delts", "triceps"]
+    db_session.commit()
+    mock_route.return_value = _route(
+        "discuss_prescription", field_id=prescription.id, target_field="exercise", question="why this exercise?",
+    )
+
+    result = send_chat_message(
+        request=schemas.ChatMessageRequest(message="why this exercise selection?", field_id=prescription.id),
+        db=db_session, current_user=user,
+    )
+
+    mock_answer.assert_not_called()  # no writer or judges
+    assert result.mode == "discuss_prescription" and result.prescription.id == prescription.id
+    assert result.answer.startswith("Barbell Bench Press is in your program to train your chest.")
+    assert "front delts and triceps" in result.answer
+    assert "isn't research-cited" in result.answer and "swap" in result.answer
+    assert result.citations == [] and result.grounding_note is None
+
+
+@patch("app.routers.chat.route_chat_message")
+def test_exercise_choice_question_still_enforces_ownership(mock_route, db_session, owner_and_prescription, other_user):
+    _, prescription = owner_and_prescription
+    mock_route.return_value = _route("discuss_prescription", field_id=prescription.id, target_field="exercise")
+
+    request = schemas.ChatMessageRequest(message="why this exercise?", field_id=prescription.id)
+    with pytest.raises(HTTPException) as exc_info:
+        send_chat_message(request=request, db=db_session, current_user=other_user)
+
+    assert exc_info.value.status_code == 404
+
+
 @patch("app.routers.chat.route_chat_message")
 def test_discuss_prescription_ownership_enforced(mock_route, db_session, owner_and_prescription, other_user):
     _, prescription = owner_and_prescription
