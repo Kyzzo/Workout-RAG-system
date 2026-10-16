@@ -65,7 +65,8 @@ type Api = ReturnType<typeof useApi>;
 const summaries = new Map<string, Promise<string | null>>();
 
 function combinedSummary(api: Api, question: string, citationIds: number[]): Promise<string | null> {
-  const ids = [...new Set(citationIds)].sort((a, b) => a - b);
+  // The endpoint takes at most 20 citations; a bigger panel is summarised from its first 20.
+  const ids = [...new Set(citationIds)].sort((a, b) => a - b).slice(0, 20);
   const key = `${question}|${ids.join(",")}`;
   let pending = summaries.get(key);
   if (!pending) {
