@@ -230,6 +230,55 @@ def test_uncited_statements_are_never_shown(mock_route, mock_answer, _verify, db
     assert result.answer == "Cited claim. [1]"
 
 
+@patch("app.routers.chat.verify_citation", return_value="primary_support")
+@patch("app.routers.chat.answer_general_question")
+@patch("app.routers.chat.route_chat_message")
+def test_unanchored_follow_up_about_an_earlier_answer_is_answered_as_research(
+    mock_route, mock_answer, _verify, db_session, owner_and_prescription,
+):
+    # 'what is that in ordinary set terms?' after a weekly-sets answer was
+    # routed to discuss_prescription with no prescription, and failed with
+    # 'This needs to say which exercise/week it's about'.
+    user, _ = owner_and_prescription
+    mock_route.return_value = _route(
+        "discuss_prescription", field_id=None,
+        question="How many direct sets per week for chest hypertrophy, rather than fractional sets?",
+    )
+    mock_answer.return_value = (_answer(("Claim.", ["c1"])), _chunks("c1"))
+
+    history = [schemas.ChatTurn(role="user", content="optimal sets per week for chest?"),
+               schemas.ChatTurn(role="assistant", content="Roughly 5-18 fractional sets.")]
+    result = send_chat_message(
+        request=schemas.ChatMessageRequest(message="what is that in ordinary set terms", history=history),
+        db=db_session, current_user=user,
+    )
+
+    assert result.mode == "answer_general_question"
+    # The earlier question travels with it, so the answer stays about chest.
+    assert mock_answer.call_args.args[0] == (
+        "optimal sets per week for chest? - follow-up: "
+        "How many direct sets per week for chest hypertrophy, rather than fractional sets?"
+    )
+
+
+@patch("app.routers.chat.answer_general_question")
+@patch("app.routers.chat.route_chat_message")
+def test_a_message_that_isnt_a_request_gets_a_plain_reply_without_research(
+    mock_route, mock_answer, db_session, owner_and_prescription,
+):
+    # 'what the fuck' after a set-count answer used to get a full research
+    # answer about volume and frequency.
+    user, _ = owner_and_prescription
+    mock_route.return_value = SimpleNamespace(tool="conversation", conversation_kind="complaint")
+
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="what the fuck"), db=db_session,
+                               current_user=user)
+
+    mock_answer.assert_not_called()  # no retrieval, writer or judges
+    assert result.answer.startswith("Sorry, that missed.")
+    assert result.citations == [] and result.grounding_note is None
+
+
 @patch("app.routers.chat.verify_citation", return_value="contradicted")
 @patch("app.routers.chat.answer_general_question")
 @patch("app.routers.chat.route_chat_message")

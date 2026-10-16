@@ -126,13 +126,53 @@ def _respond(request: schemas.ChatMessageRequest, db: Session, current_user: mod
 
     report("Understanding your question")
     decision = route_chat_message(request.message, request.field_id, request.history)
+    if decision.tool == "conversation":
+        return _conversation_reply(getattr(decision, "conversation_kind", None))
     if decision.tool == "adjust_prescription":
         report("Previewing the swap" if decision.target_field == "exercise" else "Working on the change")
         return _handle_adjust(decision, db, current_user, request.message)
-    if decision.tool == "discuss_prescription":
+    if (
+        decision.tool == "discuss_prescription"
+        and request.field_id is None
+        and getattr(decision, "field_id", None) is None
+    ):
+        # Discussing needs a prescription. Unanchored, the 'value' being
+        # asked about is an earlier chat answer ('what is that in ordinary
+        # set terms?' after a weekly-sets answer), so it's a research
+        # question. The router doesn't reliably rewrite it as standalone
+        # text, so the topic carries the earlier question it follows up on.
+        earlier = next((t.content for t in reversed(request.history) if t.role == "user"), None)
+        follow_up = decision.question or decision.topic or request.message
+        decision = SimpleNamespace(topic=f"{earlier} - follow-up: {follow_up}" if earlier else follow_up)
+    elif decision.tool == "discuss_prescription":
         report("Reading this prescription's sources")
         return _handle_discuss(decision, db, current_user, request.message)
     return _handle_general_question(decision, request.message, prefetch)
+
+
+# Replies to a message that isn't a request (thanks, a complaint, 'huh?').
+# Every message used to become a research question: 'what the fuck' after
+# a set-count answer got a full research answer about volume and
+# frequency (~15-20s, ~$0.11). Fixed text: no research claim, so nothing to
+# cite or check, and no model call beyond routing.
+_CONVERSATION_REPLIES = {
+    "thanks": "Glad it helped. Ask me anything else about your training, or ask me to change a value in "
+              "your program.",
+    "complaint": "Sorry, that missed. Tell me what was wrong or what you wanted - ask the question again, or "
+                 "say which part or unit to change - and I'll answer that directly.",
+    "greeting": "Hi! I can answer training research questions - sets, reps, effort, frequency, progression - "
+                "or change values in your program. What would you like?",
+    "unclear": "I'm not sure what you're asking. I can answer training research questions or change values "
+               "in your program - what would you like?",
+}
+
+
+def _conversation_reply(kind: str | None) -> schemas.ChatResponse:
+    # Sent as an answer with no citations or note, so the chat shows it as
+    # a plain message without a new response mode for the frontend.
+    return schemas.ChatResponse(
+        mode="answer_general_question", answer=_CONVERSATION_REPLIES.get(kind, _CONVERSATION_REPLIES["unclear"]),
+    )
 
 
 def _prefetched(prefetch: Future | None, topic: str, raw_message: str) -> list[dict] | None:

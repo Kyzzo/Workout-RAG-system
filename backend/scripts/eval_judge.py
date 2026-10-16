@@ -196,6 +196,17 @@ SUMMARY_CASES = [
     SummaryCase("unit changed", _VOLUME, CHAT_QUESTION,
                 "About 5 to 10 total sets per muscle per week is the most efficient range for growth, and 11 to 18 "
                 "total sets is intermediate.", "rejected", "the tiers are fractional sets, presented as total sets"),
+    # Answering in the user's unit: an open, correct conversion from
+    # fractional to direct sets passes; a wrong one doesn't.
+    SummaryCase("faithful conversion to direct sets", _VOLUME, "How many sets per week should I do for chest?",
+                "Roughly 5 to 18 fractional sets per muscle per week is an efficient range, with smaller gains above "
+                "it. Since fractional sets count a set where the muscle only assists as half, that is 5 to 18 direct "
+                "sets if all of your chest work targets the chest directly, and fewer direct sets if compound lifts "
+                "also train it.", "supported", "the source figure, its unit and an open, correct conversion"),
+    SummaryCase("wrong conversion", _VOLUME, "How many sets per week should I do for chest?",
+                "Roughly 5 to 18 fractional sets per muscle per week is an efficient range, which works out to about "
+                "10 to 36 direct sets per week.", "rejected",
+                "direct sets can't exceed fractional sets - the conversion is wrong"),
     SummaryCase("strength result as hypertrophy", _VOLUME, CHAT_QUESTION,
                 "About 18 weekly sets is the sweet spot for building quad size in trained lifters.",
                 "rejected", "Aube's ~18 sets is a squat 1RM finding"),

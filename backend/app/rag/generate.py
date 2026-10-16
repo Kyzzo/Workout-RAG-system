@@ -872,7 +872,16 @@ _SUMMARY_RULES = (
     "actually cover; keep units (fractional vs direct sets), outcome and "
     "population; never call a sub-range optimal, or turn 'no detectable "
     "difference' into a ceiling or a proven benefit; and mention a real "
-    "disagreement between sources rather than hide it. Set summary to null "
+    "disagreement between sources rather than hide it. Answer in the unit "
+    "the question asks for. Most set research reports FRACTIONAL sets (a set "
+    "where the muscle only assists counts as half), so a question about sets "
+    "that doesn't say 'fractional' gets its final answer in direct sets: give "
+    "the fractional figure, then convert it - direct sets = fractional sets "
+    "minus half the sets where the muscle only assists. For a muscle trained "
+    "only by exercises that target it directly the two are equal; for one "
+    "that also assists in compound lifts (e.g. triceps in pressing), say how "
+    "that lowers the direct sets needed. Always name the unit of every set "
+    "count. Set summary to null "
     "if the excerpts don't support a practical answer."
 )
 

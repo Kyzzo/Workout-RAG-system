@@ -15,7 +15,7 @@ client = OpenAI()
 # chunk_ids to an enum (citation_verification.txt section 2). Mis-routing
 # is a real, accepted residual risk (section 2), bounded to this fixed set
 # of outcomes rather than eliminated.
-ChatTool = Literal["adjust_prescription", "discuss_prescription", "answer_general_question"]
+ChatTool = Literal["adjust_prescription", "discuss_prescription", "answer_general_question", "conversation"]
 
 _ROUTER_SYSTEM_PROMPT = (
     "You are routing a user's chat message in a workout-program-structuring "
@@ -37,11 +37,20 @@ _ROUTER_SYSTEM_PROMPT = (
     "('more volume', 'go lighter'), or 'regenerate' to just redo it from the "
     "research ('update based on the latest research').\n"
     "- discuss_prescription: the user is asking ABOUT a specific already-"
-    "generated value without asking to change it, e.g. 'why is this 8-10 "
-    "reps' or 'what's the evidence behind this'.\n"
+    "generated value in their program without asking to change it, e.g. "
+    "'why is this 8-10 reps' or 'what's the evidence behind this'. Only when "
+    "the message is anchored to a field: a follow-up about an earlier "
+    "answer in this conversation (e.g. 'what is that in ordinary sets?') is "
+    "answer_general_question.\n"
     "- answer_general_question: a free-standing research question not "
     "about one specific prescribed value, e.g. 'what does research say "
     "about training to failure'.\n"
+    "- conversation: the message isn't a request at all - thanks, a "
+    "greeting, a reaction or complaint about an earlier answer ('that's "
+    "wrong', 'what the hell', 'huh?'), or something unclear or off-topic. "
+    "Set conversation_kind. Never use it for a message that asks a "
+    "training question or for a change, however casual or rude: 'wtf, so "
+    "how many sets for chest?' is a question.\n"
     "If the message is already anchored to a specific field (you'll be "
     "told so explicitly), assume adjust_prescription or "
     "discuss_prescription unless the message clearly asks something "
@@ -97,6 +106,10 @@ class ChatRouteDecision(pydantic.BaseModel):
         default=None,
         description="For answer_general_question only: the research topic "
         "being asked about, phrased as a clear question.",
+    )
+    conversation_kind: Literal["thanks", "complaint", "greeting", "unclear"] | None = pydantic.Field(
+        default=None,
+        description="For conversation only: what kind of message it is.",
     )
 
 
