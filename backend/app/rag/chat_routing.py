@@ -40,7 +40,8 @@ _ROUTER_SYSTEM_PROMPT = (
     "generated value in their program without asking to change it, e.g. "
     "'why is this 8-10 reps' or 'what's the evidence behind this'. If they "
     "ask why this exercise was chosen rather than about one of its values "
-    "('why this exercise?', 'why was this picked?'), set target_field to "
+    "('why this exercise?', 'why was this picked?', 'is there a better "
+    "exercise for this muscle?'), set target_field to "
     "'exercise' (a request to replace it is adjust_prescription). Only when "
     "the message is anchored to a field: a follow-up about an earlier "
     "answer in this conversation (e.g. 'what is that in ordinary sets?') is "
@@ -53,17 +54,25 @@ _ROUTER_SYSTEM_PROMPT = (
     "wrong', 'what the hell', 'huh?'), or something unclear or off-topic. "
     "Set conversation_kind. Never use it for a message that asks a "
     "training question or for a change, however casual or rude: 'wtf, so "
-    "how many sets for chest?' is a question.\n"
-    "If the message is already anchored to a specific field (you'll be "
-    "told so explicitly), assume adjust_prescription or "
-    "discuss_prescription unless the message clearly asks something "
-    "unrelated to that field - with one exception: a question asking what "
-    "the best, optimal or recommended amount is in general ('what's the "
-    "optimal sets per week for chest', 'how many sets should I do for "
-    "chest') is answer_general_question even when anchored; the anchor is "
-    "context, not the subject. A question about THEIR value ('why is this "
-    "12 sets', 'is my 12 sets too much') stays discuss_prescription, and a "
-    "request to change it stays adjust_prescription.\n"
+    "how many sets for chest?' is a question, and so is a question about "
+    "pain or injury.\n"
+    "If the message is anchored to an exercise (you'll be told which, and "
+    "its current values), the anchor is context, not necessarily the "
+    "subject:\n"
+    "- A request to change one of its values or swap it is "
+    "adjust_prescription.\n"
+    "- discuss_prescription is ONLY for a question about this exercise's "
+    "own sets, reps, load or effort (RIR) - why they are what they are, "
+    "whether they suit the user, the evidence behind them ('why 2 sets?', "
+    "'is 0-1 RIR too hard for me?', 'should I go heavier on this?') - or "
+    "about why this exercise was chosen or whether another exercise would "
+    "be better for the muscle (target_field 'exercise').\n"
+    "- Anything else is answer_general_question, even when it says 'this' "
+    "or names the exercise: rest between sets, rep speed or tempo, exercise "
+    "order, warm-ups, technique, pain or injury, deloads, how often to "
+    "train a muscle, and what the best, optimal or recommended amount is in "
+    "general ('how many sets should I do for chest'). Write its topic as a "
+    "standalone question that names the exercise when it matters.\n"
     "You may be shown the earlier conversation. Use it ONLY to work out "
     "what the new message refers to (e.g. 'ok lower it' after discussing a "
     "set count means decrease sets) - classify the NEW message, not the "
@@ -88,8 +97,10 @@ class ChatRouteDecision(pydantic.BaseModel):
         description="For adjust_prescription: which value the user wants "
         "changed - 'sets', 'reps', 'load' (%1RM), 'rir' (effort), or "
         "'exercise' to swap the exercise for another. For "
-        "discuss_prescription: 'exercise' only when they ask why this "
-        "exercise was chosen, otherwise null.",
+        "discuss_prescription: the value the question is about ('sets', "
+        "'reps', 'load' or 'rir'; null if it is about all of them), or "
+        "'exercise' only when the question is about the choice of exercise "
+        "itself rather than any of its values.",
     )
     adjustment_kind: Literal["set_value", "increase", "decrease", "regenerate"] | None = pydantic.Field(
         default=None,
@@ -125,11 +136,15 @@ class ChatRouteDecision(pydantic.BaseModel):
 
 
 def route_chat_message(
-    message: str, known_field_id: int | None = None, history: list | None = None
+    message: str, known_field_id: int | None = None, history: list | None = None, anchor: str | None = None,
 ) -> ChatRouteDecision:
+    """`anchor`: the anchored exercise and its current values, so the router
+    can tell a question about them from one that only mentions the
+    exercise ('how long should I rest between sets of this?')."""
     context = (
         f"This message is already anchored to WeeklyPrescription id "
         f"{known_field_id} - do not report a different field_id."
+        + (f" It is {anchor}." if anchor else "")
         if known_field_id is not None
         else "This message is not anchored to any specific field."
     )

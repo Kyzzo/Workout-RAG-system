@@ -113,7 +113,10 @@ def test_structural_context_field_id_overrides_model(mock_route, mock_answer, db
 
     # The anchored field_id is what reaches the router (which then enforces
     # it over anything the model reports - see chat_routing.py).
-    mock_route.assert_called_once_with("why is this?", prescription.id, [])
+    mock_route.assert_called_once_with(
+        "why is this?", prescription.id, [],
+        anchor="Barbell Bench Press (trains chest), week 1: 0 sets, 8-10 reps, 70% 1RM load, n/a effort",
+    )
 
 
 @patch("app.routers.chat.verify_citation", return_value="primary_support")
@@ -492,3 +495,16 @@ def test_a_summary_gets_a_second_rewrite_and_is_dropped_only_after_both_fail(
                                current_user=user)
     assert result.answer == "Growth rose with weekly sets. [1]"  # every rewrite failed: dropped as before
     assert "1 statement was removed" in result.grounding_note
+
+
+@patch("app.routers.chat.route_chat_message")
+def test_anchored_message_checks_ownership_before_routing(mock_route, db_session, owner_and_prescription, other_user):
+    # The anchored exercise is loaded to describe it to the router, so
+    # someone else's prescription is refused before any model call.
+    _, prescription = owner_and_prescription
+    request = schemas.ChatMessageRequest(message="how long should I rest?", field_id=prescription.id)
+    with pytest.raises(HTTPException) as exc_info:
+        send_chat_message(request=request, db=db_session, current_user=other_user)
+
+    assert exc_info.value.status_code == 404
+    mock_route.assert_not_called()

@@ -126,7 +126,15 @@ def _respond(request: schemas.ChatMessageRequest, db: Session, current_user: mod
         executor.shutdown(wait=False)
 
     report("Understanding your question")
-    decision = route_chat_message(request.message, request.field_id, request.history)
+    # The anchored exercise and its values go to the router: without them,
+    # 'how long should I rest between sets of this?' stayed a discussion of
+    # the stored citations, which are about sets, reps, load and effort, and
+    # the answer defended those instead of answering. Loading it here also
+    # checks ownership before any model call.
+    anchor = None
+    if request.field_id is not None:
+        anchor = _anchor_description(get_owned_prescription(request.field_id, db, current_user))
+    decision = route_chat_message(request.message, request.field_id, request.history, anchor=anchor)
     if decision.tool == "conversation":
         return _conversation_reply(getattr(decision, "conversation_kind", None))
     if decision.tool == "adjust_prescription":
@@ -333,6 +341,14 @@ def _build_adjustment(decision, prescription: models.WeeklyPrescription, raw_mes
         return None if is_placeholder else Adjustment(decision.adjustment_kind, request, current)
 
     return None
+
+
+def _anchor_description(p: models.WeeklyPrescription) -> str:
+    slot = p.exercise_slot
+    trains = slot.muscle_group
+    if slot.secondary_muscle_groups:
+        trains += f", also {', '.join(slot.secondary_muscle_groups)}"
+    return f"{slot.exercise_name} (trains {trains}), week {p.week_number}: {_summary(p)}"
 
 
 def _summary(p: models.WeeklyPrescription) -> str:
