@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Alert, Book, ChevronRight, Close } from "./Icons";
+import { Alert, Book, Close } from "./Icons";
 import type { RuleJustification, SupportingCitation } from "./types";
 import { Spinner } from "./ui";
 import { useApi } from "./useApi";
@@ -57,94 +57,139 @@ export function SourcesBadge({
   );
 }
 
-function CitationItems({ citations }: { citations: SupportingCitation[] }) {
-  return (
-    <>
-      {citations.map((c, i) => (
-        <CitationItem key={i} citation={c} />
-      ))}
-    </>
-  );
-}
-
 type Api = ReturnType<typeof useApi>;
 
-// Summaries already fetched (or in flight) this session, by citation id, so
-// reopening a panel doesn't ask again. A failed request is dropped so a
-// later open retries it.
-const summaries = new Map<number, Promise<string | null>>();
+// Combined summaries already fetched (or in flight) this session, keyed by
+// question + citations, so reopening a panel doesn't ask again. A failed
+// request is dropped so a later open retries it.
+const summaries = new Map<string, Promise<string | null>>();
 
-function summaryFor(api: Api, citationId: number): Promise<string | null> {
-  let pending = summaries.get(citationId);
+function combinedSummary(api: Api, question: string, citationIds: number[]): Promise<string | null> {
+  const ids = [...new Set(citationIds)].sort((a, b) => a - b);
+  const key = `${question}|${ids.join(",")}`;
+  let pending = summaries.get(key);
   if (!pending) {
-    pending = api<{ summary: string | null }>(`/citations/${citationId}/summary`).then((r) => r.summary);
-    pending.catch(() => summaries.delete(citationId));
-    summaries.set(citationId, pending);
+    pending = api<{ summary: string | null }>("/citations/summary", {
+      method: "POST",
+      body: { question, citation_ids: ids },
+    }).then((r) => r.summary);
+    pending.catch(() => summaries.delete(key));
+    summaries.set(key, pending);
   }
   return pending;
 }
 
-// One source: its paper and what the excerpt found, in plain language
-// (written once and checked against the excerpt server-side - see
-// backend/app/rag/citation_summaries.py). The study details, how it was
-// verified and the exact excerpt sit one click below.
-function CitationItem({ citation: c }: { citation: SupportingCitation }) {
+// One plain-language answer to the panel's question, drawn from all of its
+// studies together and checked against them server-side
+// (POST /citations/summary). Nothing is shown if no summary passed.
+function PanelSummary({ question, citations }: { question: string; citations: SupportingCitation[] }) {
   const api = useApi();
-  const [open, setOpen] = useState(false);
-  // undefined: loading; null: no summary passed the check.
+  const ids = citations.map((c) => c.citation.id);
+  const idsKey = ids.join(",");
+  // undefined: loading; null: none passed the check (or it couldn't load).
   const [summary, setSummary] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     let stale = false;
-    summaryFor(api, c.citation.id).then(
+    combinedSummary(api, question, idsKey ? idsKey.split(",").map(Number) : []).then(
       (s) => !stale && setSummary(s),
       () => !stale && setSummary(null),
     );
     return () => {
       stale = true;
     };
-  }, [api, c.citation.id]);
+  }, [api, question, idsKey]);
 
-  const [paper, ...details] = c.citation.title.split(" · ");
+  if (summary === undefined) {
+    return (
+      <p className="flex items-center gap-2 text-fg-subtle">
+        <Spinner className="size-3.5 shrink-0" />
+        Summarising {papersIn(citations).length} studies...
+      </p>
+    );
+  }
+  return summary ? <p className="text-sm leading-relaxed text-fg">{summary}</p> : null;
+}
+
+type Paper = { name: string; details: string; best: SupportingCitation["verification_status"]; excerpts: SupportingCitation[] };
+
+// Excerpts grouped by paper ("Pelland et al. 2025" with two excerpts is one
+// study), strongest verdict first.
+function papersIn(citations: SupportingCitation[]): Paper[] {
+  const byName = new Map<string, Paper>();
+  for (const c of citations) {
+    const [name, ...details] = c.citation.title.split(" · ");
+    const paper = byName.get(name) ?? { name, details: details.join(" · "), best: c.verification_status, excerpts: [] };
+    paper.excerpts.push(c);
+    if (c.verification_status === "primary_support") paper.best = "primary_support";
+    byName.set(name, paper);
+  }
+  return [...byName.values()].sort((a, b) => Number(b.best === "primary_support") - Number(a.best === "primary_support"));
+}
+
+// The studies behind a panel as a row of chips. One opens at a time:
+// opening another switches to it, so the panel can't unfold into every
+// excerpt at once.
+function StudyList({ citations }: { citations: SupportingCitation[] }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const papers = papersIn(citations);
+  if (papers.length === 0) return null;
+  const open = papers.find((p) => p.name === selected);
   return (
-    <figure className="flex flex-col gap-1.5 border-t border-line pt-3 first-of-type:border-0 first-of-type:pt-0">
-      <figcaption className="text-xs font-medium text-fg-muted">{paper}</figcaption>
-      {summary === undefined ? (
-        <p className="flex items-center gap-2 text-fg-subtle">
-          <Spinner className="size-3.5 shrink-0" />
-          Writing a plain-language summary and checking it against the study...
-        </p>
-      ) : summary ? (
-        <p className="leading-relaxed text-fg">{summary}</p>
-      ) : (
-        <p className="text-fg-subtle">No checked plain-language summary for this source - see the exact excerpt.</p>
-      )}
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="inline-flex items-center gap-1 self-start rounded text-xs text-fg-subtle hover:text-fg"
-      >
-        <ChevronRight className={`size-3.5 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
-        Study details & exact excerpt
-      </button>
-      {open && (
-        <div className="animate-in ms-[18px] flex flex-col gap-2">
-          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-subtle">
-            {details.length > 0 && <span>{details.join(" · ")}</span>}
-            <span
-              className={`rounded-full px-1.5 py-px text-[11px] font-medium ${
-                c.verification_status === "primary_support" ? "bg-evidence-soft text-evidence" : "bg-surface-3 text-fg-muted"
+    <div className="flex flex-col gap-2">
+      <p className="text-xs font-medium text-fg-subtle">
+        {papers.length} {papers.length === 1 ? "study" : "studies"}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {papers.map((paper) => {
+          const active = paper.name === selected;
+          return (
+            <button
+              key={paper.name}
+              type="button"
+              onClick={() => setSelected(active ? null : paper.name)}
+              aria-expanded={active}
+              title={STATUS_LABEL[paper.best]}
+              className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs transition-[background-color,border-color,color] duration-150 ${
+                active
+                  ? "border-accent bg-accent-soft text-fg"
+                  : "border-line bg-surface text-fg-muted hover:border-line-strong hover:text-fg"
               }`}
             >
-              {STATUS_LABEL[c.verification_status]}
+              <span
+                aria-hidden="true"
+                className={`size-1.5 rounded-full ${paper.best === "primary_support" ? "bg-evidence" : "bg-fg-subtle"}`}
+              />
+              {paper.name}
+            </button>
+          );
+        })}
+      </div>
+      {open && (
+        <div key={open.name} className="animate-in flex flex-col gap-2 rounded-lg border border-line bg-surface p-3">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-subtle">
+            <span className="font-medium text-fg">{open.name}</span>
+            {open.details && <span>{open.details}</span>}
+            <span
+              className={`rounded-full px-1.5 py-px text-[11px] font-medium ${
+                open.best === "primary_support" ? "bg-evidence-soft text-evidence" : "bg-surface-3 text-fg-muted"
+              }`}
+            >
+              {STATUS_LABEL[open.best]}
             </span>
           </p>
-          <blockquote className="whitespace-pre-line border-s-2 border-line-strong ps-3 leading-relaxed text-fg-muted">
-            {c.citation.snippet}
-          </blockquote>
+          <div className="scroll-thin flex max-h-56 flex-col gap-2 overflow-y-auto">
+            {open.excerpts.map((c, i) => (
+              <blockquote
+                key={i}
+                className="whitespace-pre-line border-s-2 border-line-strong ps-3 leading-relaxed text-fg-muted"
+              >
+                {c.citation.snippet}
+              </blockquote>
+            ))}
+          </div>
         </div>
       )}
-    </figure>
+    </div>
   );
 }
 
@@ -152,12 +197,16 @@ export function SourcesPanel({
   heading,
   citations,
   note,
+  question,
   rule,
   onClose,
 }: {
   heading: string;
   citations: SupportingCitation[];
   note: string | null;
+  // What the combined summary answers ("Why 8-12 reps for a hypertrophy
+  // program?"). Without one, the panel shows its studies only.
+  question?: string;
   // A mechanical rule that shaped this value (e.g. the even split of a
   // muscle's weekly sets across sessions), with its own verified sources.
   rule?: { heading: string; justification: RuleJustification } | null;
@@ -177,14 +226,17 @@ export function SourcesPanel({
           </button>
         )}
       </div>
+      {question && citations.length > 0 && <PanelSummary question={question} citations={citations} />}
       {note && <CaveatNote>{note}</CaveatNote>}
-      <CitationItems citations={citations} />
+      <StudyList citations={citations} />
       {rule && (
-        <div className="flex flex-col gap-3 border-t border-line pt-3">
+        // The rule's claim was checked against each of its sources, so it
+        // is this section's summary.
+        <div className="flex flex-col gap-2 border-t border-line pt-3">
           <p className="font-semibold text-fg">{rule.heading}</p>
-          <p className="text-fg-muted">{rule.justification.claim}</p>
+          <p className="text-sm leading-relaxed text-fg">{rule.justification.claim}</p>
           {rule.justification.grounding_note && <CaveatNote>{rule.justification.grounding_note}</CaveatNote>}
-          <CitationItems citations={rule.justification.supporting_citations} />
+          <StudyList citations={rule.justification.supporting_citations} />
         </div>
       )}
     </div>

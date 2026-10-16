@@ -643,6 +643,7 @@ export default function ProgramTree({
                                   heading={`Why research suggests ${volume.weekly_sets} weekly sets for ${group}`}
                                   citations={volume.supporting_citations}
                                   note={volume.grounding_note}
+                                  question={`Why ${volume.weekly_sets} weekly sets for ${group} in a ${program.goal} program?`}
                                   onClose={() => setOpenSources(null)}
                                 />
                               ) : strength && frequency && openSources === freqKey ? (
@@ -650,6 +651,7 @@ export default function ProgramTree({
                                   heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
                                   citations={frequency.supporting_citations}
                                   note={frequency.grounding_note}
+                                  question={`Why train ${group} ${frequency.frequency}x a week for ${program.goal}?`}
                                   onClose={() => setOpenSources(null)}
                                 />
                               ) : scheme && openSources === schemeKey ? (
@@ -662,6 +664,11 @@ export default function ProgramTree({
                                   }
                                   citations={scheme.supporting_citations}
                                   note={scheme.grounding_note}
+                                  question={
+                                    scheme.scheme === "constant"
+                                      ? undefined
+                                      : `Why ${schemeLabel(scheme.scheme)} progression for ${program.goal}?`
+                                  }
                                   onClose={() => setOpenSources(null)}
                                 />
                               ) : null;
@@ -919,6 +926,8 @@ type ValueCell = {
   citations: SupportingCitation[];
   note: string | null;
   heading: string;
+  // What the panel's combined summary answers (see SourcesPanel).
+  question: string;
 };
 
 function ExerciseBlock({
@@ -968,6 +977,7 @@ function ExerciseBlock({
   const table = week === "all" && allRows.length > 1;
   const single = allRows.find((r) => r.wp.week_number === week) ?? allRows[0];
   const showLoad = strength || slot.weekly_prescriptions.some((wp) => wp.load);
+  const goal = strength ? "strength" : "hypertrophy";
   // Sets / reps / (load) / effort - the same widths in both views, so values
   // line up down a day.
   const valueColumns = `minmax(0,0.8fr) minmax(0,1fr) ${showLoad ? "minmax(0,1.35fr) " : ""}minmax(0,1.1fr)`;
@@ -981,8 +991,9 @@ function ExerciseBlock({
   // Each value with its own sources: sets (a share of the muscle's cited
   // weekly volume), reps, load (%1RM) and effort (RIR).
   function valuesOf(wp: WeeklyPrescription, previous?: WeeklyPrescription): ValueCell[] {
-    const setsCitations =
-      wp.sets_citations.length > 0 ? wp.sets_citations : (muscleVolume?.supporting_citations ?? []);
+    const ownSetsCitations = wp.sets_citations.length > 0;
+    const setsCitations = ownSetsCitations ? wp.sets_citations : (muscleVolume?.supporting_citations ?? []);
+    const why = (value: string, what: string) => `Why ${value} ${what} for a ${goal} program?`;
     const changed = (now: string | number, before: string | number | undefined) =>
       previous && change(before, now) ? String(before) : undefined;
     return [
@@ -994,6 +1005,12 @@ function ExerciseBlock({
         citations: setsCitations,
         note: wp.sets_grounding_note,
         heading: `Why ${wp.sets} sets`,
+        // Split sets are cited by the muscle's weekly volume, so the
+        // question is about that weekly total.
+        question:
+          !ownSetsCitations && muscleVolume
+            ? `Why ${muscleVolume.weekly_sets} weekly sets for ${slot.muscle_group} in a ${goal} program?`
+            : why(String(wp.sets), "sets"),
       },
       {
         field: "reps",
@@ -1003,6 +1020,7 @@ function ExerciseBlock({
         citations: wp.reps_citations,
         note: wp.reps_grounding_note,
         heading: `Why ${wp.reps} reps`,
+        question: why(wp.reps, "reps"),
       },
       ...(showLoad
         ? [
@@ -1014,6 +1032,7 @@ function ExerciseBlock({
               citations: wp.load_citations,
               note: wp.load_grounding_note,
               heading: `Why ${wp.load}`,
+              question: why(wp.load, "load"),
             },
           ]
         : []),
@@ -1025,6 +1044,7 @@ function ExerciseBlock({
         citations: wp.rir_citations,
         note: wp.rir_grounding_note,
         heading: `Why ${wp.rir}`,
+        question: why(wp.rir, "effort (RIR)"),
       },
     ];
   }
@@ -1091,6 +1111,7 @@ function ExerciseBlock({
               heading={open.heading}
               citations={open.citations}
               note={open.note}
+              question={open.question}
               onClose={() => toggleSources(`wp-${wp.id}-${open.field}`)}
               rule={
                 open.field === "sets" && splitRule && wp.sets_grounding_note?.startsWith("Share of")
