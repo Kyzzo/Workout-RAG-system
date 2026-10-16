@@ -1,6 +1,9 @@
 # Backend — AI Workout Structuring App
 
-FastAPI backend. See `../design.txt` and `../PROJECT_CONTEXT.md` for full project context.
+FastAPI backend. See the [root README](../README.md) for the project overview,
+[docs/](../docs/README.md) for design decisions, and
+[initial-planning/datamodel.txt](../initial-planning/datamodel.txt) for the
+schema and its deferred design questions.
 
 ## Setup
 
@@ -79,8 +82,7 @@ Note: this project's `docker-compose.yml` maps Postgres to host port
 chunk of the 5000s port range (including 5432 itself), causing silent
 connection hangs rather than a clear error. If `docker compose ps`
 doesn't show the port mapping in its PORTS column, or connections hang
-rather than fail fast, that's the likely cause — see
-`../notes/phase2/phase2_rag_ingestion_concepts.txt` for the full story.
+rather than fail fast, that's the likely cause.
 
 Once Postgres is running, apply migrations to create/update the schema:
 
