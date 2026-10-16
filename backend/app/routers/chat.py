@@ -463,13 +463,33 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
     )
 
 
-def _verify_statements(question: str, parsed, sources: dict[str, dict]):
+# Instruction wording a writer can echo into a prescription-only statement.
+# A real answer began 'The current prescription programs 12 sets per week; a
+# statement that only describes the prescription's current values may cite
+# the source ID 'prescription'' - prompt text, shown unchecked.
+_INSTRUCTION_ECHO = re.compile(r"source id|may cite|cite (it|them)|a statement that|the id prescription", re.I)
+_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _states_only_prescription(text: str, prescription_values: str) -> bool:
+    """Whether a statement citing only the prescription says nothing but its
+    values: no echoed instruction text, and every number in it is one of the
+    prescription's. A mechanical check with no model call - it can only
+    drop such a statement, which isn't research anyway."""
+    if _INSTRUCTION_ECHO.search(text):
+        return False
+    allowed = set(_NUMBER.findall(prescription_values))
+    return set(_NUMBER.findall(text)) <= allowed
+
+
+def _verify_statements(question: str, parsed, sources: dict[str, dict], prescription_values: str | None = None):
     """Checks every statement against each source it cites with the same
     judge as everything else, keeping a statement only if at least one of
     its research sources supports it AS WRITTEN (the judge rejects changed
     units, outcomes, populations or overstated findings). A statement citing
-    only the prescription itself is app data, not a research claim, and is
-    kept as is. A general answer's summary is judged against all of its
+    only the prescription itself is app data, not a research claim: it's
+    kept if it states only the prescription's values (`prescription_values`,
+    see _states_only_prescription). A general answer's summary is judged against all of its
     sources together, since it may synthesize across them. Returns
     (kept: [(text, [supporting source dicts])], removed, summary: (text,
     [source dicts]) or None)."""
@@ -512,7 +532,10 @@ def _verify_statements(question: str, parsed, sources: dict[str, dict]):
         removed += 1
     for text, app_data, found in checks:
         if app_data:
-            kept.append((text, []))
+            if prescription_values is None or _states_only_prescription(text, prescription_values):
+                kept.append((text, []))
+            else:
+                removed += 1
             continue
         supporting = [source for source in found if next(status_iter) in _SUPPORTED_STATUSES]
         if supporting:
@@ -586,7 +609,7 @@ def _handle_discuss(decision, db: Session, current_user: models.User, raw_messag
     }
     question = decision.question or raw_message
     parsed = answer_prescription_discussion(question, _summary(prescription), list(sources.values()))
-    kept, removed, _ = _verify_statements(question, parsed, sources)
+    kept, removed, _ = _verify_statements(question, parsed, sources, prescription_values=_summary(prescription))
     answer, citations = _compose(kept, field_of=lambda source: source["field"])
 
     notes = [

@@ -150,7 +150,7 @@ def test_discuss_statement_that_misrepresents_its_excerpt_is_removed(
     cite = _cite_stored(db_session, prescription, "sets", "Paper", "similar growth at 12 and 24 sets", "primary_support")
     mock_route.return_value = _route("discuss_prescription", field_id=prescription.id, question="why?")
     mock_answer.return_value = _answer(
-        ("Your plan has 3 sets per session.", ["prescription"]),
+        ("Your plan uses 8-10 reps at 70% 1RM.", ["prescription"]),
         ("24 sets is optimal for growth.", [f"sets-{cite.id}"]),
     )
     mock_verify.return_value = "contradicted"
@@ -159,7 +159,7 @@ def test_discuss_statement_that_misrepresents_its_excerpt_is_removed(
         request=schemas.ChatMessageRequest(message="why?", field_id=prescription.id), db=db_session, current_user=user,
     )
 
-    assert result.answer == "Your plan has 3 sets per session."  # app-data statement kept, overstatement dropped
+    assert result.answer == "Your plan uses 8-10 reps at 70% 1RM."  # app-data statement kept, overstatement dropped
     assert result.citations == []
     assert "1 statement was removed" in result.grounding_note
 
@@ -259,6 +259,34 @@ def test_unanchored_follow_up_about_an_earlier_answer_is_answered_as_research(
         "optimal sets per week for chest? - follow-up: "
         "How many direct sets per week for chest hypertrophy, rather than fractional sets?"
     )
+
+
+def test_a_prescription_only_statement_may_state_only_the_prescription():
+    from app.routers.chat import _states_only_prescription
+
+    values = "12 sets, n/a reps, 70% 1RM load, n/a effort"
+    # A real answer echoed the writer's instructions into this statement.
+    assert not _states_only_prescription(
+        "The current prescription programs 12 sets per week; a statement that only describes the prescription's "
+        "current values may cite the source ID 'prescription'.", values,
+    )
+    assert not _states_only_prescription("Your program has 14 sets per week.", values)  # not its value
+    assert _states_only_prescription("Your program has 12 sets at 70% 1RM.", values)
+
+
+def test_discussion_drops_a_prescription_statement_that_says_more_than_its_values():
+    from app.routers.chat import _verify_statements
+
+    parsed = SimpleNamespace(statements=[
+        SimpleNamespace(text="The current prescription programs 12 sets; it may cite the source ID 'prescription'.",
+                        sources=["prescription"]),
+        SimpleNamespace(text="Your program has 12 sets.", sources=["prescription"]),
+    ])
+
+    kept, removed, _ = _verify_statements("q", parsed, {}, prescription_values="12 sets, 8-10 reps, n/a effort")
+
+    assert [text for text, _ in kept] == ["Your program has 12 sets."]
+    assert removed == 1
 
 
 @patch("app.routers.chat.answer_general_question")
