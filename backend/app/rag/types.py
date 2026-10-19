@@ -7,8 +7,14 @@ import pydantic
 # sessions, deloads) and 'exercise-selection' (varying exercises, regional
 # growth) back no generated field, so generation never searches them - it
 # keeps those papers out of dosing evidence while chat (which searches the
-# whole corpus) can still cite them.
-Category = Literal["volume", "frequency", "intensity", "progression", "recovery", "exercise-selection"]
+# whole corpus) can still cite them. The same holds for the topics chat
+# answers but no field is generated for: rest between sets, nutrition,
+# technique (rep tempo, range of motion), stretching, cardio alongside
+# lifting, and who is training (sex, age).
+Category = Literal[
+    "volume", "frequency", "intensity", "progression", "recovery", "exercise-selection",
+    "rest-intervals", "nutrition", "technique", "stretching", "concurrent-training", "population",
+]
 
 
 class ChunksAndMeta(pydantic.BaseModel):

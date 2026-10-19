@@ -162,6 +162,21 @@
       ]
     },
     {
+      "source": "chilibeck-etal-2017-creatine-older-adults-meta",
+      "citation": "Chilibeck et al. 2017",
+      "pdf": "lifting_science_dataset_hypertrophy/nutrition/Chilibeck-etal-2017-creatine-older-adults-meta.pdf",
+      "categories": [
+        "nutrition",
+        "population"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "untrained",
+      "year": 2017,
+      "publication": "journal",
+      "evidence_note": "older adults only (mean ages 57-70), 7 of 22 studies in frail or diseased groups; creatine doses are study conditions; second half reviews mechanisms"
+    },
+    {
       "source": "coleman-etal-2024-deload",
       "citation": "Coleman et al. 2024",
       "pdf": "lifting_science_dataset_hypertrophy/recovery/Coleman-etal-2024-deload.pdf",
@@ -199,6 +214,72 @@
           "min_count": 2
         }
       ]
+    },
+    {
+      "source": "enes-etal-2025-repetition-tempo-meta",
+      "citation": "Enes et al. 2025",
+      "pdf": "lifting_science_dataset_hypertrophy/technique/Enes-etal-2025-repetition-tempo-meta.pdf",
+      "categories": [
+        "technique"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "hypertrophy",
+      "population": "untrained",
+      "year": 2025,
+      "publication": "journal",
+      "evidence_note": "12 of 14 studies in untrained young adults; tempo compared per muscle action (eccentric or concentric), not total rep duration",
+      "text_fixes": [
+        {
+          "find": "(?<=CrI:\\s)2(?=\\d\\.\\d\\d)|\\b(?<=mean\\s5\\s)2(?=\\d\\.\\d\\d)",
+          "replace": "−",
+          "regex": true,
+          "min_count": 11
+        },
+        {
+          "find": "\\b(mean|[pP]|M|F)\\s+5\\s+(?=[-−]?\\d)",
+          "replace": "\\1 = ",
+          "regex": true,
+          "min_count": 37
+        },
+        {
+          "find": "(?<=\\d)\\s6\\s(?=\\d+\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 4
+        },
+        {
+          "find": "\\b([pP])\\s,\\s(?=0\\.\\d)",
+          "replace": "\\1 < ",
+          "regex": true,
+          "min_count": 4
+        },
+        {
+          "find": "\\$(?=\\d)",
+          "replace": "≥",
+          "regex": true,
+          "min_count": 3
+        },
+        {
+          "find": "#(?=\\d)",
+          "replace": "≤",
+          "regex": true,
+          "min_count": 3
+        }
+      ]
+    },
+    {
+      "source": "grgic-etal-2017-rest-interval-hypertrophy",
+      "citation": "Grgic et al. 2017",
+      "pdf": "lifting_science_dataset_hypertrophy/rest-intervals/Grgic-etal-2017-rest-interval-hypertrophy.pdf",
+      "categories": [
+        "rest-intervals"
+      ],
+      "study_type": "review",
+      "outcome": "hypertrophy",
+      "population": "mixed",
+      "year": 2017,
+      "publication": "journal",
+      "evidence_note": "systematic review without meta-analysis: 6 studies, 115 participants, 5 of 6 studies untrained, mostly indirect muscle measures"
     },
     {
       "source": "grgic-etal-2018-frequency-strength-meta",
@@ -244,6 +325,40 @@
           "find": "/C22",
           "replace": "",
           "min_count": 1
+        }
+      ]
+    },
+    {
+      "source": "grgic-etal-2018-rest-interval-strength",
+      "citation": "Grgic et al. 2018",
+      "pdf": "lifting_science_dataset_strength/rest-intervals/Grgic-etal-2018-rest-interval-strength.pdf",
+      "categories": [
+        "rest-intervals"
+      ],
+      "study_type": "review",
+      "outcome": "strength",
+      "population": "mixed",
+      "year": 2018,
+      "publication": "journal",
+      "evidence_note": "systematic review without meta-analysis: 23 studies, 491 participants, 4 of them theses",
+      "text_fixes": [
+        {
+          "find": "/C176",
+          "replace": "°",
+          "regex": false,
+          "min_count": 12
+        },
+        {
+          "find": "/C211",
+          "replace": "©",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "(?<=\\s)(\\d{1,2}(?:–\\d{1,2})?) 9 (?=\\d)",
+          "replace": "\\1 × ",
+          "regex": true,
+          "min_count": 45
         }
       ]
     },
@@ -323,6 +438,20 @@
       ]
     },
     {
+      "source": "haugen-etal-2023-free-weight-vs-machine-meta",
+      "citation": "Haugen et al. 2023",
+      "pdf": "lifting_science_dataset_hypertrophy/exercise-selection/Haugen-etal-2023-free-weight-vs-machine-meta.pdf",
+      "categories": [
+        "exercise-selection"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2023,
+      "publication": "journal",
+      "evidence_note": "hypertrophy from 5 studies, mostly indirect measures (circumferences, skinfolds, BodPod); combining free weights and machines is the authors' speculation"
+    },
+    {
       "source": "hermann-etal-2024-without-fail",
       "citation": "Hermann et al. 2024",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/proximity_to_failure/Without_fail_Muscular_adaptations_in_single_set_re.pdf",
@@ -395,6 +524,20 @@
       ]
     },
     {
+      "source": "kreider-etal-2017-creatine-position-stand",
+      "citation": "Kreider et al. 2017",
+      "pdf": "lifting_science_dataset_hypertrophy/nutrition/Kreider-etal-2017-creatine-position-stand.pdf",
+      "categories": [
+        "nutrition"
+      ],
+      "study_type": "review",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2017,
+      "publication": "journal",
+      "evidence_note": "ISSN position stand (narrative review) funded by a supplement-industry council, most authors have creatine-industry ties; much of it covers clinical uses, not lifting"
+    },
+    {
       "source": "lasevicius-etal-2019-2x-vs-3x",
       "citation": "Lasevicius et al. 2019",
       "pdf": "lifting_science_dataset_hypertrophy/frequency/Lasevicius-etal-2019-2x-vs-3x.pdf",
@@ -445,6 +588,56 @@
       "population": "mixed",
       "year": 2022,
       "publication": "journal"
+    },
+    {
+      "source": "morton-etal-2018-protein-meta-regression",
+      "citation": "Morton et al. 2018",
+      "pdf": "lifting_science_dataset_hypertrophy/nutrition/Morton-etal-2018-protein-meta-regression.pdf",
+      "categories": [
+        "nutrition"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2018,
+      "publication": "journal",
+      "evidence_note": "the ~1.6 g/kg/day protein breakpoint is a regression estimate with a wide CI (1.03-2.20, p=0.079), not a target; an author has dairy-industry funding"
+    },
+    {
+      "source": "nunes-etal-2020-exercise-order-meta",
+      "citation": "Nunes et al. 2020",
+      "pdf": "lifting_science_dataset_hypertrophy/exercise-selection/Nunes-etal-2020-exercise-order-meta.pdf",
+      "categories": [
+        "exercise-selection"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "untrained",
+      "year": 2020,
+      "publication": "journal",
+      "evidence_note": "8 of 11 studies untrained; muscle size mostly measured in synergists or by indirect methods, so 'no difference' for growth is weak evidence"
+    },
+    {
+      "source": "nunes-etal-2022-protein-intake-meta",
+      "citation": "Nunes et al. 2022",
+      "pdf": "lifting_science_dataset_hypertrophy/nutrition/Nunes-etal-2022-protein-intake-meta.pdf",
+      "categories": [
+        "nutrition"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2022,
+      "publication": "journal",
+      "evidence_note": "protein intake bands are subgroups where effects appeared, not targets; ~80% of participants already ate >=1.2 g/kg/day; industry-funded (ILSI Europe)",
+      "text_fixes": [
+        {
+          "find": "/C0",
+          "replace": "−",
+          "regex": false,
+          "min_count": 35
+        }
+      ]
     },
     {
       "source": "nuzzo-etal-2024-reps-at-percent-1rm",
@@ -696,6 +889,76 @@
       ]
     },
     {
+      "source": "roberts-etal-2020-sex-differences-meta",
+      "citation": "Roberts et al. 2020",
+      "pdf": "lifting_science_dataset_hypertrophy/population/Roberts-etal-2020-sex-differences-meta.pdf",
+      "categories": [
+        "population"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "untrained",
+      "year": 2020,
+      "publication": "journal",
+      "evidence_note": "relative (effect-size) gains, not absolute - men gain more in absolute terms; mostly short studies in untrained people; no study-quality assessment",
+      "text_fixes": [
+        {
+          "find": "\\bES\\s+52\\s+(?=\\d\\.\\d)",
+          "replace": "ES = −",
+          "regex": true,
+          "min_count": 3
+        },
+        {
+          "find": "\\bES\\s+5\\s+2(?=\\d\\.\\d\\d)",
+          "replace": "ES = −",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "(?<=CI:\\s)2(?=\\d\\.\\d\\d)|(?<=\\bto\\s)2(?=\\d\\.\\d\\d)",
+          "replace": "−",
+          "regex": true,
+          "min_count": 6
+        },
+        {
+          "find": "\\bI\\s?2\\s+5\\s+",
+          "replace": "I² = ",
+          "regex": true,
+          "min_count": 8
+        },
+        {
+          "find": "\\b(ES\\]?|P)\\s+5\\s+(?=[-−]?\\d)",
+          "replace": "\\1 = ",
+          "regex": true,
+          "min_count": 11
+        },
+        {
+          "find": "(?<=\\d)\\s6\\s(?=\\d+\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 6
+        },
+        {
+          "find": "\\bP\\s,\\s(?=0\\.\\d)",
+          "replace": "P < ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\bP\\s#\\s(?=0\\.\\d)",
+          "replace": "P ≤ ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\(all\\s#20",
+          "replace": "(all ≤20",
+          "regex": true,
+          "min_count": 1
+        }
+      ]
+    },
+    {
       "source": "robinson-etal-2024-proximity-to-failure",
       "citation": "Robinson et al. 2024",
       "pdf": "lifting_science_dataset_hypertrophy/intensity-load/proximity_to_failure/Exploring the Dose–Response Relationship Between Estimated.pdf",
@@ -779,6 +1042,48 @@
       "publication": "journal"
     },
     {
+      "source": "schumann-etal-2022-concurrent-training-meta",
+      "citation": "Schumann et al. 2022",
+      "pdf": "lifting_science_dataset_hypertrophy/concurrent-training/Schumann-etal-2022-concurrent-training-meta.pdf",
+      "categories": [
+        "concurrent-training"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2022,
+      "publication": "journal",
+      "evidence_note": "mostly untrained or recreationally active participants; hypertrophy measured in the legs only; aerobic intensity not analyzed"
+    },
+    {
+      "source": "singer-etal-2024-rest-interval-hypertrophy",
+      "citation": "Singer et al. 2024",
+      "pdf": "lifting_science_dataset_hypertrophy/rest-intervals/Singer-etal-2024-rest-interval-hypertrophy.pdf",
+      "categories": [
+        "rest-intervals"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "hypertrophy",
+      "population": "mixed",
+      "year": 2024,
+      "publication": "journal",
+      "evidence_note": "Bayesian meta-analysis comparing the rest lengths studies used; it compares them, it does not prescribe one rest length"
+    },
+    {
+      "source": "warneke-etal-2024-static-stretching-meta",
+      "citation": "Warneke et al. 2024",
+      "pdf": "lifting_science_dataset_hypertrophy/technique/Warneke-etal-2024-static-stretching-meta.pdf",
+      "categories": [
+        "stretching"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2024,
+      "publication": "journal",
+      "evidence_note": "effects only at high doses (>=15 min a session, >=6 weeks, >=5 sessions a week), mostly calf stretching up to 1-2 h a day; strongest results from the authors' own group"
+    },
+    {
       "source": "weekly-sets-dose-response",
       "citation": "Pelland et al. (preprint)",
       "pdf": "lifting_science_dataset_hypertrophy/volume/The+Resistance+Training+Dose-Response.pdf",
@@ -790,6 +1095,20 @@
       "population": "mixed",
       "year": 2024,
       "publication": "preprint"
+    },
+    {
+      "source": "wolf-etal-2023-partial-vs-full-rom-meta",
+      "citation": "Wolf et al. 2023",
+      "pdf": "lifting_science_dataset_hypertrophy/technique/Wolf-etal-2023-partial-vs-full-rom-meta.pdf",
+      "categories": [
+        "technique"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "both",
+      "population": "mixed",
+      "year": 2023,
+      "publication": "journal",
+      "evidence_note": "the long-muscle-length partials result (-0.28, CI -0.81 to 0.16) is an exploratory subgroup that crosses zero; includes theses; low study-quality scores"
     },
     {
       "source": "zhang-etal-2026",

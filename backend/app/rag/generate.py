@@ -150,8 +150,25 @@ _CATEGORY_KEYWORDS = {
         r"\b(damage|soreness|doms|recover\w*|fatigue\w*|deload\w*|rest days?|overtrain\w*|sleep)\b", re.I,
     ),
     "exercise-selection": re.compile(
-        r"\b(exercise (selection|variation|variety|choice)|vary(ing)? (my )?exercises|rotat\w* exercises|regional)\b",
+        r"\b(exercise (selection|variation|variety|choice|order)|vary(ing)? (my )?exercises|rotat\w* exercises|regional"
+        r"|order of (my )?exercises|free ?weights?|machines?|compound|isolation)\b",
         re.I,
+    ),
+    "rest-intervals": re.compile(
+        r"\b(rest (between|periods?|intervals?|times?)|inter-?set rest|how long (should i |to )?rest)\b", re.I,
+    ),
+    "nutrition": re.compile(r"\b(protein|creatine|supplement\w*|diet\w*|nutrition|calori\w*|eat\w*)\b", re.I),
+    "technique": re.compile(
+        r"\b(tempo|rep (speed|duration)|slow (reps?|eccentrics?)|eccentrics?|range of motion|rom|partials?"
+        r"|lengthened|full range)\b",
+        re.I,
+    ),
+    "stretching": re.compile(r"\b(stretch\w*|flexibility|mobility)\b", re.I),
+    "concurrent-training": re.compile(
+        r"\b(cardio|aerobic|running|cycling|endurance|concurrent|hiit|conditioning)\b", re.I,
+    ),
+    "population": re.compile(
+        r"\b(women|woman|female|males?|men|sex|gender|older|elderly|aging|ageing|seniors?)\b", re.I,
     ),
 }
 # Journal-style entries ("2023;12(2):29-36") and DOIs: three or more in one
