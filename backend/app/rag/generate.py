@@ -570,7 +570,11 @@ def _generate_field(
 # bench) into a single session. Hypertrophy spreads a muscle's sets across
 # several exercises (systematic exercise variation - see Kassiano et al.
 # 2022) rather than piling them on one; strength allows 5 for 5x5-style
-# main lifts.
+# main lifts. What the research does support - multiple sets per exercise
+# over one - is cited by the "hypertrophy_sets_per_exercise" and
+# "strength_sets_per_exercise" rules (rule_justifications.py); the cap
+# values themselves are not (for hypertrophy, 5 sets per exercise has
+# outgrown 1 in trained men, so 3 is a spreading choice, not a ceiling).
 _MAX_SETS_PER_EXERCISE = {"hypertrophy": 3, "strength": 5}
 
 

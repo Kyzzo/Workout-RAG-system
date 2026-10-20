@@ -92,6 +92,30 @@ RULES = {
         categories=("volume", "frequency"),
         outcome="hypertrophy",
     ),
+    # The per-exercise set caps (_MAX_SETS_PER_EXERCISE in generate.py).
+    # The cap values themselves are a design choice - the research supports
+    # several sets per exercise, not a ceiling (for hypertrophy, 5 sets per
+    # exercise has outgrown 1) - so each claim cites only what multiple sets
+    # per exercise do, never that the cap is a limit.
+    "hypertrophy_sets_per_exercise": Rule(
+        claim=(
+            "Performing multiple sets per exercise has produced greater muscle hypertrophy than performing "
+            "a single set per exercise."
+        ),
+        query="Single versus multiple sets per exercise and muscle hypertrophy",
+        categories=("volume",),
+        outcome="hypertrophy",
+    ),
+    "strength_sets_per_exercise": Rule(
+        claim=(
+            "For maximal (1RM) strength, two to three sets per exercise have produced greater gains than a "
+            "single set, and studies of up to five or six sets per exercise have not shown a clear further "
+            "strength benefit."
+        ),
+        query="Sets per exercise dose-response for 1RM strength: 1 set versus 3 sets versus 5 sets",
+        categories=("volume",),
+        outcome="strength",
+    ),
     # Strength programs' progression scheme is chosen from the wizard's
     # training-status answer by this rule, not generated per program.
     "periodization_by_training_status": Rule(

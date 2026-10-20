@@ -68,6 +68,30 @@
           "replace": "·wk⁻¹",
           "regex": true,
           "min_count": 1
+        },
+        {
+          "find": "(?<=\\d)\\s6\\s*\\n(?=\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 2
+        },
+        {
+          "find": "77.0 6 7 .9",
+          "replace": "77.0 ± 7.9",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "\\$(?=\\s?\\d)",
+          "replace": "≥",
+          "regex": true,
+          "min_count": 5
+        },
+        {
+          "find": "\\bp\\s#\\s+(?=0\\.\\d)",
+          "replace": "p ≤ ",
+          "regex": true,
+          "min_count": 1
         }
       ]
     },
@@ -82,7 +106,101 @@
       "outcome": "both",
       "population": "trained",
       "year": 2022,
-      "publication": "journal"
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "(?<![\\d.\\w])2(?!6\\.59)(?=\\d\\.\\d\\d\\b)",
+          "replace": "−",
+          "regex": true,
+          "min_count": 14
+        },
+        {
+          "find": "(?:(?<=\\.\\d)|(?<=\\.\\d\\d))\\s6\\s+(?=\\d*\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 84
+        },
+        {
+          "find": "BF% 5 ",
+          "replace": "BF% = ",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "\\b(n|p|ES|CI|RPE|SET|CV|BM\\])\\s?5\\s+(?=[-−]?\\d|[a-z]|#)",
+          "replace": "\\1 = ",
+          "regex": true,
+          "min_count": 19
+        },
+        {
+          "find": "\\b([pP])\\s?,\\s+(?=0?\\.\\d)",
+          "replace": "\\1 < ",
+          "regex": true,
+          "min_count": 4
+        },
+        {
+          "find": "\\b([pP])\\s\\.\\s+(?=0\\.\\d)",
+          "replace": "\\1 > ",
+          "regex": true,
+          "min_count": 3
+        },
+        {
+          "find": "\\b([pP])\\s#\\s+(?=0\\.\\d)",
+          "replace": "\\1 ≤ ",
+          "regex": true,
+          "min_count": 4
+        },
+        {
+          "find": "\\b([pP])\\s\\$\\s+(?=0\\.\\d)",
+          "replace": "\\1 ≥ ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "atp # 0.05",
+          "replace": "at p ≤ 0.05",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "\\$(?=\\d)",
+          "replace": "≥",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "#(?=\\d)",
+          "replace": "≤",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "·wk21",
+          "replace": "·wk⁻¹",
+          "regex": false,
+          "min_count": 4
+        },
+        {
+          "find": "(?<=\\d\\.\\d)\\s6\\s(?=\\d{1,2},\\d{3})",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 3
+        }
+      ]
+    },
+    {
+      "source": "baz-valle-etal-2022-volume-hypertrophy-review",
+      "citation": "Baz-Valle et al. 2022",
+      "pdf": "lifting_science_dataset_hypertrophy/volume/Baz-Valle-etal-2022-volume-hypertrophy-review.pdf",
+      "categories": [
+        "volume"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "hypertrophy",
+      "population": "trained",
+      "year": 2022,
+      "publication": "journal",
+      "evidence_note": "counts total weekly sets per muscle (every set of an exercise in full); young trained men only; groups under 12 sets were left out of the meta-analysis, so it cannot compare 12-20 sets with fewer"
     },
     {
       "source": "buford-etal-2007-linear-daily-weekly-undulating",
@@ -434,6 +552,36 @@
         {
           "find": "[210.88 to",
           "replace": "[−10.88 to"
+        },
+        {
+          "find": "(?<=\\d)\\s+6\\s+(?=\\d+\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 46
+        },
+        {
+          "find": "\\bn\\s?=\\s?([1-4]) (\\d)\\s?\\)",
+          "replace": "n = \\1\\2)",
+          "regex": true,
+          "min_count": 6
+        },
+        {
+          "find": "\\$(?=\\d)",
+          "replace": "≥",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\(\\s?,(?=\\d)",
+          "replace": "(<",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "/C211",
+          "replace": "©",
+          "regex": false,
+          "min_count": 1
         }
       ]
     },
@@ -538,6 +686,182 @@
       "evidence_note": "ISSN position stand (narrative review) funded by a supplement-industry council, most authors have creatine-industry ties; much of it covers clinical uses, not lifting"
     },
     {
+      "source": "krieger-2009-single-vs-multiple-sets-meta",
+      "citation": "Krieger 2009",
+      "pdf": "lifting_science_dataset_strength/volume/Krieger-2009-single-vs-multiple-sets-meta.pdf",
+      "categories": [
+        "volume"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "strength",
+      "population": "mixed",
+      "year": 2009,
+      "publication": "journal",
+      "evidence_note": "compares sets per exercise, not weekly sets; only 2 studies tested 4-6 sets, so it draws no conclusion about more than 3 sets; trained meant 6+ months of lifting",
+      "text_fixes": [
+        {
+          "find": "(?<![\\d.])2(?=\\d\\.\\d{2,3}\\b)",
+          "replace": "−",
+          "regex": true,
+          "min_count": 30
+        },
+        {
+          "find": "(?:(?<=\\.\\d)|(?<=\\.\\d\\d)|(?<=\\.\\d{3}))\\s6\\s(?=\\d*\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 48
+        },
+        {
+          "find": "\\(\\s?6SEs?\\)",
+          "replace": "(±SE)",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\b([pP])\\s?,\\s(?=0?\\.\\d)",
+          "replace": "\\1 < ",
+          "regex": true,
+          "min_count": 7
+        },
+        {
+          "find": "\\b([pP])\\s\\.\\s(?=0\\.\\d)",
+          "replace": "\\1 > ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\b([pP])\\s#\\s(?=0\\.\\d)",
+          "replace": "\\1 ≤ ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "(?<=\\s),(?=0\\.0)",
+          "replace": "<",
+          "regex": true,
+          "min_count": 28
+        },
+        {
+          "find": "\\$(?=\\s?\\d)",
+          "replace": "≥",
+          "regex": true,
+          "min_count": 7
+        },
+        {
+          "find": ",(?=6\\s?[mo])",
+          "replace": "<",
+          "regex": true,
+          "min_count": 3
+        },
+        {
+          "find": "/C211",
+          "replace": "©",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "d\\s?/C1 wk21",
+          "replace": "d·wk⁻¹",
+          "regex": true,
+          "min_count": 2
+        },
+        {
+          "find": "\\bn\\s?=\\s?([12]) (\\d)\\b",
+          "replace": "n = \\1\\2",
+          "regex": true,
+          "min_count": 19
+        }
+      ]
+    },
+    {
+      "source": "krieger-2010-single-vs-multiple-sets-hypertrophy-meta",
+      "citation": "Krieger 2010",
+      "pdf": "lifting_science_dataset_hypertrophy/volume/Krieger-2010-single-vs-multiple-sets-hypertrophy-meta.pdf",
+      "categories": [
+        "volume"
+      ],
+      "study_type": "meta-analysis",
+      "outcome": "hypertrophy",
+      "population": "mixed",
+      "year": 2010,
+      "publication": "journal",
+      "evidence_note": "compares sets per exercise; 8 studies, 6 in untrained people; 2-3 and 4-6 sets vs 1 were trends (p~0.09), significant only by permutation test; only 2 studies tested 4-6 sets",
+      "text_fixes": [
+        {
+          "find": "(?<![\\d.])2(?=\\d\\.\\d{2,3}\\b)",
+          "replace": "−",
+          "regex": true,
+          "min_count": 24
+        },
+        {
+          "find": "(?:(?<=\\.\\d)|(?<=\\.\\d\\d)|(?<=\\.\\d{3}))\\s6\\s(?=\\d*\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 33
+        },
+        {
+          "find": "\\(\\s?6SEs?\\)",
+          "replace": "(±SE)",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\b([pP])\\s?,\\s(?=0?\\.\\d)",
+          "replace": "\\1 < ",
+          "regex": true,
+          "min_count": 7
+        },
+        {
+          "find": "\\b([pP])\\s\\.\\s(?=0\\.\\d)",
+          "replace": "\\1 > ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\b([pP])\\s#\\s(?=0\\.\\d)",
+          "replace": "\\1 ≤ ",
+          "regex": true,
+          "min_count": 2
+        },
+        {
+          "find": "(?<=\\s),(?=0\\.0)",
+          "replace": "<",
+          "regex": true,
+          "min_count": 2
+        },
+        {
+          "find": "\\$(?=\\s?\\d)",
+          "replace": "≥",
+          "regex": true,
+          "min_count": 11
+        },
+        {
+          "find": ",(?=6\\s?[mo])",
+          "replace": "<",
+          "regex": true,
+          "min_count": 3
+        },
+        {
+          "find": "/C211",
+          "replace": "©",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "d\\s?/C1 wk21",
+          "replace": "d·wk⁻¹",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\bn\\s?=\\s?([12]) (\\d)\\b",
+          "replace": "n = \\1\\2",
+          "regex": true,
+          "min_count": 8
+        }
+      ]
+    },
+    {
       "source": "lasevicius-etal-2019-2x-vs-3x",
       "citation": "Lasevicius et al. 2019",
       "pdf": "lifting_science_dataset_hypertrophy/frequency/Lasevicius-etal-2019-2x-vs-3x.pdf",
@@ -561,7 +885,99 @@
       "outcome": "both",
       "population": "untrained",
       "year": 2022,
-      "publication": "journal"
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "CI\\s?\\]?\\s?52\\s?(?=\\d)",
+          "replace": "CI = −",
+          "regex": true,
+          "min_count": 6
+        },
+        {
+          "find": "\\b(n|p|CI|RM)\\s*5\\s+(?=\\d|[a-z])",
+          "replace": "\\1 = ",
+          "regex": true,
+          "min_count": 27
+        },
+        {
+          "find": "p = 081",
+          "replace": "p = 0.81",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "(?:(?<=\\.\\d)|(?<=\\.\\d\\d))\\s6\\s+(?=\\d*\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 32
+        },
+        {
+          "find": "(?<=\\d,\\d{3})\\s6\\s(?=\\d{1,3},\\d{3})",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 3
+        },
+        {
+          "find": "\\b(\\d{2,3}\\.\\d)6 (?=\\d{1,2}\\.\\d\\b)",
+          "replace": "\\1 ± ",
+          "regex": true,
+          "min_count": 6
+        },
+        {
+          "find": "\\b([pP])\\s?,\\s+(?=0?\\.\\d)",
+          "replace": "\\1 < ",
+          "regex": true,
+          "min_count": 6
+        },
+        {
+          "find": "\\b([pP])\\s\\.\\s+(?=0\\.\\d)",
+          "replace": "\\1 > ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "atp # 0.05",
+          "replace": "at p ≤ 0.05",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "\\$(?=\\d)",
+          "replace": "≥",
+          "regex": true,
+          "min_count": 2
+        },
+        {
+          "find": "#(?=\\d)",
+          "replace": "≤",
+          "regex": true,
+          "min_count": 2
+        },
+        {
+          "find": "(?<=\\s),(?=\\d)",
+          "replace": "<",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "E S :0 . 4 5 ,p",
+          "replace": "ES: 0.45, p",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "3.0 6 0 sets",
+          "replace": "3.0 ± 0 sets",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "3\\.0\\s6\\s0(?=\\s+sets)",
+          "replace": "3.0 ± 0",
+          "regex": true,
+          "min_count": 1
+        }
+      ]
     },
     {
       "source": "lopez-etal-2021-load-network-meta",
@@ -574,7 +990,15 @@
       "outcome": "both",
       "population": "mixed",
       "year": 2021,
-      "publication": "journal"
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "\\(n =(\\d) (\\d) \\)",
+          "replace": "(n = \\1\\2)",
+          "regex": true,
+          "min_count": 2
+        }
+      ]
     },
     {
       "source": "moesgaard-etal-2022-periodization-meta",
@@ -885,6 +1309,12 @@
           "find": "(3 3 8",
           "replace": "(3 × 8",
           "min_count": 1
+        },
+        {
+          "find": "\\bp\\s5\\s+(?=0\\.)",
+          "replace": "p = ",
+          "regex": true,
+          "min_count": 1
         }
       ]
     },
@@ -1013,7 +1443,63 @@
       "outcome": "both",
       "population": "mixed",
       "year": 2017,
-      "publication": "journal"
+      "publication": "journal",
+      "text_fixes": [
+        {
+          "find": "(?<![\\d.\\w])2(?=\\d\\.\\d\\d\\b)",
+          "replace": "−",
+          "regex": true,
+          "min_count": 27
+        },
+        {
+          "find": "(?:(?<=\\.\\d)|(?<=\\.\\d\\d))\\s6\\s+(?=\\d*\\.\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 30
+        },
+        {
+          "find": "\\b([pP])\\s\\.\\s+(?=0\\.\\d)",
+          "replace": "\\1 > ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\b([pP])\\s#\\s+(?=0\\.\\d)",
+          "replace": "\\1 ≤ ",
+          "regex": true,
+          "min_count": 3
+        },
+        {
+          "find": "(?<=0\\.05)\\s,\\s(?=p)",
+          "replace": " < ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "#(?=\\d)",
+          "replace": "≤",
+          "regex": true,
+          "min_count": 2
+        },
+        {
+          "find": "\\(,(?=\\d)",
+          "replace": "(<",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\(\\s\\.(?=\\d)",
+          "replace": "(>",
+          "regex": true,
+          "min_count": 3
+        },
+        {
+          "find": "/C211",
+          "replace": "©",
+          "regex": false,
+          "min_count": 1
+        }
+      ]
     },
     {
       "source": "schoenfeld-etal-2017-volume-dose-response",
@@ -1027,6 +1513,94 @@
       "population": "mixed",
       "year": 2017,
       "publication": "journal"
+    },
+    {
+      "source": "schoenfeld-etal-2019-sets-per-exercise",
+      "citation": "Schoenfeld et al. 2019",
+      "pdf": "lifting_science_dataset_hypertrophy/volume/Schoenfeld-etal-2019-sets-per-exercise.pdf",
+      "categories": [
+        "volume"
+      ],
+      "study_type": "randomized-trial",
+      "outcome": "both",
+      "population": "trained",
+      "year": 2019,
+      "publication": "journal",
+      "evidence_note": "1, 3 or 5 sets per exercise per session, 8 weeks, to failure, young trained men; weekly arm sets count compound sets in full (no direct arm work); 3 vs 5 sets not significantly different",
+      "text_fixes": [
+        {
+          "find": "(?<=\\d) T\\s(?=\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 103
+        },
+        {
+          "find": "(?<=[(\\s])j(?=\\d)",
+          "replace": "−",
+          "regex": true,
+          "min_count": 29
+        },
+        {
+          "find": "\\$(?= \\()",
+          "replace": "Δ",
+          "regex": true,
+          "min_count": 4
+        },
+        {
+          "find": "\\bP e (?=0)",
+          "replace": "P ≤ ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "BF 10 Q 1",
+          "replace": "BF10 ≥ 1",
+          "regex": false,
+          "min_count": 2
+        },
+        {
+          "find": "\\(1\\s+G\\s+BF\\s?10\\s+G\\s+3",
+          "replace": "(1 < BF10 < 3",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "completed 980% of",
+          "replace": "completed >80% of",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "//C2/\\s*",
+          "replace": "× ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "(?<=[a-z])_(?=s\\b|\\s)",
+          "replace": "'",
+          "regex": true,
+          "min_count": 2
+        },
+        {
+          "find": "/C210",
+          "replace": "®",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "/C211",
+          "replace": "©",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "\\(n =(\\d) (\\d) \\)",
+          "replace": "(n = \\1\\2)",
+          "regex": true,
+          "min_count": 1
+        }
+      ]
     },
     {
       "source": "schoenfeld-etal-2021",
@@ -1171,6 +1745,36 @@
           "replace": " ± ",
           "regex": true,
           "min_count": 5
+        },
+        {
+          "find": "133.31 6 1 7.08",
+          "replace": "133.31 ± 17.08",
+          "regex": false,
+          "min_count": 1
+        },
+        {
+          "find": "(?<=\\d)\\s6\\s*\\n(?=\\d)",
+          "replace": " ± ",
+          "regex": true,
+          "min_count": 4
+        },
+        {
+          "find": "\\b([pP])\\s?,\\s+(?=0?\\.\\d)",
+          "replace": "\\1 < ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\b([pP])\\s\\.\\s+(?=0\\.\\d)",
+          "replace": "\\1 > ",
+          "regex": true,
+          "min_count": 1
+        },
+        {
+          "find": "\\b([pP])\\s#\\s+(?=0\\.\\d)",
+          "replace": "\\1 ≤ ",
+          "regex": true,
+          "min_count": 1
         }
       ]
     }
