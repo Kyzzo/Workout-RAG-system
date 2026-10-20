@@ -9,7 +9,8 @@ import { RuleSources } from "./RuleSources";
 // with load increases at the top of the range is labeled as convention.
 const STEPS: React.ReactNode[] = [
   <>
-    Pick a weight that lets you hit the <strong className="font-medium text-fg">bottom</strong> of each
+    {/* Explicit space: the build dropped the one before "of" (it rendered "bottomof"). */}
+    Pick a weight that lets you hit the <strong className="font-medium text-fg">bottom</strong>{" "}of each
     exercise&apos;s rep range, around its prescribed effort (RIR).
   </>,
   <>
