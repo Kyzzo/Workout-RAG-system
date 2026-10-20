@@ -276,21 +276,12 @@ class FigureCheck(pydantic.BaseModel):
     same_unit: bool
 
 
-class AdviceCheck(pydantic.BaseModel):
-    advice: str
-    basis: Literal["finding", "authors_suggestion", "study_condition", "none"]
-
-
 class SummaryVerdict(pydantic.BaseModel):
     # Each figure's unit is set beside the excerpts' before the verdict
     # (fields are generated in order): the judge noted Pelland's tiers were
     # 'fractional weekly sets' yet accepted them relabeled as 'total sets' -
     # it matched the numbers and never compared the units.
     figures: list[FigureCheck]
-    # Listed for the same reason: a live answer told users to keep workouts
-    # to about 30 minutes because one trial's sessions lasted that long
-    # (Oct 20, 2026) - how a study was run, accepted as a finding.
-    advice: list[AdviceCheck]
     # Set before the verdict for the same reason: every claim in a blood
     # flow restriction answer was true of its low-load-training excerpts,
     # and the summary was accepted without ever naming the technique asked
@@ -330,9 +321,7 @@ e.g. light-load training to failure is not blood flow restriction training, \
 and heavy-load strength findings say nothing about wearing a lifting belt. \
 Set `answers_the_question` false if the summary answers a nearby question \
 instead, or if no excerpt it cites is about what the question asks; then the \
-summary is contradicted. A summary that says plainly the research doesn't \
-settle the question ('this research doesn't set a protein target') and then \
-reports what the excerpts do show answers it honestly: set it true.
+summary is contradicted.
 
 Before deciding, list in `figures` every number or range the summary states. \
 For each, write its unit exactly as the summary words it (`unit_in_summary`, \
@@ -369,25 +358,7 @@ the summary never spells out the conversion (e.g. '10 total quad sets' \
 within '5-18 fractional sets'); a different number for the same range \
 (5-18 fractional as 11-18 total, or halved) is still wrong. A figure stated \
 in another unit without its source figure and conversion, or converted \
-wrongly (e.g. halving a fractional count), has same_unit false.
-
-Then list in `advice` every recommendation the summary itself makes, in its \
-own words - never one you infer from it or find in the excerpts - what to do, \
-how much, how long, how often - but not a general 'adjust based on your \
-recovery and progress', and not a statement of what a study did or didn't \
-test ('this trial compared set numbers, not rest periods'). For each, give its `basis` in the excerpts: \
-'finding' if a result supports it (a comparison, a dose-response, an outcome \
-the excerpts report) - including a result for a different muscle, exercise \
-or population when the summary says so openly and presents the advice as a \
-guide ('shown for the quadriceps, not these exercises'); the same result \
-carried over without saying so is still contradicted; 'authors_suggestion' if the excerpts' authors \
-recommend it; 'study_condition' if it only matches how a study was run - the \
-session length, rest, frequency, protein intake or dose that participants \
-were given - and no result compared it with anything else; 'none' if \
-nothing covers it. A study's condition can sit right next to its result \
-('appreciable gains with two 30-minute sessions a week'): the result supports \
-'short sessions can work', not 'workouts should last 30 minutes'. Any advice \
-with basis study_condition or none makes the summary contradicted. \
+wrongly (e.g. halving a fractional count), has same_unit false. \
 Then set `answers_the_question`, then give the `outcome`."""
 
 

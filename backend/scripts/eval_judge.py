@@ -333,6 +333,11 @@ SUMMARY_CASES = [
     # turned into advice: the first two are from live answers (Oct 20, 2026)
     # that told users how long a workout should take and how much protein
     # to eat per meal. Each trap has a faithful twin from the same excerpts.
+    # KNOWN GAP: the current summary judge rejects the session-length trap
+    # only about 1 time in 3 (and the study-intake trap above 0/5). An advice
+    # list in the judge caught both, but rejected half of live first
+    # summaries and slowed answers from a 20s to a 35s median, so it was
+    # reverted (notes/eval_runs/2026-10-20_full_rerun).
     SummaryCase("study session length as a target", ("hermann_conclusion", "hermann_methods"),
                 "How long should a workout take?",
                 "For most lifters: keep each workout to about 30 minutes. Research on trained lifters shows "

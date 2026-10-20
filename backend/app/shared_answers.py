@@ -34,7 +34,7 @@ from . import models
 from .citations import get_or_create_citation
 
 FIELD_ANSWER_VERSION = "2026-10-20b"  # b: generation judge accepts a bare value inside a similar-outcomes span
-CHAT_ANSWER_VERSION = "2026-10-20c"  # c: summary judge rejects advice that only matches how a study was run
+CHAT_ANSWER_VERSION = "2026-10-20d"  # d: advice check (c) reverted - it rejected half of first summaries, median answer 20s -> 35s
 
 
 @dataclass
