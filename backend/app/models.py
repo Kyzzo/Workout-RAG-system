@@ -303,8 +303,8 @@ class SharedAnswer(Base):
     # exercises on a hypertrophy goal, or weekly sets for chest at moderate
     # volume. The research and the question are the same for everyone, so
     # it's generated, judged and stored once. Only verified answers are
-    # stored; `key` includes ANSWER_VERSION so a prompt or model change
-    # makes older answers unreachable.
+    # stored; `key` starts with its kind's version (shared_answers.py),
+    # so a prompt or model change makes older answers unreachable.
     __tablename__ = "shared_answers"
 
     id: Mapped[int] = mapped_column(primary_key=True)

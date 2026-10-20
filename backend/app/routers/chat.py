@@ -15,7 +15,7 @@ from .. import changes, models, schemas
 from ..auth import get_current_user
 from ..database import SessionLocal, get_db
 from ..progress import report, reporting
-from ..shared_answers import shared_key
+from ..shared_answers import chat_key
 from ..ownership import get_owned_prescription
 from ..rag.chat_routing import route_chat_message
 from ..rag.generate import (
@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # The chat's suggested general questions (mirrors GENERAL_PROMPTS in
 # frontend/app/ChatWindow.tsx). Everyone asks them word for word, so each
 # one's verified answer is stored once (in shared_answers, keyed with
-# ANSWER_VERSION like every shared answer) and reused: instant and free
+# CHAT_ANSWER_VERSION) and reused: instant and free
 # after the first time. Typed questions always run the full pipeline.
 PRESET_GENERAL_QUESTIONS = {
     "How many sets per week should I do per muscle?",
@@ -199,7 +199,7 @@ def _prefetched(prefetch: Future | None, topic: str, raw_message: str) -> list[d
 
 
 def _answer_preset(preset: str, message: str, db: Session) -> schemas.ChatResponse:
-    key = shared_key("chat", preset)
+    key = chat_key("chat", preset)
     # One at a time per question: a second asker waits for the first answer
     # instead of paying for the same pipeline run.
     with _preset_locks[preset]:

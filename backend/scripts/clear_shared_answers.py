@@ -5,7 +5,8 @@ ingesting papers - locally and against production (DATABASE_URL override),
 the same as refresh_rule_justifications. Programs already generated keep
 their values; only new generations are affected.
 
-Prompt or model changes don't need this: bump ANSWER_VERSION instead.
+Prompt or model changes don't need this: bump FIELD_ANSWER_VERSION or
+CHAT_ANSWER_VERSION (app/shared_answers.py) instead.
 Shared answers apply to every program, so it's worth reviewing them with
 --list; --key clears just one (e.g. a value you want regenerated).
 

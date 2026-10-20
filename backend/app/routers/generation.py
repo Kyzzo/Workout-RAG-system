@@ -40,7 +40,7 @@ from ..rep_max import (
 from ..rag.exercise_selection import (
     ExerciseSelectionError, classify_compound, classify_exercise, is_isometric_hold, select_additional_exercises,
 )
-from ..shared_answers import Answer, GeneratedAnswer, get_or_generate, shared_key
+from ..shared_answers import Answer, GeneratedAnswer, field_key, get_or_generate
 
 router = APIRouter(prefix="/weekly-prescriptions", tags=["generation"])
 mesocycle_router = APIRouter(prefix="/mesocycles", tags=["generation"])
@@ -315,7 +315,7 @@ def _movement(slot: models.ExerciseSlot, db: Session) -> str:
 def _exercise_answer(db: Session, field: str, goal: str, preference: str, movement: str) -> Answer:
     """Reps, RIR or load for a movement type and goal, shared by every
     program (app/shared_answers.py). The preference only changes RIR."""
-    key = shared_key("exercise", field, goal, preference if field == "rir" else "-", movement)
+    key = field_key("exercise", field, goal, preference if field == "rir" else "-", movement)
     query = build_movement_query(field, goal, movement)
 
     def attempt():
@@ -778,7 +778,7 @@ def generate_frequency_endpoint(
     # One answer per goal, shared by every muscle and program
     # (app/shared_answers.py): the frequency research pools muscles.
     answer = get_or_generate(
-        db, shared_key("frequency", goal), "frequency",
+        db, field_key("frequency", goal), "frequency",
         lambda: _generated(lambda: _attempt_frequency_generation(None, goal), "frequency"),
     )
     frequency = int(answer.value)
@@ -1509,7 +1509,7 @@ def generate_weekly_volume_endpoint(
     # and per muscle the answers barely differed (moderate: 12 sets for 12 of
     # 14 muscles) at 14x the cost.
     answer = get_or_generate(
-        db, shared_key("weekly_sets", goal, preference), "weekly_sets",
+        db, field_key("weekly_sets", goal, preference), "weekly_sets",
         lambda: _generated(lambda: _attempt_weekly_volume_generation(None, goal, preference), "weekly_sets"),
     )
 

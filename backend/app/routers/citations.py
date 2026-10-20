@@ -10,7 +10,7 @@ from .. import models
 from ..auth import get_current_user
 from ..database import get_db
 from ..rag.citation_summaries import checked_panel_summary, checked_summary
-from ..shared_answers import shared_key
+from ..shared_answers import chat_key
 
 router = APIRouter(prefix="/citations", tags=["citations"])
 
@@ -30,7 +30,7 @@ class PanelSummaryIn(BaseModel):
 # One writer per citation: a panel's parallel opens of the same source wait
 # for the first instead of paying twice. Citations that failed the check are
 # remembered for this process, so reopening one doesn't pay again (a
-# restart, or a new ANSWER_VERSION, gives them another try).
+# restart, or a new CHAT_ANSWER_VERSION, gives them another try).
 _locks: dict[int | str, threading.Lock] = defaultdict(threading.Lock)
 _locks_guard = threading.Lock()
 _failed: set[str] = set()
@@ -62,7 +62,7 @@ def get_panel_summary(
         raise HTTPException(status_code=404, detail="Citation not found")
 
     question = " ".join(request.question.split())
-    key = shared_key("citations_summary", question.lower(), ",".join(map(str, ids)))
+    key = chat_key("citations_summary", question.lower(), ",".join(map(str, ids)))
     with _lock_for(key):
         stored = _stored(db, key)
         if stored is not None:
@@ -97,7 +97,7 @@ def get_citation_summary(
     if citation is None:
         raise HTTPException(status_code=404, detail="Citation not found")
 
-    key = shared_key("citation_summary", citation_id)
+    key = chat_key("citation_summary", citation_id)
     with _lock_for(citation_id):
         stored = _stored(db, key)
         if stored is not None:

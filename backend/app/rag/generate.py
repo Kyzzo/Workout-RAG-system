@@ -503,7 +503,7 @@ def _retrieve_general_chunks(topic: str, candidates: list[dict] | None = None) -
 
 # The model that picks generated values, as (model, reasoning effort).
 # Changing it (or any generation prompt or question)? Bump
-# shared_answers.ANSWER_VERSION so stored answers are regenerated.
+# shared_answers.FIELD_ANSWER_VERSION so stored answers are regenerated.
 # Compared on weekly volume (4 muscles x 2 goals): gpt-4o-mini picked a 'no
 # detectable superiority' point (31 sets) as a target and anchored on single
 # studies; gpt-5 at minimal effort based values on the meta-analyses, cited

@@ -15,7 +15,7 @@
 # it directly. Stored per citation in shared_answers (routers/citations.py):
 # written and checked once, then reused by everyone.
 #
-# Changing the prompt, model or judge? Bump shared_answers.ANSWER_VERSION so
+# Changing the prompt, model or judge? Bump shared_answers.CHAT_ANSWER_VERSION so
 # stored summaries are rewritten.
 import pydantic
 

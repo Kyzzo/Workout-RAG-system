@@ -11,11 +11,18 @@
 # Only VERIFIED answers are stored: an answer the judge couldn't support is
 # regenerated on each request, so an unlucky draw never sticks for everyone.
 #
-# Invalidation: the key includes ANSWER_VERSION - bump it whenever a
-# generation or judge prompt, a model or a reasoning effort changes, and
-# older answers stop being reachable. After ingesting papers, clear the
-# table (scripts/clear_shared_answers.py, local and production) so answers
-# are regenerated against the new corpus.
+# Invalidation: each key starts with its kind's version, and bumping one
+# makes that kind's older answers unreachable:
+# - FIELD_ANSWER_VERSION (field_key): generated values - reps, RIR,
+#   frequency, weekly sets. Bump for a change to value generation, its
+#   retrieval or the generation judge.
+# - CHAT_ANSWER_VERSION (chat_key): chat's preset answers and the sources
+#   panel's citation summaries. Bump for a change to the chat writer or
+#   its statement or summary judges.
+# One version used to cover both, so every chat-only change also discarded
+# the 23 field answers (~$5 to regenerate) - three times on Oct 15-20.
+# After ingesting papers, clear the table (scripts/clear_shared_answers.py,
+# local and production) so answers are regenerated against the new corpus.
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
@@ -26,7 +33,8 @@ from sqlalchemy.orm import Session
 from . import models
 from .citations import get_or_create_citation
 
-ANSWER_VERSION = "2026-10-20b"  # b: generation judge accepts a bare value inside a similar-outcomes span
+FIELD_ANSWER_VERSION = "2026-10-20b"  # b: generation judge accepts a bare value inside a similar-outcomes span
+CHAT_ANSWER_VERSION = "2026-10-20b"  # split from the field version at 2026-10-20b, so no stored answer changed
 
 
 @dataclass
@@ -63,8 +71,18 @@ def _lock_for(key: str) -> threading.Lock:
         return _locks[key]
 
 
-def shared_key(*parts) -> str:
-    return "|".join([ANSWER_VERSION, *(str(p) for p in parts)])
+def _key(version: str, parts) -> str:
+    return "|".join([version, *(str(p) for p in parts)])
+
+
+def field_key(*parts) -> str:
+    """A generated value's key (reps, RIR, frequency, weekly sets)."""
+    return _key(FIELD_ANSWER_VERSION, parts)
+
+
+def chat_key(*parts) -> str:
+    """A chat preset answer's or citation summary's key."""
+    return _key(CHAT_ANSWER_VERSION, parts)
 
 
 def _find(db: Session, key: str) -> models.SharedAnswer | None:
