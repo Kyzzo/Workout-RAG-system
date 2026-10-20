@@ -8,6 +8,9 @@ export type BlockGenerationResult = { failures: string[]; cancelled: boolean };
 // several seconds of retrieval, generation and verification.
 const CONCURRENCY = 3;
 
+// How often the program view may refresh while a block generates.
+const REFRESH_INTERVAL_MS = 4000;
+
 // Weekly volume is split across a muscle's exercises after crediting the
 // half-sets other exercises give it as a secondary, so muscles that receive
 // that credit go AFTER the ones that provide it: compound-dominant muscles
@@ -61,6 +64,18 @@ async function runSteps(
 ): Promise<BlockGenerationResult> {
   const failures: string[] = [];
 
+  // The view re-reads the whole program on onStepDone; after every one of a
+  // block's ~55 steps that was ~55 multi-MB reloads competing with the steps
+  // themselves. At most one per interval while the run lasts - callers
+  // refresh once more when it ends.
+  let lastRefresh = 0;
+  function stepDone() {
+    const now = Date.now();
+    if (now - lastRefresh < REFRESH_INTERVAL_MS) return;
+    lastRefresh = now;
+    hooks.onStepDone();
+  }
+
   async function step(label: string, path: string, body?: unknown) {
     if (hooks.isCancelled()) return;
     try {
@@ -68,7 +83,7 @@ async function runSteps(
     } catch (err) {
       failures.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
     }
-    hooks.onStepDone();
+    stepDone();
   }
 
   // Runs independent steps, up to CONCURRENCY at a time.

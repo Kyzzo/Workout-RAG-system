@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from .. import models, schemas
 from ..auth import get_current_user
@@ -115,30 +115,34 @@ def get_program(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    mesocycles = joinedload(models.Program.mesocycles)
+    # One SELECT ... IN per level, and citations without their excerpt text
+    # (the response carries titles; GET /citations/{id} serves the text).
+    # A single joined tree repeated every excerpt on each of its rows - weeks
+    # x fields x citations - and shipped several MB from the database for a
+    # 55-exercise program (Oct 20, 2026).
+    mesocycles = selectinload(models.Program.mesocycles)
+    citation_ref = load_only(models.Citation.id, models.Citation.title)
     program = (
         db.query(models.Program)
         .options(
             mesocycles
-            .joinedload(models.Mesocycle.day_templates)
-            .joinedload(models.DayTemplate.exercise_slots)
-            .joinedload(models.ExerciseSlot.weekly_prescriptions)
-            .joinedload(models.WeeklyPrescription.prescription_citations)
-            .joinedload(models.PrescriptionCitation.citation),
-            # Separate SELECT ... IN queries for the block-level results, so
-            # they don't multiply the rows of the big joined tree above.
+            .selectinload(models.Mesocycle.day_templates)
+            .selectinload(models.DayTemplate.exercise_slots)
+            .selectinload(models.ExerciseSlot.weekly_prescriptions)
+            .selectinload(models.WeeklyPrescription.prescription_citations)
+            .selectinload(models.PrescriptionCitation.citation).options(citation_ref),
             mesocycles
             .selectinload(models.Mesocycle.muscle_group_frequencies)
             .selectinload(models.MuscleGroupFrequency.frequency_citations)
-            .joinedload(models.FrequencyCitation.citation),
+            .selectinload(models.FrequencyCitation.citation).options(citation_ref),
             mesocycles
             .selectinload(models.Mesocycle.muscle_group_volumes)
             .selectinload(models.MuscleGroupVolume.volume_citations)
-            .joinedload(models.VolumeCitation.citation),
+            .selectinload(models.VolumeCitation.citation).options(citation_ref),
             mesocycles
             .selectinload(models.Mesocycle.progression_schemes)
             .selectinload(models.ProgressionScheme.progression_scheme_citations)
-            .joinedload(models.ProgressionSchemeCitation.citation),
+            .selectinload(models.ProgressionSchemeCitation.citation).options(citation_ref),
         )
         .filter(models.Program.id == program_id, models.Program.user_id == current_user.id)
         .first()

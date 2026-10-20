@@ -159,17 +159,24 @@ class WeeklyPrescriptionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class CitationOut(BaseModel):
-    id: int  # for its plain-language summary (GET /citations/{id}/summary)
+class CitationRefOut(BaseModel):
+    id: int  # for its excerpt (GET /citations/{id}) and summaries
     title: str
-    snippet: str
 
     model_config = {"from_attributes": True}
 
 
+class CitationOut(CitationRefOut):
+    snippet: str
+
+
 class SupportingCitationOut(BaseModel):
+    # Title only: the excerpt is fetched when a sources panel shows it
+    # (GET /citations/{id}). With every excerpt inline, a 55-exercise
+    # program weighed ~7 MB, re-fetched after each generation step, and
+    # queued requests outlived their 60s login tokens (Oct 20, 2026).
     verification_status: Literal["primary_support", "contextual_support"]
-    citation: CitationOut
+    citation: CitationRefOut
 
     model_config = {"from_attributes": True}
 

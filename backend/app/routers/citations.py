@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import models
+from .. import models, schemas
 from ..auth import get_current_user
 from ..database import get_db
 from ..rag.citation_summaries import checked_panel_summary, checked_summary
@@ -80,6 +80,21 @@ def get_panel_summary(
         except IntegrityError:
             db.rollback()  # stored meanwhile by another instance
         return CitationSummaryOut(summary=summary)
+
+
+@router.get("/{citation_id}", response_model=schemas.CitationOut)
+def get_citation(
+    citation_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """A cited excerpt's text, fetched when a sources panel shows it: the
+    program tree carries titles only. Research excerpts are shared, not per
+    user."""
+    citation = db.get(models.Citation, citation_id)
+    if citation is None:
+        raise HTTPException(status_code=404, detail="Citation not found")
+    return citation
 
 
 # Per-excerpt summaries: the frontend now asks for one summary per panel

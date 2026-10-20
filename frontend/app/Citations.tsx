@@ -80,6 +80,36 @@ function combinedSummary(api: Api, question: string, citationIds: number[]): Pro
   return pending;
 }
 
+// Excerpt texts already fetched (or in flight) this session. The program
+// tree carries citation titles only; a study's excerpt loads when its
+// panel opens. A failed request is dropped so a later open retries it.
+const excerpts = new Map<number, Promise<string>>();
+
+function Excerpt({ id }: { id: number }) {
+  const api = useApi();
+  // undefined: loading; null: couldn't load.
+  const [text, setText] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let stale = false;
+    let pending = excerpts.get(id);
+    if (!pending) {
+      pending = api<{ snippet: string }>(`/citations/${id}`).then((c) => c.snippet);
+      pending.catch(() => excerpts.delete(id));
+      excerpts.set(id, pending);
+    }
+    pending.then(
+      (t) => !stale && setText(t),
+      () => !stale && setText(null),
+    );
+    return () => {
+      stale = true;
+    };
+  }, [api, id]);
+
+  if (text === undefined) return <Spinner className="size-3.5" />;
+  return <>{text ?? "Couldn't load this excerpt."}</>;
+}
+
 // One plain-language answer to the panel's question, drawn from all of its
 // studies together and checked against them server-side
 // (POST /citations/summary). Nothing is shown if no summary passed.
@@ -184,7 +214,7 @@ function StudyList({ citations }: { citations: SupportingCitation[] }) {
                 key={i}
                 className="whitespace-pre-line border-s-2 border-line-strong ps-3 leading-relaxed text-fg-muted"
               >
-                {c.citation.snippet}
+                <Excerpt id={c.citation.id} />
               </blockquote>
             ))}
           </div>

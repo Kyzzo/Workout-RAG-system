@@ -12,6 +12,7 @@ from app.routers.generation import (
     generate_progression_endpoint,
     generate_volume,
 )
+from app.routers.citations import get_citation
 from app.routers.programs import get_program
 
 
@@ -98,6 +99,29 @@ def test_program_view_shows_only_supported_citations_per_field(db_session, owner
     assert [c.citation.title for c in wp.sets_citations] == ["paper-0"]
     # the contradicted load citation is kept in the database but never shown
     assert [(c.citation.title, c.verification_status) for c in wp.load_citations] == [("paper-1", "contextual_support")]
+
+
+def test_program_view_sends_titles_and_excerpts_load_on_demand(db_session, owner_and_prescription):
+    # The program tree carries each citation's id and title only; its excerpt
+    # comes from GET /citations/{id} when a sources panel shows it.
+    user, prescription = owner_and_prescription
+    citation = models.Citation(title="paper-x", snippet="the excerpt text", qdrant_point_id="chunk-x")
+    db_session.add(citation)
+    db_session.flush()
+    db_session.add(models.PrescriptionCitation(
+        prescription_id=prescription.id, citation_id=citation.id, field="reps", verification_status="primary_support",
+    ))
+    db_session.flush()
+    db_session.expire_all()
+
+    program = schemas.ProgramOut.model_validate(
+        get_program(program_id=prescription.exercise_slot.day_template.mesocycle.program_id, db=db_session, current_user=user)
+    )
+    shown = program.mesocycles[0].day_templates[0].exercise_slots[0].weekly_prescriptions[0].reps_citations[0]
+    assert shown.citation.model_dump() == {"id": citation.id, "title": "paper-x"}
+
+    excerpt = schemas.CitationOut.model_validate(get_citation(citation_id=citation.id, db=db_session, current_user=user))
+    assert excerpt.snippet == "the excerpt text"
 
 
 @patch("app.routers.generation.verify_citation")

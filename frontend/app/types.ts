@@ -4,7 +4,9 @@
 // server-side for QA).
 export type SupportingCitation = {
   verification_status: "primary_support" | "contextual_support";
-  citation: { id: number; title: string; snippet: string };
+  // Title only: the excerpt is fetched when a sources panel shows it
+  // (GET /citations/{id}, Citations.tsx).
+  citation: { id: number; title: string };
 };
 
 export type WeeklyPrescription = {
