@@ -512,6 +512,9 @@ def _retry_summary(question: str, summary, verdict, chunks: list[dict], sources:
     the answer's one clear assertion, so dropping it left answers with
     findings but no answer. Returns (summary, sources, ok); if every
     rewrite fails, the summary comes back with ok False and is dropped."""
+    if verdict is not None and not getattr(verdict, "answers_the_question", True):
+        # Off the question: a rewrite from the same excerpts can't fix that.
+        return summary, [], False
     rejected = summary
     for _ in range(SUMMARY_REWRITES):
         report("Rewriting the summary")
@@ -716,8 +719,14 @@ def _exercise_choice_reply(prescription: models.WeeklyPrescription) -> schemas.C
     )
 
 
+_NO_ANSWER = "The research in this app's corpus doesn't support a confident answer to that question."
+_NOT_ANSWERED = "The research in this app's corpus doesn't directly answer that question."
+
+
 def _attempt_general_question(topic: str, candidates: list[dict] | None = None):
     parsed, chunks = answer_general_question(topic, candidates)
+    if parsed is None:  # no excerpt bears on the question: nothing was written
+        return None, [], 0, None
     kept, removed, summary = _verify_statements(topic, parsed, {c["id"]: c for c in chunks}, summary_chunks=chunks)
     return parsed, kept, removed, summary
 
@@ -725,17 +734,25 @@ def _attempt_general_question(topic: str, candidates: list[dict] | None = None):
 def _handle_general_question(decision, raw_message: str, prefetch: Future | None = None) -> schemas.ChatResponse:
     # Not persisted - conversational. Same bounded-retry policy as every
     # other generation path: retried once if nothing verified and the model
-    # didn't already admit general_knowledge.
+    # didn't already admit general_knowledge - not when nothing relevant was
+    # found, since a second search finds the same excerpts.
     topic = decision.topic or raw_message
     parsed, kept, removed, summary = _attempt_general_question(topic, _prefetched(prefetch, topic, raw_message))
-    if not kept and not summary and parsed.grounding != "general_knowledge":
+    if parsed is not None and not kept and not summary and parsed.grounding != "general_knowledge":
         report("Nothing held up against the sources - trying once more")
         parsed, kept, removed, summary = _attempt_general_question(topic)
 
     answer, citations = _compose(kept, summary=summary)
+    if kept and not summary:
+        # The summary is the answer, and the writer leaves it out when no
+        # excerpt addresses the question: without a verified one, statements
+        # that held up are findings near the question, not an answer to it
+        # (an ice-bath question was shown one claim about protein synthesis
+        # after muscle damage). They stay, as related findings.
+        answer = f"{_NOT_ANSWERED} Related findings that held up against their sources:\n\n{answer}"
     if kept or summary:
         grounding_note = _removed_note(removed)
-    elif parsed.grounding == "general_knowledge":
+    elif parsed is not None and parsed.grounding == "general_knowledge":
         grounding_note = _GENERAL_KNOWLEDGE_NOTE
     else:
         grounding_note = _UNSUBSTANTIATED_NOTE
@@ -743,7 +760,7 @@ def _handle_general_question(decision, raw_message: str, prefetch: Future | None
         mode="answer_general_question",
         # Never fall back to unverified prose: no verified statement means
         # no answer, said plainly.
-        answer=answer or "The research in this app's corpus doesn't support a confident answer to that question.",
+        answer=answer or _NO_ANSWER,
         citations=citations,
         grounding_note=grounding_note,
     )

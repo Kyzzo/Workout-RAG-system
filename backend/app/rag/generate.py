@@ -1049,12 +1049,21 @@ def _answer_in_statements(
 
 def answer_general_question(
     topic: str, candidates: list[dict] | None = None,
-) -> tuple[pydantic.BaseModel, list[dict]]:
+) -> tuple[pydantic.BaseModel | None, list[dict]]:
     # General Q&A (chat mode 3): not tied to one dosage category, so
-    # it searches the whole corpus. Returns a summary and statements to verify.
+    # it searches the whole corpus. Returns a summary and statements to verify,
+    # or None when no excerpt bears on the question.
     # `candidates`: search_general's results for this topic, if already found.
     report("Searching the papers")
     chunks = _retrieve_general_chunks(topic, candidates)
+    # Questions the corpus doesn't cover (sleep, caffeine, ice baths, belts,
+    # alcohol) topped out at 1-2 of 10, every answerable one at 6 or more
+    # (notes/eval_runs/2026-10-19_answer_check). Writing from those excerpts
+    # only produced off-topic claims to judge and a retry. An excerpt with
+    # no score (reranking failed) counts as relevant, so an outage doesn't
+    # turn into declines.
+    if not any(c.get("rerank_score", RERANK_MIN_SCORE) >= RERANK_MIN_SCORE for c in chunks):
+        return None, chunks
     report("Writing the answer")
     context_block = "\n\n".join(f"[{c['id']}] ({context_label(c)}) {c['text']}" for c in chunks)
     parsed = _answer_in_statements(

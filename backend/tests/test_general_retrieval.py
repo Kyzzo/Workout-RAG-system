@@ -340,3 +340,19 @@ def test_search_text_only_for_known_fields_and_goals():
     assert generate.search_text("reps", "hypertrophy") == "Repetition range and load per set for muscle hypertrophy"
     assert generate.search_text("reps", None) is None  # no goal: search with the question itself
     assert generate.search_text("unknown", "strength") is None
+
+
+@pytest.mark.parametrize("scores, writes", [
+    ([2, 1, 1], False),  # no excerpt bears on the question: declined unwritten
+    ([2, 4, 1], True),   # one at the bar is enough
+    ([None, None], True),  # reranking failed: never a decline
+])
+def test_a_general_question_is_written_only_when_an_excerpt_bears_on_it(scores, writes):
+    chunks = [{"id": f"c{i}", "text": "t", "source": "p"} | ({} if s is None else {"rerank_score": s})
+              for i, s in enumerate(scores)]
+    with patch.object(generate, "_retrieve_general_chunks", return_value=chunks), \
+         patch.object(generate, "_answer_in_statements", return_value=SimpleNamespace()) as write:
+        parsed, returned = generate.answer_general_question("does sleep build muscle?")
+
+    assert write.called is writes
+    assert (parsed is not None) is writes and returned == chunks

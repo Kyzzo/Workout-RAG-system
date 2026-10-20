@@ -650,7 +650,8 @@
       "citation": "Klemp et al. 2016",
       "pdf": "lifting_science_dataset_strength/progression/Klemp-etal-2016-dup-high-vs-low-reps.pdf",
       "categories": [
-        "progression"
+        "progression",
+        "intensity"
       ],
       "study_type": "randomized-trial",
       "outcome": "both",

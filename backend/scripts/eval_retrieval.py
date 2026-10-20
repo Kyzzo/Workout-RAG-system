@@ -42,7 +42,8 @@ CASES = [
     # movement type. Rule cases use each rule's own query.
     ("volume / hypertrophy",
      field("weekly_sets", G.build_volume_query(None, "hypertrophy"), "volume", "hypertrophy"),
-     {"pelland-etal-2025", "weekly-sets-dose-response", "remmert-etal-2025-per-session-volume"}),
+     {"pelland-etal-2025", "weekly-sets-dose-response", "remmert-etal-2025-per-session-volume",
+      "baz-valle-etal-2022-volume-hypertrophy-review"}),
     ("volume / strength",
      field("weekly_sets", G.build_volume_query(None, "strength"), "volume", "strength"),
      {"pelland-etal-2025", "androulakis-korakakis-etal-2020-min-dose"}),
@@ -133,6 +134,13 @@ CASES = [
     ("chat: deload week",
      lambda: G._retrieve_general_chunks("Should I take a deload week off training every few weeks?"),
      {"coleman-etal-2024-deload"}),
+    # Papers added 2026-10-19. The single-vs-multiple-set meta-analyses back
+    # the sets-per-exercise rules, not weekly volume: the dose-response
+    # meta-analyses rightly outrank them there (rerank 4-5 vs 8+).
+    ("rule: hypertrophy sets per exercise", rule("hypertrophy_sets_per_exercise"),
+     {"krieger-2010-single-vs-multiple-sets-hypertrophy-meta"}),
+    ("rule: strength sets per exercise", rule("strength_sets_per_exercise"),
+     {"krieger-2009-single-vs-multiple-sets-meta", "schoenfeld-etal-2019-sets-per-exercise"}),
     ("chat: varying exercises",
      lambda: G._retrieve_general_chunks("Should I vary my exercises to grow more muscle?"),
      {"kassiano-etal-2022-exercise-variation-review"}),

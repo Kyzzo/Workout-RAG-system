@@ -93,7 +93,7 @@ def test_stream_reports_stages_then_the_result(
     stages = [e["label"] for e in events if e["type"] == "stage"]
     assert stages == ["Understanding your question", "Checking 2 statements against their sources"]
     assert events[-1]["type"] == "result"
-    assert events[-1]["response"]["answer"] == "A claim. [1] Another. [2]"
+    assert events[-1]["response"]["answer"].endswith("\n\nA claim. [1] Another. [2]")
 
 
 @patch("app.routers.chat.route_chat_message")

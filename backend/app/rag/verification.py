@@ -254,6 +254,11 @@ class SummaryVerdict(pydantic.BaseModel):
     # 'fractional weekly sets' yet accepted them relabeled as 'total sets' -
     # it matched the numbers and never compared the units.
     figures: list[FigureCheck]
+    # Set before the verdict for the same reason: every claim in a blood
+    # flow restriction answer was true of its low-load-training excerpts,
+    # and the summary was accepted without ever naming the technique asked
+    # about.
+    answers_the_question: bool
     outcome: Literal["supported", "contradicted"]
 
 
@@ -281,6 +286,15 @@ presented as hypertrophy); presenting a finding from one population as \
 general without saying so; hiding a real disagreement between the excerpts; \
 or sounding more certain than the evidence (e.g. 'proven', 'always').
 
+The summary must also answer the question that was asked, from excerpts \
+about what the question is about. Findings on a different intervention, \
+technique or topic don't answer it, however accurately they are reported - \
+e.g. light-load training to failure is not blood flow restriction training, \
+and heavy-load strength findings say nothing about wearing a lifting belt. \
+Set `answers_the_question` false if the summary answers a nearby question \
+instead, or if no excerpt it cites is about what the question asks; then the \
+summary is contradicted.
+
 Before deciding, list in `figures` every number or range the summary states. \
 For each, write its unit exactly as the summary words it (`unit_in_summary`, \
 e.g. 'total sets per muscle per week'), the unit the excerpts report that \
@@ -305,7 +319,7 @@ also gives the source figure in its own unit and says how it converts (e.g. \
 flyes are direct'), and the conversion follows from these facts. A figure \
 stated in another unit without its source figure and conversion, or \
 converted wrongly (e.g. halving a fractional count), has same_unit false. \
-Then give the `outcome`."""
+Then set `answers_the_question`, then give the `outcome`."""
 
 
 def judge_summary(question: str, summary: str, excerpts: list[str], judge: Judge | None = None) -> SummaryVerdict:

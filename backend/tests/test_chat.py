@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from app import models, schemas
 from app.rag.verification import STATEMENT_JUDGE
-from app.routers.chat import send_chat_message
+from app.routers.chat import _NOT_ANSWERED, send_chat_message
 
 
 def _route(tool, **kwargs):
@@ -88,6 +88,12 @@ def _answer(*statements, grounding="fully_grounded"):
         statements=[SimpleNamespace(text=t, sources=list(src)) for t, src in statements],
         grounding=grounding,
     )
+
+
+def _related(findings):
+    # How statements that held up are shown when no verified summary answers
+    # the question.
+    return f"{_NOT_ANSWERED} Related findings that held up against their sources:\n\n{findings}"
 
 
 def _cite_stored(db_session, prescription, field, title, snippet, status):
@@ -245,7 +251,7 @@ def test_general_answer_is_built_only_from_verified_statements(mock_route, mock_
         request=schemas.ChatMessageRequest(message="optimal weekly sets?"), db=db_session, current_user=user,
     )
 
-    assert result.answer == (
+    assert result.answer == _related(
         "No detectable superiority beyond ~31 fractional sets per week for hypertrophy. [1] "
         "12, 18 and 24 weekly quad sets produced similar growth in trained lifters. [2]"
     )
@@ -269,7 +275,7 @@ def test_uncited_statements_are_never_shown(mock_route, mock_answer, _verify, db
 
     result = send_chat_message(request=schemas.ChatMessageRequest(message="t"), db=db_session, current_user=user)
 
-    assert result.answer == "Cited claim. [1]"
+    assert result.answer == _related("Cited claim. [1]")
 
 
 @patch("app.routers.chat.verify_citation", return_value="primary_support")
@@ -413,6 +419,25 @@ def test_verified_summary_leads_the_answer(mock_route, mock_answer, _verify, moc
     assert result.grounding_note is None
 
 
+@patch("app.routers.chat.verify_citation")
+@patch("app.routers.chat.answer_general_question")
+@patch("app.routers.chat.route_chat_message")
+def test_a_question_no_excerpt_bears_on_is_declined_without_judging_or_a_retry(
+    mock_route, mock_answer, mock_verify, db_session, owner_and_prescription,
+):
+    user, _ = owner_and_prescription
+    mock_route.return_value = _route("answer_general_question", topic="does alcohol hurt gains?")
+    mock_answer.return_value = (None, _chunks("a"))
+
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="does alcohol hurt gains?"),
+                               db=db_session, current_user=user)
+
+    assert result.answer == "The research in this app's corpus doesn't support a confident answer to that question."
+    assert result.citations == []
+    assert mock_answer.call_count == 1  # the same search would find the same excerpts
+    mock_verify.assert_not_called()
+
+
 @patch("app.routers.chat.rewrite_summary", return_value=None)
 @patch("app.routers.chat.check_summary", return_value=SimpleNamespace(outcome="contradicted", figures=[]))
 @patch("app.routers.chat.verify_citation", return_value="primary_support")
@@ -429,7 +454,7 @@ def test_rejected_summary_is_dropped_and_counted(mock_route, mock_answer, _verif
 
     result = send_chat_message(request=schemas.ChatMessageRequest(message="t"), db=db_session, current_user=user)
 
-    assert result.answer == "Cited claim. [1]"
+    assert result.answer == _related("Cited claim. [1]")
     assert "1 statement was removed" in result.grounding_note
 
 
@@ -493,8 +518,33 @@ def test_a_summary_gets_a_second_rewrite_and_is_dropped_only_after_both_fail(
     mock_check.side_effect = [rejected] * 3
     result = send_chat_message(request=schemas.ChatMessageRequest(message="sets for chest?"), db=db_session,
                                current_user=user)
-    assert result.answer == "Growth rose with weekly sets. [1]"  # every rewrite failed: dropped as before
+    assert result.answer == _related("Growth rose with weekly sets. [1]")  # every rewrite failed: dropped
     assert "1 statement was removed" in result.grounding_note
+
+
+@patch("app.routers.chat.rewrite_summary")
+@patch("app.routers.chat.check_summary")
+@patch("app.routers.chat.verify_citation", return_value="primary_support")
+@patch("app.routers.chat.answer_general_question")
+@patch("app.routers.chat.route_chat_message")
+def test_a_summary_off_the_question_is_not_rewritten_and_findings_are_shown_as_related(
+    mock_route, mock_answer, _verify, mock_check, mock_rewrite, db_session, owner_and_prescription,
+):
+    # A blood flow restriction question was answered Yes from low-load
+    # training findings; rewriting from the same excerpts can't fix that.
+    user, _ = owner_and_prescription
+    mock_route.return_value = _route("answer_general_question", topic="does BFR build muscle?")
+    mock_answer.return_value = (
+        _with_summary(_answer(("Low loads to failure grew muscle.", ["a"])), "Yes, light weights build muscle.", ["a"]),
+        _chunks("a"),
+    )
+    mock_check.return_value = SimpleNamespace(outcome="contradicted", figures=[], answers_the_question=False)
+
+    result = send_chat_message(request=schemas.ChatMessageRequest(message="does BFR build muscle?"),
+                               db=db_session, current_user=user)
+
+    assert result.answer == _related("Low loads to failure grew muscle. [1]")
+    mock_rewrite.assert_not_called()
 
 
 @patch("app.routers.chat.route_chat_message")
