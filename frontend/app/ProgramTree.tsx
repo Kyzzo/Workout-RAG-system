@@ -643,7 +643,10 @@ export default function ProgramTree({
                                   heading={`Why research suggests ${volume.weekly_sets} weekly sets for ${group}`}
                                   citations={volume.supporting_citations}
                                   note={volume.grounding_note}
-                                  question={`Why ${volume.weekly_sets} weekly sets for ${group} in a ${program.goal} program?`}
+                                  // Muscle-generic: weekly volume and frequency are one shared
+                                  // answer for every muscle, so naming the muscle wrote (and paid
+                                  // for) 14 copies of the same summary.
+                                  question={`Why ${volume.weekly_sets} weekly sets per muscle in a ${program.goal} program?`}
                                   onClose={() => setOpenSources(null)}
                                 />
                               ) : strength && frequency && openSources === freqKey ? (
@@ -651,7 +654,7 @@ export default function ProgramTree({
                                   heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
                                   citations={frequency.supporting_citations}
                                   note={frequency.grounding_note}
-                                  question={`Why train ${group} ${frequency.frequency}x a week for ${program.goal}?`}
+                                  question={`Why train each muscle ${frequency.frequency}x a week for ${program.goal}?`}
                                   onClose={() => setOpenSources(null)}
                                 />
                               ) : scheme && openSources === schemeKey ? (
@@ -1006,10 +1009,11 @@ function ExerciseBlock({
         note: wp.sets_grounding_note,
         heading: `Why ${wp.sets} sets`,
         // Split sets are cited by the muscle's weekly volume, so the
-        // question is about that weekly total.
+        // question is about that weekly total - worded like the weekly
+        // volume panel's, so both share one stored summary.
         question:
           !ownSetsCitations && muscleVolume
-            ? `Why ${muscleVolume.weekly_sets} weekly sets for ${slot.muscle_group} in a ${goal} program?`
+            ? `Why ${muscleVolume.weekly_sets} weekly sets per muscle in a ${goal} program?`
             : why(String(wp.sets), "sets"),
       },
       {
