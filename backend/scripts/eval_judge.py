@@ -329,6 +329,51 @@ SUMMARY_CASES = [
                 "rises with weekly sets but each extra set adds less. Start in that range and adjust based on your "
                 "recovery and progress; the research shows a range, not one best number.",
                 "supported", "a general 'adjust by recovery' hedge needs no excerpt"),
+    # How a study was run (session length, per-meal dose, rest, frequency)
+    # turned into advice: the first two are from live answers (Oct 20, 2026)
+    # that told users how long a workout should take and how much protein
+    # to eat per meal. Each trap has a faithful twin from the same excerpts.
+    SummaryCase("study session length as a target", ("hermann_conclusion", "hermann_methods"),
+                "How long should a workout take?",
+                "For most lifters: keep each workout to about 30 minutes. Research on trained lifters shows "
+                "30-minute total-body sessions twice a week produce appreciable gains, so longer sessions aren't "
+                "needed.", "rejected", "30 minutes was the trial's session length, not a finding about duration"),
+    SummaryCase("faithful study session length", ("hermann_conclusion", "hermann_methods"),
+                "How long should a workout take?",
+                "The research here doesn't set an ideal workout length. In one trial, trained lifters made "
+                "appreciable gains with just two 30-minute total-body sessions a week, so long sessions aren't "
+                "required to make progress.", "supported", "the session length reported as what one trial did"),
+    SummaryCase("per-meal dose as a finding", ("morton_limitations_conclusion",),
+                "How much protein should I eat per meal?",
+                "Eat about 0.25 g of protein per kg of body weight at each meal: the meta-analysis found that "
+                "the dose per meal, more than the daily total, drives muscle gains.", "rejected",
+                "Morton found the post-exercise dose didn't matter and the daily total did; 0.25 g/kg is a cited "
+                "suggestion"),
+    SummaryCase("faithful per-meal dose", ("morton_limitations_conclusion",),
+                "How much protein should I eat per meal?",
+                "The daily total matters more than the per-meal amount: about 1.6 g per kg of body weight a day. "
+                "The meta-analysis authors suggest splitting it into roughly 0.25 g/kg doses, but the protein dose "
+                "after training didn't change gains in their analysis.", "supported",
+                "the dose kept as the authors' suggestion, with the finding that dose details mattered little"),
+    SummaryCase("study rest period as a target", ("schoenfeld2019_methods",),
+                "How long should I rest between sets?",
+                "Rest about 90 seconds between sets for the best muscle growth.", "rejected",
+                "90 s was the rest every group used; the trial compared set volumes, not rest periods"),
+    SummaryCase("faithful study rest period", ("schoenfeld2019_methods",),
+                "How long should I rest between sets?",
+                "This trial doesn't show what rest is best: every group rested 90 seconds between sets, because it "
+                "compared numbers of sets, not rest periods.", "supported", "the rest period reported as a condition"),
+    SummaryCase("study frequency as a target", ("bazvalle_conclusions",),
+                "How many times a week should I train each muscle?",
+                "Train each muscle twice a week: a review of trained men found 12 to 20 weekly sets works best when "
+                "each muscle is trained twice per week.", "rejected",
+                "twice a week was the condition of the studies reviewed; the review didn't compare frequencies"),
+    SummaryCase("faithful study frequency", ("bazvalle_conclusions",),
+                "How many times a week should I train each muscle?",
+                "This review doesn't compare training frequencies. It recommends 12 to 20 weekly sets for quadriceps "
+                "and biceps in young trained men, based on programs that trained each muscle twice a week, and "
+                "notes that training more often could allow more volume.", "supported",
+                "the frequency kept as the condition, with the review's own suggestion"),
 ]
 
 
@@ -468,7 +513,12 @@ def main():
         "--judge-cases", choices=("all", "statement", "generation", "summary"), default="all",
         help="which judge cases to run (generation = bare generated values; summary = chat's lead summary)",
     )
+    parser.add_argument(
+        "--only", metavar="TEXT[,TEXT...]",
+        help="run only judge and summary cases whose name contains one of these, e.g. 'study,per-meal'",
+    )
     args = parser.parse_args()
+    picked = lambda cases: [c for c in cases if not args.only or any(t in c.name for t in args.only.split(","))]
     if args.generation_judge:
         model, _, effort = args.generation_judge.partition(":")
         verification.GENERATION_JUDGE = Judge(model, effort or None)
@@ -498,11 +548,12 @@ def main():
     print(f"judges: statement={verification.STATEMENT_JUDGE}, generation={verification.GENERATION_JUDGE}, "
           f"summary={verification.SUMMARY_JUDGE}; {args.repeats} runs per case")
     ok = True
-    judge_cases = [c for c in JUDGE_CASES if args.judge_cases in ("all", c.judge)]
+    judge_cases = picked([c for c in JUDGE_CASES if args.judge_cases in ("all", c.judge)])
     if judge_cases:
         ok &= _report("JUDGE CASES", judge_cases, _run_judge_case, args.repeats, describe_judge)
-    if args.judge_cases in ("all", "summary"):
-        ok &= _report("SUMMARY CASES", SUMMARY_CASES, _run_summary_case, args.repeats, describe_summary)
+    summary_cases = picked(SUMMARY_CASES)
+    if args.judge_cases in ("all", "summary") and summary_cases:
+        ok &= _report("SUMMARY CASES", summary_cases, _run_summary_case, args.repeats, describe_summary)
     if not args.judge_only:
         ok &= _report("GENERATION CASES", GENERATION_CASES, _run_generation_case, args.repeats, describe_gen)
     if args.chat:
