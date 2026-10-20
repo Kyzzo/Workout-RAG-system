@@ -227,10 +227,15 @@ RULES = {
     # prescribed reps and RIR, and progression weeks' reps (or a deload's
     # RIR) from their load.
     "reps_at_percent_1rm": Rule(
+        # The paper's SD (~2.5 reps at 80% 1RM) is left out: it's in a
+        # different excerpt from the 90%/70% means, and each excerpt is judged
+        # alone, so the full claim was supported in 1 of 10 runs (Oct 20,
+        # 2026) and a refresh dropped the rule's only citation. Without it,
+        # the means excerpt states every figure: 5 of 5.
         claim=(
             "The number of repetitions that can be completed to failure falls as the load (%1RM) rises - "
             "on average about 5 repetitions at 90% 1RM and 15 at 70% 1RM - and varies between "
-            "individuals, with a standard deviation of about 2.5 repetitions at 80% 1RM."
+            "individuals."
         ),
         query="Maximal number of repetitions to failure at percentages of the one repetition maximum",
         categories=("intensity",),
