@@ -884,6 +884,7 @@ export default function ProgramTree({
                                 slot={slot}
                                 mesocycle={mesocycle}
                                 strength={strength}
+                                trained={program.trained}
                                 week={week}
                                 busy={busy}
                                 busyKey={busyKey}
@@ -937,6 +938,7 @@ function ExerciseBlock({
   slot,
   mesocycle,
   strength,
+  trained,
   week,
   busy,
   busyKey,
@@ -953,6 +955,7 @@ function ExerciseBlock({
   slot: ExerciseSlot;
   mesocycle: Mesocycle;
   strength: boolean;
+  trained: boolean;
   week: Week;
   busy: boolean;
   busyKey: string | null;
@@ -987,6 +990,7 @@ function ExerciseBlock({
   // Split sets carry no per-exercise citations; their evidence is the
   // muscle's cited weekly volume.
   const muscleVolume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === slot.muscle_group);
+  const scheme = mesocycle.progression_schemes.find((p) => p.muscle_group === slot.muscle_group)?.scheme;
 
   const labelOf = (wp: WeeklyPrescription, everyWeek: boolean) =>
     everyWeek ? slot.exercise_name : `${slot.exercise_name}, week ${wp.week_number}`;
@@ -997,6 +1001,8 @@ function ExerciseBlock({
     const ownSetsCitations = wp.sets_citations.length > 0;
     const setsCitations = ownSetsCitations ? wp.sets_citations : (muscleVolume?.supporting_citations ?? []);
     const why = (value: string, what: string) => `Why ${value} ${what} for a ${goal} program?`;
+    const linearPhase = (p: WeeklyPrescription) =>
+      strength && scheme === "linear" && (p.reps_grounding_note ?? "").startsWith("Phase ");
     const changed = (now: string | number, before: string | number | undefined) =>
       previous && change(before, now) ? String(before) : undefined;
     return [
@@ -1024,7 +1030,13 @@ function ExerciseBlock({
         citations: wp.reps_citations,
         note: wp.reps_grounding_note,
         heading: `Why ${wp.reps} reps`,
-        question: why(wp.reps, "reps"),
+        // A linear phase's reps say which phase and for whom: asked as a
+        // bare "Why 8 reps for a strength program?", the summary argued from
+        // the trained-lifter finding (undulating beats linear) on a plan the
+        // app gives newer lifters, for whom the models didn't differ.
+        question: linearPhase(wp)
+          ? `Why ${wp.reps} reps in this phase of linear progression, for a ${trained ? "trained lifter" : "lifter newer to training"} with a strength goal?`
+          : why(wp.reps, "reps"),
       },
       ...(showLoad
         ? [

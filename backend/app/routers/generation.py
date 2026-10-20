@@ -19,6 +19,7 @@ from ..rag.generate import (
     generate_volume_sets,
     generate_weekly_volume,
     max_sets_per_exercise,
+    _RIR_GUIDANCE,
 )
 from ..rag.corpus import evidence_text
 from ..rag.rule_justifications import justify_rule
@@ -312,10 +313,18 @@ def _movement(slot: models.ExerciseSlot, db: Session) -> str:
     return "compound" if slot.is_compound else "isolation"
 
 
+def _rir_key_preference(preference: str) -> str:
+    """The preference RIR answers are stored under. Only 'minimal' changes
+    the RIR question (_RIR_GUIDANCE); moderate and high asked the same one
+    but were stored apart, and a strength program got 2-3 RIR at moderate
+    and 1-2 at high from identical questions (Oct 20, 2026)."""
+    return preference if preference in _RIR_GUIDANCE else "moderate"
+
+
 def _exercise_answer(db: Session, field: str, goal: str, preference: str, movement: str) -> Answer:
     """Reps, RIR or load for a movement type and goal, shared by every
     program (app/shared_answers.py). The preference only changes RIR."""
-    key = field_key("exercise", field, goal, preference if field == "rir" else "-", movement)
+    key = field_key("exercise", field, goal, _rir_key_preference(preference) if field == "rir" else "-", movement)
     query = build_movement_query(field, goal, movement)
 
     def attempt():
@@ -582,17 +591,24 @@ def exercise_fields(goal: str) -> tuple[str, ...]:
 
 def _set_from_rule(
     wp: models.WeeklyPrescription, field: str, value: str, note: str, rule: models.RuleJustification,
+    *more_rules: models.RuleJustification,
 ) -> None:
     # A value calculated by a cited rule: the rule's verified citations back
     # it (replacing whatever backed the field before), and if the corpus
-    # doesn't support the rule, its note says so.
+    # doesn't support the rule, its note says so. `more_rules` add their
+    # citations too (each excerpt once) - for a value a protocol rule sets
+    # but another rule's findings justify.
+    rules = (rule, *more_rules)
+    gaps = " ".join(dict.fromkeys(r.grounding_note for r in rules if r.grounding_note))
+    setattr(wp, f"{field}_grounding_note", f"{note} {gaps}" if gaps else note)
     setattr(wp, field, value)
-    setattr(wp, f"{field}_grounding_note", f"{note} {rule.grounding_note}" if rule.grounding_note else note)
+    seen = set()
     wp.prescription_citations = [pc for pc in wp.prescription_citations if pc.field != field] + [
         models.PrescriptionCitation(
             citation_id=rc.citation_id, field=field, verification_status=rc.verification_status,
         )
-        for rc in rule.rule_citations
+        for r in rules for rc in r.rule_citations
+        if rc.citation_id not in seen and not seen.add(rc.citation_id)
     ]
 
 
@@ -865,6 +881,7 @@ def _dup_reps_by_session(sessions: int) -> list[int] | None:
 def _apply_linear_periodization(
     mesocycle: models.Mesocycle, muscle_group: str, include_deload: bool,
     reps_rule: models.RuleJustification, linear_rule: models.RuleJustification,
+    periodization_rule: models.RuleJustification,
 ) -> list[models.WeeklyPrescription]:
     """Linear (untrained lifters): the block's weeks in phases of 8, 6 and 4
     reps at the exercise's RIR, each week's load estimated from them.
@@ -891,7 +908,13 @@ def _apply_linear_periodization(
                 phase = _LINEAR_PHASES.index(planned) + 1
                 reps, raised = _reachable_reps(planned, rir, slot.exercise_name)
                 note = _LINEAR_REPS_NOTE.format(phase=phase, reps=planned) + adapted + raised
-                _set_from_rule(wp, "reps", str(reps), note, linear_rule)
+                # The linear rule's excerpts describe the trials' protocol, not
+                # their results; with only those (Rhea's methods beside Buford's
+                # 'similar' results), the sources panel's summary said Rhea found
+                # similar gains - Rhea found undulating better in trained lifters
+                # (Oct 20, 2026). The periodization rule's findings are why the
+                # app chooses linear, so they back the phase's reps too.
+                _set_from_rule(wp, "reps", str(reps), note, linear_rule, periodization_rule)
                 wp.rir = rir
                 _estimate_load(wp, slot.exercise_name, reps_rule)
                 if _LOAD_PERCENT_PATTERN.match(wp.load):
@@ -1091,7 +1114,7 @@ def _run_progression(
         if program.trained:
             note = _DUP_NOT_POSSIBLE_NOTE + (f" {note}" if note else "")
         updated_prescriptions = _apply_linear_periodization(
-            mesocycle, muscle_group, program.include_deload, reps_rule, linear_rule,
+            mesocycle, muscle_group, program.include_deload, reps_rule, linear_rule, rule,
         )
     elif has_compound:
         scheme, rules = "undulating", (rule, dup_rule)

@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from app import models, schemas
 from app.routers.generation import (
+    _rir_key_preference,
     _sibling_volume_summary,
     generate_frequency_endpoint,
     generate_intensity,
@@ -411,6 +412,66 @@ def test_untrained_lifter_gets_linear_progression(db_session, strength_owner_and
     week3 = next(wp for wp in result.updated_prescriptions if wp.week_number == 3)
     assert "Phase 2 of 3" in week3.reps_grounding_note and "as evenly as possible" in week3.reps_grounding_note
     assert [c.verification_status for c in week3.reps_citations] == ["primary_support"]  # the rule's
+
+
+def _rules_by_key(db_session, keys):
+    # A distinct cited rule per key, so a value's citations show which rules back it.
+    rules = {}
+    for key in keys:
+        citation = models.Citation(title=key, snippet="s", qdrant_point_id=f"rule-{key}")
+        db_session.add(citation)
+        db_session.flush()
+        rules[key] = SimpleNamespace(
+            grounding_note=None,
+            rule_citations=[SimpleNamespace(citation_id=citation.id, verification_status="primary_support")],
+        )
+    return rules
+
+
+def test_linear_phase_reps_cite_the_periodization_findings_too(db_session, strength_owner_and_prescription):
+    # The linear rule's excerpts are the trials' protocol; with only those the
+    # sources panel's summary said Rhea found similar gains (it found
+    # undulating better in trained lifters). The periodization rule's
+    # findings, why the app chooses linear, back the phase's reps too.
+    user, mesocycle = strength_owner_and_prescription
+    mesocycle.program.trained = False
+    for day in mesocycle.day_templates:
+        for slot in day.exercise_slots:
+            for wp in slot.weekly_prescriptions:
+                wp.rir = "1-2 RIR"  # a load needs the RIR
+    db_session.flush()
+    keys = ["periodization_by_training_status", "reps_at_percent_1rm", "linear_periodization_protocol"]
+    rules = _rules_by_key(db_session, keys)
+    request = schemas.GenerateProgressionRequest(muscle_group="chest")
+    with patch("app.routers.generation.justify_rule", side_effect=lambda db, key: rules[key]):
+        result = generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
+
+    titles = lambda cites: sorted(c.citation.title for c in cites)
+    for wp in result.updated_prescriptions:
+        assert titles(wp.reps_citations) == ["linear_periodization_protocol", "periodization_by_training_status"]
+        assert titles(wp.load_citations) == ["reps_at_percent_1rm"]
+
+
+def test_undulating_reps_keep_only_the_protocol_rule(db_session, strength_owner_and_prescription):
+    user, mesocycle = strength_owner_and_prescription
+    _bench_days(db_session, mesocycle, 3)
+    keys = ["periodization_by_training_status", "reps_at_percent_1rm", "daily_undulating_protocol",
+            "linear_periodization_protocol"]
+    rules = _rules_by_key(db_session, keys)
+    request = schemas.GenerateProgressionRequest(muscle_group="chest")
+    with patch("app.routers.generation.justify_rule", side_effect=lambda db, key: rules[key]):
+        result = generate_progression_endpoint(mesocycle_id=mesocycle.id, request=request, db=db_session, current_user=user)
+
+    for wp in result.updated_prescriptions:
+        assert [c.citation.title for c in wp.reps_citations] == [
+            "daily_undulating_protocol"]
+
+
+@pytest.mark.parametrize("preference, stored_as", [("minimal", "minimal"), ("moderate", "moderate"), ("high", "moderate")])
+def test_rir_answers_share_a_key_unless_the_question_differs(preference, stored_as):
+    # Only 'minimal' changes the RIR question; moderate and high asked the
+    # same one and got 2-3 vs 1-2 RIR for strength when stored apart.
+    assert _rir_key_preference(preference) == stored_as
 
 
 def test_trained_lifter_gets_rheas_daily_undulation(db_session, strength_owner_and_prescription):
