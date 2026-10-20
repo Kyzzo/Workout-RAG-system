@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .citations import get_or_create_citation
 
-ANSWER_VERSION = "2026-10-19a"  # a: summary judge rejects a summary off the question; chat declines unwritten when no excerpt bears on it
+ANSWER_VERSION = "2026-10-20a"  # a: summary judge accepts open set conversions and total counts for direct-only muscles
 
 
 @dataclass

@@ -245,6 +245,11 @@ class FigureCheck(pydantic.BaseModel):
     figure: str
     unit_in_summary: str
     unit_in_excerpts: str
+    # Named before same_unit: an open conversion ('5-18 fractional sets,
+    # which is 5-18 total chest sets') was listed as a figure of its own,
+    # 'not reported' in the excerpts, and failed - 5/10 on the conversion
+    # cases (Oct 19, 2026), and a quads answer lost all three summaries.
+    converted_from: str
     same_unit: bool
 
 
@@ -299,8 +304,9 @@ Before deciding, list in `figures` every number or range the summary states. \
 For each, write its unit exactly as the summary words it (`unit_in_summary`, \
 e.g. 'total sets per muscle per week'), the unit the excerpts report that \
 figure in (`unit_in_excerpts`, e.g. 'fractional weekly sets', or 'not \
-reported' if no excerpt gives it), and whether the two are the same count \
-(`same_unit`). A summary that leaves the unit unstated takes the excerpts' \
+reported' if no excerpt gives it), the figure it is converted from \
+(`converted_from`, see below; 'none' if it isn't a conversion), and whether \
+the two are the same count (`same_unit`). A summary that leaves the unit unstated takes the excerpts' \
 unit; a summary that names a different one ('total' or 'direct' for \
 fractional, per session for per week) does not. Any figure with same_unit \
 false makes the summary contradicted.
@@ -316,9 +322,20 @@ presses, biceps from rows and pulldowns, and front delts from presses. A \
 converted figure is fine - list it with same_unit true - only if the summary \
 also gives the source figure in its own unit and says how it converts (e.g. \
 '5-18 fractional sets, which is 5-18 total sets for chest, since presses and \
-flyes are direct'), and the conversion follows from these facts. A figure \
-stated in another unit without its source figure and conversion, or \
-converted wrongly (e.g. halving a fractional count), has same_unit false. \
+flyes are direct'), and the conversion follows from these facts. For such a \
+figure, set `converted_from` to the source figure and its unit as the \
+summary states them (e.g. '5-18 fractional sets'; for a worked example such \
+as '10 fractional sets could be 6 pushdowns plus 8 bench sets, which is 14 \
+total sets', the 14 is converted from '10 fractional sets'): the excerpts won't report \
+the converted figure, so judge it by its source and the conversion, not by \
+'not reported'. For chest, quadriceps or hamstrings the three counts are \
+the same number, so a total or direct set count for that muscle has \
+same_unit true wherever the excerpts' fractional figures cover it, even if \
+the summary never spells out the conversion (e.g. '10 total quad sets' \
+within '5-18 fractional sets'); a different number for the same range \
+(5-18 fractional as 11-18 total, or halved) is still wrong. A figure stated \
+in another unit without its source figure and conversion, or converted \
+wrongly (e.g. halving a fractional count), has same_unit false. \
 Then set `answers_the_question`, then give the `outcome`."""
 
 

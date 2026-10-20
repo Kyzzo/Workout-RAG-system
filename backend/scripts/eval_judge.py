@@ -217,6 +217,18 @@ SUMMARY_CASES = [
                 "Roughly 5 to 18 fractional sets per muscle per week is an efficient range, which works out to about "
                 "10 to 36 direct sets per week.", "rejected",
                 "direct sets can't exceed fractional sets - the conversion is wrong"),
+    # From a quads answer that lost all three summaries (Oct 19, 2026): quad
+    # work is direct, so a total count needs no spelled-out conversion - but
+    # a different number for the same tiers is still wrong.
+    SummaryCase("faithful total sets for a direct muscle (quads)", _VOLUME, "Is 10 sets a week enough to grow my quads?",
+                "Yes: 10 sets a week can grow your quads. Count every quad set as 1 set. Research places higher- and "
+                "intermediate-efficiency growth at 5 to 18 fractional sets per week, with each extra set adding less, "
+                "and in very strong lifters 12 to 24 weekly sets produced similar quad growth.",
+                "supported", "quad sets are all direct, so 10 total sets is 10 fractional sets, inside 5-18"),
+    SummaryCase("shifted range for a direct muscle (quads)", _VOLUME, "Is 10 sets a week enough to grow my quads?",
+                "For most lifters: about 11 to 18 sets per week for quads. Quad work is direct; the research's 5 to "
+                "18 fractional sets per week aligns with roughly 11 to 18 total sets.", "rejected",
+                "for quads 5-18 fractional sets is 5-18 total sets, not 11-18"),
     SummaryCase("strength result as hypertrophy", _VOLUME, CHAT_QUESTION,
                 "About 18 weekly sets is the sweet spot for building quad size in trained lifters.",
                 "rejected", "Aube's ~18 sets is a squat 1RM finding"),
