@@ -41,6 +41,27 @@ class StatementVerdict(pydantic.BaseModel):
     outcome: Literal["primary_support", "contextual_support", "contradicted"]
 
 
+# Bare values only. Production rejected '8-12' reps for hypertrophy in 4 of 4
+# attempts (Oct 19, 2026), reading 'similar growth across loads, no ideal
+# zone' as contradicting any recommended range. In the shared prompt, the
+# same wording let a chat statement's 'upper limit' through (hedged ceiling
+# 5/5 -> 2/5), so prose keeps the qualifier rules unchanged.
+_SIMILAR_SPAN_INSTRUCTIONS = """
+
+The answer here is a bare value. A finding of similar outcomes across \
+options supports it like an effective range does: when the excerpt reports \
+that a span of loads or repetition ranges produced similar results for the \
+question's outcome, a value inside the span it compared is one of those \
+effective options - primary_support if the excerpt names a range containing \
+it (8-12 where '8-12RM and 20-25RM produced similar growth'), \
+contextual_support if it states the span only in other terms (8-12 reps \
+where 'heavy and light loads were equally effective'). A finding that no \
+single option is best ('no ideal zone', 'similar across loads') never \
+contradicts a bare value inside its span, since a bare value claims no \
+optimum. A value outside the span the excerpt compared is not supported by \
+it."""
+
+
 _DETAILS_INSTRUCTIONS = """
 
 The answer here is prose, so before the `outcome`, list in `details` every \
@@ -219,9 +240,9 @@ def judge_citation(
     judge = judge or GENERATION_JUDGE  # looked up per call, so it can be swapped (scripts/eval_judge.py)
     # gpt-5 is a reasoning model, which rejects a temperature setting
     options = {"reasoning_effort": judge.reasoning_effort} if judge.reasoning_effort else {}
-    # The details instructions go after the shared prompt, so both kinds of
+    # Each kind's instructions go after the shared prompt, so both kinds of
     # call keep the same cacheable prefix.
-    system = _JUDGE_SYSTEM_PROMPT + (_DETAILS_INSTRUCTIONS if prose else "")
+    system = _JUDGE_SYSTEM_PROMPT + (_DETAILS_INSTRUCTIONS if prose else _SIMILAR_SPAN_INSTRUCTIONS)
     completion = client.chat.completions.parse(
         model=judge.model,
         **options,

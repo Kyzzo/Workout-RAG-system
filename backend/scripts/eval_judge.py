@@ -39,7 +39,7 @@ from types import SimpleNamespace
 
 from app.rag import verification
 from app.rag.corpus import evidence_text, paper
-from app.rag.generate import VOLUME_BANDS, build_reps_query, build_rir_query, build_volume_query
+from app.rag.generate import VOLUME_BANDS, build_movement_query, build_reps_query, build_rir_query, build_volume_query
 from app.rag.verification import Judge, judge_citation
 
 EXCERPTS = json.loads((Path(__file__).parent / "eval_fixtures" / "judge_excerpts.json").read_text(encoding="utf-8"))
@@ -135,6 +135,22 @@ JUDGE_CASES = [
               build_reps_query("chest", "hypertrophy", "Barbell Bench Press"), "8-12", "generation", "rejected",
               "the intro describes what the repetition continuum proposes - a belief the paper goes on to "
               "challenge, not a finding - though it states 8-12 word for word"),
+    # Similar-outcome findings support a bare value inside the compared span:
+    # production rejected 8-12 for compound hypertrophy (Oct 19, 4 of 4
+    # attempts), reading 'similar growth across loads, no ideal zone' as
+    # contradicting any recommended range. A bare value claims no optimum.
+    JudgeCase("8-12 inside cited 8-12RM-vs-light findings", "schoenfeld_cited_moderate",
+              build_movement_query("reps", "hypertrophy", "compound"), "8-12", "generation", "supported",
+              "cited trials found 8-12RM grew muscle like 20-25RM and ~30RM - 8-12 is one of the effective ranges"),
+    JudgeCase("8-12 vs 'heavy and light loads equally effective'", "schoenfeld2017_equal_loads",
+              build_movement_query("reps", "hypertrophy", "compound"), "8-12", "generation", "supported",
+              "moderate reps sit between the heavy and light loads found equally effective (related evidence at least)"),
+    JudgeCase("8-12 inside similar rep ranges (Klemp)", "klemp_similar_reps",
+              build_movement_query("reps", "hypertrophy", "compound"), "8-12", "generation", "supported",
+              "volume-equated 12-10-8 and 6-4-2 reps grew muscle similarly; 8-12 is inside what was compared"),
+    JudgeCase("40-50 beyond the loads compared", "schoenfeld_cited_moderate",
+              build_movement_query("reps", "hypertrophy", "compound"), "40-50", "generation", "rejected",
+              "the cited trials span 2-6RM to ~30RM; 'similar across loads' doesn't reach a range nobody trained"),
     JudgeCase("theory presented as the theory", "schoenfeld_continuum_intro", THEORY_QUESTION,
               "The traditional repetition continuum holds that a moderate repetition scheme of 8 to 12 "
               "repetitions per set at 60% to 80% of 1RM optimizes muscle hypertrophy.", "statement", "supported",

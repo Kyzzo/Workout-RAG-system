@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .citations import get_or_create_citation
 
-ANSWER_VERSION = "2026-10-20a"  # a: summary judge accepts open set conversions and total counts for direct-only muscles
+ANSWER_VERSION = "2026-10-20b"  # b: generation judge accepts a bare value inside a similar-outcomes span
 
 
 @dataclass
