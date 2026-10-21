@@ -157,7 +157,7 @@ function Workspace() {
     // Wide screens: program on the left, chat as a sticky panel on the right
     // so it stays in view while the program scrolls. Narrow screens stack.
     <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_25rem] lg:gap-8 lg:px-8 lg:py-8 xl:grid-cols-[minmax(0,1fr)_27rem]">
-      <main className="stagger flex min-w-0 flex-col gap-5">
+      <main className="flex min-w-0 flex-col gap-5">
         {hasPrograms && (
           <div className="flex items-center gap-2">
             <label htmlFor="program-select" className="sr-only">
@@ -214,7 +214,7 @@ function Workspace() {
             <header className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1">
-                  <h1 className="display truncate pb-1 text-[2.25rem] sm:text-[2.75rem]">
+                  <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
                     {programTitle(program)}
                   </h1>
                   <button
