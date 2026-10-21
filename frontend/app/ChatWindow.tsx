@@ -866,13 +866,16 @@ function AnswerText({ answer }: { answer: string }) {
 
 function CitationList({ citations }: { citations: Citation[] }) {
   if (citations.length === 0) return null;
+  // Folded by default: the answer and its evidence come first, the source
+  // list opens on demand.
   return (
-    <div className="mt-3 border-t border-line pt-2.5">
-      <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+    <details className="group/sources mt-3 border-t border-line pt-2.5">
+      <summary className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-fg-subtle transition-colors duration-150 select-none hover:text-fg">
+        <ChevronRight className="size-3 transition-transform duration-200 group-open/sources:rotate-90" />
         <Book className="size-3 text-evidence" />
         {citations.length} source{citations.length === 1 ? "" : "s"}
-      </p>
-      <ol className="flex flex-col gap-1.5">
+      </summary>
+      <ol className="animate-in mt-1.5 flex flex-col gap-1.5">
         {citations.map((c, i) => (
           <li key={i} title={c.snippet} className="flex gap-2 text-xs text-fg-muted">
             <span className="font-mono text-fg-subtle">{i + 1}</span>
@@ -887,6 +890,6 @@ function CitationList({ citations }: { citations: Citation[] }) {
           </li>
         ))}
       </ol>
-    </div>
+    </details>
   );
 }
