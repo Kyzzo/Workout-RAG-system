@@ -889,7 +889,26 @@ export default function ProgramTree({
                           </div>
                         );
                       })}
-                            {muscleGroups.map((group, index) => {
+                            {[...muscleGroups, ...indirectGroups].sort().map((group, index) => {
+                              const rowClass = `flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-line py-2 ps-3 pe-1 text-[13px] sm:flex-nowrap sm:py-1 sm:ps-4 sm:pe-2 ${
+                                index % 2 === 1 ? "border-s" : ""
+                              }`;
+                              // Trained only through other lifts: no research
+                              // numbers or actions of its own, so just say so.
+                              if (indirectGroups.includes(group)) {
+                                return (
+                                  <div key={group} role="row" className={`${rowClass} sm:min-h-10`}>
+                                    <span role="rowheader" className="flex min-w-0 flex-1 items-center font-medium sm:w-24 sm:flex-none sm:shrink-0">
+                                      <span className="truncate">{capitalize(group)}</span>
+                                      <span className="text-fg-subtle">*</span>
+                                    </span>
+                                    <span aria-hidden="true" className="basis-full max-sm:order-1 sm:hidden" />
+                                    <span role="cell" className="min-w-0 flex-1 text-xs text-fg-muted max-sm:order-2">
+                                      Trained via other lifts · {deliveredSets(mesocycle, group)} sets/wk as half sets
+                                    </span>
+                                  </div>
+                                );
+                              }
                               const frequency = mesocycle.muscle_group_frequencies.find((f) => f.muscle_group === group);
                               const volume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group);
                               const scheme = mesocycle.progression_schemes.find((p) => p.muscle_group === group);
@@ -942,13 +961,7 @@ export default function ProgramTree({
                                   />
                                 ) : null;
                               return [
-                                <div
-                                  key={group}
-                                  role="row"
-                                  className={`flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-line py-2 ps-3 pe-1 text-[13px] sm:flex-nowrap sm:py-1 sm:ps-4 sm:pe-2 ${
-                                    index % 2 === 1 ? "border-s" : ""
-                                  }`}
-                                >
+                                <div key={group} role="row" className={rowClass}>
                                     <span role="rowheader" className="flex min-w-0 flex-1 items-center gap-1.5 font-medium sm:w-24 sm:flex-none sm:shrink-0">
                                       <span className="truncate">{capitalize(group)}</span>
                                       {rowBusy && <Spinner className="size-3 shrink-0 text-accent-text" />}
@@ -1068,7 +1081,7 @@ export default function ProgramTree({
                       {/* An odd count leaves the last row half empty: an
                           empty cell keeps the grid's lines even. The dense
                           flow places it beside the last muscle. */}
-                      {muscleGroups.length % 2 === 1 && (
+                      {(muscleGroups.length + indirectGroups.length) % 2 === 1 && (
                         <div aria-hidden="true" className="border-s border-t border-line" />
                       )}
                     </div>
