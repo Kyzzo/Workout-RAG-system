@@ -411,9 +411,8 @@ export default function ChatWindow({
             </span>
             <p className="font-medium">Ask the evidence</p>
             <p className="text-sm leading-relaxed text-fg-muted">
-              Press <span className="font-medium text-fg">Ask</span>{" "}on any prescription to question or change it
-              (&quot;why this load?&quot;, &quot;make it 4 sets&quot;), or ask a general question below. Every answer
-              links the studies it used.
+              Press <span className="font-medium text-fg">Ask</span>{" "}on any prescription, or ask below. Answers link
+              their studies.
             </p>
             <div className="mt-3">
               <SuggestedPrompts
