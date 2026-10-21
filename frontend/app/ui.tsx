@@ -218,7 +218,7 @@ export function Segmented<T extends string>({
   label: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="grid auto-cols-fr grid-flow-col gap-1 rounded-xl bg-surface-2 p-1 border border-line">
+    <div role="radiogroup" aria-label={label} className="flex gap-1 rounded-xl bg-surface-2 p-1 border border-line">
       {options.map((o) => {
         const selected = o.value === value;
         return (
@@ -229,7 +229,7 @@ export function Segmented<T extends string>({
             aria-checked={selected}
             disabled={disabled}
             onClick={() => onChange(o.value)}
-            className={`h-8 rounded-lg text-sm font-medium transition-[background-color,color,box-shadow] duration-150 disabled:opacity-50 ${
+            className={`h-8 min-w-fit flex-1 basis-0 rounded-lg px-2 text-sm font-medium transition-[background-color,color,box-shadow] duration-150 disabled:opacity-50 ${
               selected ? "bg-accent-soft text-accent-text ring-1 ring-accent-ring/70" : "text-fg-muted hover:text-fg"
             }`}
           >

@@ -597,7 +597,10 @@ export default function ProgramTree({
                   type="button"
                   disabled={busy}
                   onClick={() => generateBlock(mesocycle)}
-                  className={`btn ${ungenerated ? "btn-primary" : "btn-secondary"}`}
+                  aria-label={ungenerated ? "Generate block" : "Regenerate block"}
+                  title={ungenerated ? "Generate block" : "Regenerate block"}
+                  // Icon-only on phones so it sits beside the title.
+                  className={`btn ${ungenerated ? "btn-primary" : "btn-secondary"} max-sm:size-10 max-sm:p-0`}
                 >
                   {busyKey === `block-${mesocycle.id}` ? (
                     <Spinner className="size-4" />
@@ -606,11 +609,13 @@ export default function ProgramTree({
                   ) : (
                     <Refresh className="size-4" />
                   )}
-                  {busyKey === `block-${mesocycle.id}`
-                    ? "Generating..."
-                    : ungenerated
-                      ? "Generate block"
-                      : "Regenerate block"}
+                  <span className="hidden sm:inline">
+                    {busyKey === `block-${mesocycle.id}`
+                      ? "Generating..."
+                      : ungenerated
+                        ? "Generate block"
+                        : "Regenerate block"}
+                  </span>
                 </button>
               )}
             </header>
@@ -636,7 +641,7 @@ export default function ProgramTree({
                     </span>
                     <span className="min-w-0 flex-1 basis-52">
                       <span className="block text-sm font-semibold">Weekly sets by muscle</span>
-                      <span className="block text-xs text-fg-subtle">
+                      <span className="hidden text-xs text-fg-subtle sm:block">
                         What the plan gives vs. research
                         {suggested.length > 0 && ` (${range(suggested)} suggested)`} · trained {range(trainedPerWeek)}x/wk
                       </span>
