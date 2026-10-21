@@ -832,12 +832,21 @@ export default function ProgramTree({
                           type="button"
                           onClick={() => toggleDay(day.id)}
                           aria-expanded={open}
-                          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-3 text-start"
+                          className="group/day flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-3 text-start"
                         >
+                          {/* Purple marks the open day, and previews it on hover. */}
                           <ChevronRight
-                            className={`size-4 shrink-0 text-fg-subtle transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+                            className={`size-4 shrink-0 transition-[rotate,color] duration-200 ${
+                              open ? "rotate-90 text-accent-text" : "text-fg-subtle group-hover/day:text-accent-text"
+                            }`}
                           />
-                          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-surface-3 font-mono text-xs font-medium text-fg-muted">
+                          <span
+                            className={`grid size-8 shrink-0 place-items-center rounded-lg font-mono text-xs font-medium transition-colors duration-150 ${
+                              open
+                                ? "bg-accent-soft text-accent-text"
+                                : "bg-surface-3 text-fg-muted group-hover/day:bg-accent-soft group-hover/day:text-accent-text"
+                            }`}
+                          >
                             D{dayIndex + 1}
                           </span>
                           <span className="min-w-0 flex-1">

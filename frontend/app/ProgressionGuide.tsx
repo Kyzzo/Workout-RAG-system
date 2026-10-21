@@ -31,7 +31,7 @@ const STEPS: React.ReactNode[] = [
 export default function ProgressionGuide() {
   return (
     <details className="group card overflow-hidden">
-      <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 select-none">
+      <summary className="group/summary flex cursor-pointer items-center gap-3 px-5 py-4 select-none">
         <Image
           src="/progress-icon.jpg"
           alt=""
@@ -43,7 +43,7 @@ export default function ProgressionGuide() {
           <span className="block text-sm font-semibold">How to progress</span>
           <span className="block text-xs text-fg-subtle">Double progression: add reps, then weight</span>
         </span>
-        <ChevronRight className="size-4 text-fg-subtle transition-transform duration-200 group-open:rotate-90" />
+        <ChevronRight className="size-4 text-fg-subtle transition-[rotate,color] duration-200 group-open:rotate-90 group-open:text-accent-text group-hover/summary:text-accent-text" />
       </summary>
       <div className="animate-in flex flex-col gap-4 border-t border-line px-5 py-4">
         <ol className="flex flex-col gap-3">
