@@ -8,7 +8,6 @@
 :root {
   color-scheme: light;
   --bg: #f6f6f8;
-  --bg-glow: rgba(91, 79, 245, 0.09);
   --surface: #ffffff;
   --surface-2: #f3f3f6;
   --surface-3: #e9e9ee;
@@ -41,7 +40,6 @@
   :root {
     color-scheme: dark;
     --bg: #08080b;
-    --bg-glow: rgba(109, 98, 255, 0.16);
     --surface: #111116;
     --surface-2: #18181e;
     --surface-3: #222229;
@@ -107,11 +105,7 @@
   }
 
   body {
-    background:
-      radial-gradient(1100px 520px at 15% -12%, var(--bg-glow), transparent 65%),
-      radial-gradient(800px 420px at 100% 0%, var(--bg-glow), transparent 60%),
-      var(--bg);
-    background-repeat: no-repeat;
+    background: var(--bg);
     color: var(--fg);
     font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
     font-feature-settings: "ss01", "cv11";
