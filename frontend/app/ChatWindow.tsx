@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
+import Image from "next/image";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { API_URL } from "./apiUrl";
 import { CaveatNote } from "./Citations";
@@ -370,9 +371,13 @@ export default function ChatWindow({
   return (
     <section className="card flex h-full flex-col overflow-hidden" aria-label="Research chat">
       <header className="flex items-center gap-3 border-b border-line px-4 py-3.5">
-        <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-accent to-accent-2 text-white">
-          <Message className="size-4" />
-        </span>
+        <Image
+          src="/chat-icon.jpg"
+          alt=""
+          width={32}
+          height={32}
+          className="size-8 shrink-0 rounded-lg object-cover ring-1 ring-line-strong"
+        />
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold">Research chat</h2>
           <p className="truncate text-xs text-fg-subtle">Answers and changes cite the papers</p>
