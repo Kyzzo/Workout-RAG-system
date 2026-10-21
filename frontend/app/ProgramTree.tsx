@@ -548,11 +548,23 @@ export default function ProgramTree({
         ).length;
         // The dosing chart: sets per week the plan gives each muscle against
         // the research-suggested sets, on one shared scale.
-        const dosing = muscleGroups.map((group) => ({
-          group,
-          delivered: deliveredSets(mesocycle, group),
-          target: mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group)?.weekly_sets,
-        }));
+        // A muscle can have no exercise of its own (front delts or lower back,
+        // when a press or hinge already trains it). It's still trained, as
+        // half sets, so it's charted too, without a research line.
+        const indirectGroups = [...new Set(slots.flatMap((s) => s.secondary_muscle_groups))]
+          .filter((g) => !muscleGroups.includes(g))
+          .sort();
+        const dosing = [...muscleGroups, ...indirectGroups].sort().map((group) => {
+          const indirect = indirectGroups.includes(group);
+          return {
+            group,
+            indirect,
+            delivered: deliveredSets(mesocycle, group),
+            target: indirect
+              ? undefined
+              : mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group)?.weekly_sets,
+          };
+        });
         const dosingMax = Math.max(1, ...dosing.map((d) => Math.max(d.delivered, d.target ?? 0)));
         const dosingOpen = openDosing.has(mesocycle.id);
         const chartOpen = openCharts.has(mesocycle.id);
@@ -686,14 +698,16 @@ export default function ProgramTree({
                       dark to read as a mark); below target uses the warning
                       colour with an icon. Values stay in text colours. */}
                   <ul className={`${chartOpen ? "grid" : "hidden sm:grid"} gap-x-8 gap-y-2.5 px-4 pb-3.5 pt-3.5 sm:grid-cols-2`}>
-                    {dosing.map(({ group, delivered, target }) => {
+                    {dosing.map(({ group, indirect, delivered, target }) => {
                       const short = target !== undefined && delivered < target;
                       const pct = (n: number) => `${(n / dosingMax) * 100}%`;
                       return (
                         <li
                           key={group}
                           title={`${capitalize(group)}: plan gives ${delivered} sets/wk${
-                            target === undefined
+                            indirect
+                              ? ", all as half sets from other lifts"
+                              : target === undefined
                               ? ""
                               : strength
                                 ? `, research: ${target} is enough for strength`
@@ -701,10 +715,16 @@ export default function ProgramTree({
                           }`}
                           className="grid grid-cols-[6.5rem_minmax(0,1fr)_3.5rem] items-center gap-3"
                         >
-                          <span className="truncate text-xs text-fg-muted">{capitalize(group)}</span>
+                          <span className="truncate text-xs text-fg-muted">
+                            {capitalize(group)}
+                            {indirect && <span className="text-fg-subtle">*</span>}
+                          </span>
                           <span className="relative h-2 rounded-full bg-surface-3">
+                            {/* Lighter: every set comes from other lifts. */}
                             <span
-                              className={`absolute inset-y-0 start-0 rounded-full ${short ? "bg-warn" : "bg-accent-text"}`}
+                              className={`absolute inset-y-0 start-0 rounded-full ${
+                                short ? "bg-warn" : indirect ? "bg-accent-text/45" : "bg-accent-text"
+                              }`}
                               style={{ width: pct(delivered) }}
                             />
                             {target !== undefined && (
@@ -725,6 +745,12 @@ export default function ProgramTree({
                       );
                     })}
                   </ul>
+                  {indirectGroups.length > 0 && (
+                    <p className={`${chartOpen ? "" : "hidden sm:block"} -mt-1.5 px-4 pb-3.5 text-[11px] text-fg-subtle`}>
+                      * {indirectGroups.map(capitalize).join(" and ")}: no exercise of {indirectGroups.length === 1 ? "its" : "their"}{" "}
+                      own, trained as half sets from other lifts, so no research line.
+                    </p>
+                  )}
                   <p className={`${chartOpen ? "" : "hidden"} -mt-1.5 px-4 pb-3.5 text-[11px] text-fg-subtle sm:hidden`}>
                     Bar: sets in the plan · line: {strength ? "enough for strength (research)" : "research suggestion"}
                   </p>
