@@ -581,7 +581,17 @@ export default function ProgramTree({
               (f) => `${f.frequency}|${f.supporting_citations.length}`,
             )
           : null;
-        const sharedTrained = shared(trainedPerWeek, String);
+        // How often muscles are trained: the usual value goes in the strip,
+        // naming up to two muscles that differ (front delts on fewer days
+        // when presses cover them). More exceptions than that and each row
+        // shows its own.
+        const trainedCounts = new Map<number, number>();
+        for (const n of trainedPerWeek) trainedCounts.set(n, (trainedCounts.get(n) ?? 0) + 1);
+        const typicalTrained = [...trainedCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+        const trainedExceptions = muscleGroups
+          .map((group, i) => ({ group, days: trainedPerWeek[i] }))
+          .filter(({ days }) => days !== typicalTrained);
+        const sharedTrained = typicalTrained !== undefined && trainedExceptions.length <= 2 ? typicalTrained : null;
         return (
           // On phones the block drops its frame so the cards inside it
           // (chart, weeks, days) use the full width.
@@ -806,9 +816,15 @@ export default function ProgramTree({
                             </Fact>
                           )}
                           {sharedTrained !== null && (
-                            <Fact label="You train each muscle">
+                            <Fact label={trainedExceptions.length > 0 ? "You train most muscles" : "You train each muscle"}>
                               <span>
                                 {sharedTrained}x<span className="text-xs font-normal text-fg-subtle">/wk</span>
+                                {trainedExceptions.length > 0 && (
+                                  <span className="text-xs font-normal text-fg-subtle">
+                                    {" · "}
+                                    {trainedExceptions.map(({ group, days }) => `${group} ${days}x`).join(", ")}
+                                  </span>
+                                )}
                               </span>
                             </Fact>
                           )}
@@ -1038,6 +1054,7 @@ export default function ProgramTree({
                                       ]}
                                     />
                                     </span>
+                                    <span aria-hidden="true" className="basis-full max-sm:order-1 sm:hidden" />
                                 </div>,
                                 panel && (
                                   <div key={`${group}-sources`} role="row" className="col-span-2 border-t border-line">
