@@ -1167,7 +1167,7 @@ function ExerciseBlock({
         <div className="min-w-0">
           <p className="font-medium leading-snug text-fg">{slot.exercise_name}</p>
           <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-fg-subtle">
-            <span className="chip h-5 border-transparent bg-accent-soft px-1.5 text-accent-text">{slot.muscle_group}</span>
+            <span className="chip h-5 px-1.5">{slot.muscle_group}</span>
             {slot.secondary_muscle_groups.length > 0 && <span>also {slot.secondary_muscle_groups.join(", ")}</span>}
             {working && (
               <span className="inline-flex items-center gap-1.5 text-accent-text">
@@ -1204,7 +1204,7 @@ function ExerciseBlock({
         return (
           <div
             className={`rounded-lg transition-colors duration-150 ${
-              anchoredFieldId === single.wp.id ? "bg-accent-soft ring-1 ring-accent/50" : ""
+              anchoredFieldId === single.wp.id ? "bg-accent-soft ring-1 ring-accent-ring/70" : ""
             }`}
           >
             <div
@@ -1228,7 +1228,7 @@ function ExerciseBlock({
               <li
                 key={wp.id}
                 className={`rounded-lg transition-colors duration-150 ${
-                  anchoredFieldId === wp.id ? "bg-accent-soft ring-1 ring-accent/50" : "hover:bg-surface-3/40"
+                  anchoredFieldId === wp.id ? "bg-accent-soft ring-1 ring-accent-ring/70" : "hover:bg-surface-3/40"
                 }`}
               >
                 {/* Narrow: week label and actions on a slim top line, values

@@ -182,7 +182,7 @@ function StudyList({ citations }: { citations: SupportingCitation[] }) {
               title={STATUS_LABEL[paper.best]}
               className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs transition-[background-color,border-color,color] duration-150 ${
                 active
-                  ? "border-accent bg-accent-soft text-fg"
+                  ? "border-accent-ring bg-accent-soft text-fg"
                   : "border-line bg-surface text-fg-muted hover:border-line-strong hover:text-fg"
               }`}
             >
