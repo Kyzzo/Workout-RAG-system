@@ -34,7 +34,7 @@ export default function RootLayout({
           <header className="sticky top-0 z-40 border-b border-line bg-bg/75 backdrop-blur-xl">
             <div className="mx-auto flex h-14 w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
               <Image
-                src="/logo-city.jpg"
+                src="/logo-5am-green.jpg"
                 alt=""
                 width={32}
                 height={32}
