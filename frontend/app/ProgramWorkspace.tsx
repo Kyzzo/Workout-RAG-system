@@ -229,7 +229,7 @@ function Workspace() {
                   </button>
                 </div>
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
-                  <span className="chip font-medium capitalize text-fg">
+                  <span className="chip border-transparent bg-accent-soft font-medium capitalize text-accent-text">
                     {program.goal}
                   </span>
                   <span className="chip">{volumeLabel(program.volume_preference, program.goal)}</span>

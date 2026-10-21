@@ -1167,7 +1167,7 @@ function ExerciseBlock({
         <div className="min-w-0">
           <p className="font-medium leading-snug text-fg">{slot.exercise_name}</p>
           <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-fg-subtle">
-            <span className="chip h-5 px-1.5">{slot.muscle_group}</span>
+            <span className="chip h-5 border-transparent bg-accent-soft px-1.5 text-accent-text">{slot.muscle_group}</span>
             {slot.secondary_muscle_groups.length > 0 && <span>also {slot.secondary_muscle_groups.join(", ")}</span>}
             {working && (
               <span className="inline-flex items-center gap-1.5 text-accent-text">
