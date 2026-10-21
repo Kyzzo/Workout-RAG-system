@@ -137,6 +137,42 @@ reranker that silently scored only 3 of 40 candidates, and a model too weak
 to recognize a statistical result as an answer. Details in the
 [retrieval design doc](../design-decisions/retrieval-and-reranking.md).
 
+## Chat answers, audited end to end
+
+Every component had its own eval, but none measured what a user actually
+reads. So 34 new questions (typical, tricky, outside the corpus, and asked
+from an exercise card) were run once each through the production chat
+code, and every claim shown was graded against the excerpt it cites. The
+grading was done by a language model, reading the full excerpt whenever a
+claim looked off.
+
+The first audit found 154 claims: 83% faithful, 15% minor slips and 2%
+unfaithful. All three unfaithful claims were the lead summary, the one
+place the model combines several sources. Several bad answers were to
+questions the corpus couldn't answer (protein, rest, stretching), where
+the model filled the gap with what a study's participants happened to do.
+That was a coverage problem, so 18 papers were added and PDF extraction
+damage in 10 older ones was repaired. The chat also learned to say so when
+the research doesn't answer a question: it declines before writing when
+no excerpt is relevant (the reranker scored every unanswerable question
+1-2 out of 10 and every answerable one 6 or higher, so a cutoff of 4 was
+a measured choice).
+
+The same 34 questions after those changes: 185 claims, 88% faithful, 12%
+minor slips and 0.5% unfaithful, with no unfaithful lead summaries, at the
+same speed (median 20 seconds) and cost (about $0.11 an answer).
+
+One fix was measured and then reverted. A check that rejects advice
+resting only on how a study was run (a 30-minute session length turned
+into "workouts should take 30 minutes") passed all its regression cases.
+But a full 42-question rerun showed it rejecting half of the good first
+drafts, mostly by misreading a counting instruction the writer is required
+to include. Median answer time rose from 20 to 35 seconds and seven
+correct answers lost their lead. The failure it fixed is rare and
+low-harm, so it was reverted and its cases kept in the eval as known gaps.
+A targeted eval shows that a fix works; only the full rerun showed what it
+cost.
+
 ## What this taught
 
 - Correct citations don't make a correct claim. Verification has to judge

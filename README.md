@@ -18,7 +18,7 @@ whether to trust it or override it.
 
 - **Builds a full training block** from a goal, a split, days per week and
   a block length. Every set count, rep range, effort target and load is
-  generated from a corpus of 32 hypertrophy and strength papers.
+  generated from a corpus of 50 strength-training research papers.
 - **Cites each value separately.** Each badge opens a plain-language
   explanation and the studies behind it, with excerpts.
 - **Answers research questions in chat.** Each claim in an answer is
@@ -55,11 +55,32 @@ the same setup.
 | Large-model calls per program, before shared answers | about 590 |
 | Large-model calls, first program of a setup | 29 |
 | Large-model calls, later programs with the same setup | 0, in about 20 seconds |
-| Summary judge eval, 5 runs per case | 16 of 16 cases pass |
+| Chat claims checked against their cited excerpts (34 questions, 185 claims) | 88% faithful, 12% minor slips, 0.5% unfaithful |
+| Unfaithful lead answers in that audit, before and after the latest fixes | 3, then 0 |
+| Chat answer, median time and cost | about 20 seconds, about $0.11 |
+| Questions the corpus can't answer | declined in about 6 seconds, about $0.03 |
+| Summary judge regression cases, 5 runs per case | 35, all passing except 3 known gaps |
 | Backend tests, all model calls mocked | 200+ |
 
 How each number was measured, and what was wrong before it, is written up
-in [docs/](docs/README.md).
+in [docs/](docs/README.md). The chat audit was graded by a language model
+against each cited excerpt, on one run of each question.
+
+## Known limitations
+
+- **A study's setup can be presented as advice.** Asked how long a
+  workout should take, the chat can answer "about 30 minutes" because one
+  trial's sessions lasted that long. A judge check that catches this was
+  built and measured: it worked on the regression cases, but in a full
+  42-question rerun it rejected half of the good first drafts and raised
+  the median answer time from 20 to 35 seconds. It was reverted. The
+  failing cases stay in the eval as known gaps.
+- **Advice can be moved to a population the study didn't cover**, such as
+  telling beginners what a study of trained lifters found. Also a known
+  gap in the eval.
+- **About one claim in eight is a minor slip**: true in spirit but looser
+  than its source, such as a figure stated more firmly than the study
+  does.
 
 ## Read more
 
