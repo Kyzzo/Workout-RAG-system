@@ -823,10 +823,10 @@ export default function ProgramTree({
                   return (
                     <div
                       key={day.id}
-                      // Outline, arrow and badge turn purple together: on the open
-                      // day, and on hover anywhere over a closed one.
+                      // Arrow and badge turn purple: on the open day, and on hover
+                      // anywhere over a closed one. The outline stays neutral.
                       className={`group/day rounded-xl border transition-colors duration-150 ${
-                        open ? "border-accent-ring/45 bg-surface-2/40" : "border-line hover:border-accent-ring/45"
+                        open ? "border-line-strong bg-surface-2/40" : "border-line hover:border-line-strong"
                       }`}
                     >
                       <div className="flex items-center gap-1 pe-2">
