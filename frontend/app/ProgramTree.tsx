@@ -197,6 +197,15 @@ export default function ProgramTree({
   // Days start collapsed so a long program reads as an outline; open the
   // ones you're looking at.
   const [openDays, setOpenDays] = useState<Set<number>>(new Set());
+  // Blocks whose dosing details table is open (the chart above it always shows).
+  const [openDosing, setOpenDosing] = useState<Set<number>>(new Set());
+  const toggleDosing = (id: number) =>
+    setOpenDosing((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   // The week each block shows (its first week by default), or "all" for
   // every week at once. Only blocks whose weeks differ (strength) get a
   // picker; the rest are the same every week.
@@ -510,6 +519,15 @@ export default function ProgramTree({
         const belowTarget = mesocycle.muscle_group_volumes.filter(
           (v) => muscleGroups.includes(v.muscle_group) && deliveredSets(mesocycle, v.muscle_group) < v.weekly_sets,
         ).length;
+        // The dosing chart: sets per week the plan gives each muscle against
+        // the research-suggested sets, on one shared scale.
+        const dosing = muscleGroups.map((group) => ({
+          group,
+          delivered: deliveredSets(mesocycle, group),
+          target: mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group)?.weekly_sets,
+        }));
+        const dosingMax = Math.max(1, ...dosing.map((d) => Math.max(d.delivered, d.target ?? 0)));
+        const dosingOpen = openDosing.has(mesocycle.id);
         return (
           <section key={mesocycle.id} className="card flex flex-col">
             <header className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-line px-5 py-4">
@@ -566,38 +584,90 @@ export default function ProgramTree({
               )}
 
               {muscleGroups.length > 0 && (
-                // A summary panel, not another day row: a raised neutral
-                // surface, a preview of what's inside and a labelled expand
-                // control. Accent stays on the control only (accent = action).
-                <details className="group rounded-xl border border-line-strong bg-surface-2/70">
-                  <summary className="flex cursor-pointer items-center gap-3 px-4 py-3.5 select-none">
+                // A summary panel, not another day row: a chart of weekly sets
+                // per muscle against the research suggestion, always shown, with
+                // the full table (sources, frequency, actions) behind Details.
+                <section className="rounded-xl border border-line-strong bg-surface-2/70" aria-label="Weekly sets by muscle">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-3.5">
                     <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
                       <Layers className="size-4" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold">Per-muscle dosing</span>
-                      <span className="mt-1.5 flex flex-wrap gap-1.5">
-                        <span className="chip">
-                          {muscleGroups.length} muscle{muscleGroups.length === 1 ? "" : "s"}
-                        </span>
-                        {suggested.length > 0 && (
-                          <span className="chip tabular-nums">{range(suggested)} sets/wk suggested</span>
-                        )}
-                        <span className="chip tabular-nums">trained {range(trainedPerWeek)}x/wk</span>
-                        {belowTarget > 0 && (
-                          <span className="chip border-transparent bg-warn-soft text-warn">
-                            <Alert className="size-3" />
-                            {belowTarget} below target
-                          </span>
-                        )}
+                      <span className="block text-sm font-semibold">Weekly sets by muscle</span>
+                      <span className="block text-xs text-fg-subtle">
+                        What the plan gives vs. research
+                        {suggested.length > 0 && ` (${range(suggested)} suggested)`} · trained {range(trainedPerWeek)}x/wk
                       </span>
                     </span>
-                    <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text">
-                      <span className="hidden sm:inline sm:group-open:hidden">Show all</span>
-                      <span className="hidden sm:group-open:inline">Hide</span>
-                      <ChevronDown className="size-4 transition-transform duration-200 group-open:rotate-180" />
+                    {belowTarget > 0 && (
+                      <span className="chip border-transparent bg-warn-soft text-warn">
+                        <Alert className="size-3" />
+                        {belowTarget} below target
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => toggleDosing(mesocycle.id)}
+                      aria-expanded={dosingOpen}
+                      className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text"
+                    >
+                      {dosingOpen ? "Hide details" : "Details"}
+                      <ChevronDown className={`size-4 transition-transform duration-200 ${dosingOpen ? "rotate-180" : ""}`} />
+                    </button>
+                  </div>
+
+                  {/* Bullet chart: bar = sets the plan gives, tick = research
+                      suggestion. Light accent for bars (the fill accent is too
+                      dark to read as a mark); below target uses the warning
+                      colour with an icon. Values stay in text colours. */}
+                  <ul className="grid gap-x-8 gap-y-2.5 px-4 pb-2 pt-3.5 sm:grid-cols-2">
+                    {dosing.map(({ group, delivered, target }) => {
+                      const short = target !== undefined && delivered < target;
+                      const pct = (n: number) => `${(n / dosingMax) * 100}%`;
+                      return (
+                        <li
+                          key={group}
+                          title={`${capitalize(group)}: plan gives ${delivered} sets/wk${
+                            target !== undefined ? `, research suggests ${target}` : ""
+                          }`}
+                          className="grid grid-cols-[6.5rem_minmax(0,1fr)_3.5rem] items-center gap-3"
+                        >
+                          <span className="truncate text-xs text-fg-muted">{capitalize(group)}</span>
+                          <span className="relative h-2 rounded-full bg-surface-3">
+                            <span
+                              className={`absolute inset-y-0 start-0 rounded-full ${short ? "bg-warn" : "bg-accent-text"}`}
+                              style={{ width: pct(delivered) }}
+                            />
+                            {target !== undefined && (
+                              <span
+                                aria-hidden="true"
+                                className="absolute -inset-y-1 w-0.5 -translate-x-1/2 rounded-full bg-fg-muted ring-2 ring-surface-2"
+                                style={{ insetInlineStart: pct(target) }}
+                              />
+                            )}
+                          </span>
+                          <span className={`inline-flex items-center justify-end gap-1 text-xs tabular-nums ${short ? "text-warn" : "text-fg"}`}>
+                            {short && <Alert className="size-3" />}
+                            {delivered}
+                            {target !== undefined && <span className="text-fg-subtle">/{target}</span>}
+                            {short && <span className="sr-only"> (below the suggestion)</span>}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pb-3.5 text-[11px] text-fg-subtle">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span aria-hidden="true" className="h-2 w-3 rounded-full bg-accent-text" />
+                      Sets per week in the plan
                     </span>
-                  </summary>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span aria-hidden="true" className="h-3 w-0.5 rounded-full bg-fg-muted" />
+                      Research-suggested sets
+                    </span>
+                  </p>
+
+                  {dosingOpen && (
                   <div className="animate-in border-t border-line">
                     {/* Hypertrophy frequency isn't a generated number: with weekly
                         sets matched it doesn't change growth detectably, so the
@@ -806,7 +876,8 @@ export default function ProgramTree({
                       </table>
                     </div>
                   </div>
-                </details>
+                  )}
+                </section>
               )}
 
               {pickWeek && (
