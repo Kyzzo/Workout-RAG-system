@@ -3,8 +3,9 @@
 Next.js app for the AI Workout Tracker. See the [root README](../README.md)
 for what the project does.
 
-It renders programs with a citation badge on each value, runs the program
-wizard and research chat, and sends every request to the FastAPI backend
+It renders programs with a citation badge on each value and a weekly sets
+chart per block, runs the program wizard and the evidence assistant (the
+research chat), and sends every request to the FastAPI backend
 with a Clerk session token. All program logic lives in the backend. This
 app has no API routes of its own.
 

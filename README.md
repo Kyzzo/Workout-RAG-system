@@ -21,13 +21,18 @@ whether to trust it or override it.
   generated from a corpus of 50 strength-training research papers.
 - **Cites each value separately.** Each badge opens a plain-language
   explanation and the studies behind it, with excerpts.
-- **Answers research questions in chat.** Each claim in an answer is
-  checked against its cited excerpts, not just the answer as a whole.
-- **Edits through chat.** You can ask for a set to be added, an exercise
-  swapped, or the reasoning behind a value explained. Every change can be
-  undone.
+- **Charts weekly sets per muscle.** Each block shows what the plan gives
+  every muscle against the research number, and flags the muscles that
+  fall short.
+- **Answers research questions** in the evidence assistant. Each claim in
+  an answer is checked against its cited excerpts, not just the answer as
+  a whole.
+- **Edits through the assistant.** You can ask for a set to be added, an
+  exercise swapped, or the reasoning behind a value explained. In a
+  hypertrophy program a change can apply to one picked week or to every
+  week. Every change can be undone.
 
-<img src="docs/images/research-chat.png" alt="Research chat answering a question about weekly sets per muscle, with numbered citations" width="420">
+<img src="docs/images/research-chat.png" alt="The evidence assistant answering a question about weekly sets per muscle, with numbered citations" width="420">
 
 ## How a value gets its citation
 
