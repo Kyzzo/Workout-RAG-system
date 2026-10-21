@@ -648,7 +648,11 @@ export default function ProgramTree({
                       <span className="block text-sm font-semibold">Weekly sets by muscle</span>
                       <span className="hidden text-xs text-fg-subtle sm:block">
                         What the plan gives vs. research
-                        {suggested.length > 0 && ` (${range(suggested)} suggested)`} · trained {range(trainedPerWeek)}x/wk
+                        {suggested.length > 0 &&
+                          (strength
+                            ? ` (${range(suggested)} is enough for strength)`
+                            : ` (${range(suggested)} suggested)`)}{" "}
+                        · trained {range(trainedPerWeek)}x/wk
                       </span>
                     </span>
                     {belowTarget > 0 && (
@@ -689,7 +693,11 @@ export default function ProgramTree({
                         <li
                           key={group}
                           title={`${capitalize(group)}: plan gives ${delivered} sets/wk${
-                            target !== undefined ? `, research suggests ${target}` : ""
+                            target === undefined
+                              ? ""
+                              : strength
+                                ? `, research: ${target} is enough for strength`
+                                : `, research suggests ${target}`
                           }`}
                           className="grid grid-cols-[6.5rem_minmax(0,1fr)_3.5rem] items-center gap-3"
                         >
@@ -717,6 +725,9 @@ export default function ProgramTree({
                       );
                     })}
                   </ul>
+                  <p className={`${chartOpen ? "" : "hidden"} -mt-1.5 px-4 pb-3.5 text-[11px] text-fg-subtle sm:hidden`}>
+                    Bar: sets in the plan · line: {strength ? "enough for strength (research)" : "research suggestion"}
+                  </p>
 
                   {dosingOpen && (
                   <div className="animate-in border-t border-line">
@@ -754,7 +765,7 @@ export default function ProgramTree({
                             </Fact>
                           )}
                           {sharedVolume && (
-                            <Fact label="Suggested sets per muscle">
+                            <Fact label={strength ? "Enough for strength, per muscle" : "Suggested sets per muscle"}>
                               <span>
                                 {sharedVolume.weekly_sets}
                                 <span className="text-xs font-normal text-fg-subtle">/wk</span>
@@ -806,19 +817,36 @@ export default function ProgramTree({
                     <div className="grid sm:grid-cols-2">
                       {[muscleGroups.slice(0, Math.ceil(muscleGroups.length / 2)), muscleGroups.slice(Math.ceil(muscleGroups.length / 2))].map(
                         (column, columnIndex) => (
-                          <div key={columnIndex} className={columnIndex === 1 ? "sm:border-s sm:border-line" : undefined}>
+                          <div
+                            key={columnIndex}
+                            role="table"
+                            aria-label={`Dosing by muscle, ${columnIndex + 1} of 2`}
+                            className={columnIndex === 1 ? "sm:border-s sm:border-line" : undefined}
+                          >
+                            {/* The second column's headings are visual only on
+                                wider screens; phones stack the columns, so they
+                                stay for screen readers there. */}
                             <div
-                              className={`items-center gap-3 py-2 ps-4 pe-2 text-[11px] font-medium text-fg-subtle ${
-                                columnIndex === 1 ? "hidden sm:flex" : "flex"
+                              role="row"
+                              className={`flex items-center gap-3 py-2 ps-4 pe-2 text-[11px] font-medium text-fg-subtle ${
+                                columnIndex === 1 ? "max-sm:sr-only" : ""
                               }`}
                             >
-                              <span className="w-24 shrink-0">Muscle</span>
-                              {sharedTrained === null && <span className="w-12 text-end">Trained</span>}
-                              {strength && !sharedFrequency && <span className="w-[4.5rem] text-end">Research</span>}
-                              {!sharedVolume && <span className="w-14 text-end">Sets/wk</span>}
-                              {!strength && <span className="w-16 text-end">Per session</span>}
-                              <span className="min-w-0 flex-1">{strength && "Progression"}</span>
-                              <span className="w-8 shrink-0" />
+                              <span role="columnheader" className="w-24 shrink-0">Muscle</span>
+                              {sharedTrained === null && <span role="columnheader" className="w-12 text-end">Trained</span>}
+                              {strength && !sharedFrequency && (
+                                <span role="columnheader" className="w-[4.5rem] text-end">Research</span>
+                              )}
+                              {!sharedVolume && <span role="columnheader" className="w-14 text-end">Sets/wk</span>}
+                              {!strength && <span role="columnheader" className="w-16 text-end">Per session</span>}
+                              {strength ? (
+                                <span role="columnheader" className="min-w-0 flex-1">Progression</span>
+                              ) : (
+                                <span aria-hidden="true" className="min-w-0 flex-1" />
+                              )}
+                              <span role="columnheader" className="w-8 shrink-0">
+                                <span className="sr-only">Actions</span>
+                              </span>
                             </div>
                             {column.map((group) => {
                               const frequency = mesocycle.muscle_group_frequencies.find((f) => f.muscle_group === group);
@@ -874,16 +902,16 @@ export default function ProgramTree({
                                 ) : null;
                               return (
                                 <div key={group} className="border-t border-line">
-                                  <div className="flex items-center gap-3 py-1 ps-4 pe-2 text-[13px]">
-                                    <span className="flex w-24 shrink-0 items-center gap-1.5 font-medium">
+                                  <div role="row" className="flex items-center gap-3 py-1 ps-4 pe-2 text-[13px]">
+                                    <span role="rowheader" className="flex w-24 shrink-0 items-center gap-1.5 font-medium">
                                       <span className="truncate">{capitalize(group)}</span>
                                       {rowBusy && <Spinner className="size-3 shrink-0 text-accent-text" />}
                                     </span>
                                     {sharedTrained === null && (
-                                      <span className="w-12 text-end tabular-nums text-fg-muted">{trainedDays}x/wk</span>
+                                      <span role="cell" className="w-12 text-end tabular-nums text-fg-muted">{trainedDays}x/wk</span>
                                     )}
                                     {strength && !sharedFrequency && (
-                                      <span className="inline-flex w-[4.5rem] items-center justify-end gap-1.5 tabular-nums">
+                                      <span role="cell" className="inline-flex w-[4.5rem] items-center justify-end gap-1.5 tabular-nums">
                                         {frequency ? (
                                           <>
                                             {frequency.frequency}x/wk
@@ -901,7 +929,7 @@ export default function ProgramTree({
                                       </span>
                                     )}
                                     {!sharedVolume && (
-                                      <span className="inline-flex w-14 items-center justify-end gap-1.5 tabular-nums">
+                                      <span role="cell" className="inline-flex w-14 items-center justify-end gap-1.5 tabular-nums">
                                         {volume ? (
                                           <>
                                             {volume.weekly_sets}
@@ -919,11 +947,11 @@ export default function ProgramTree({
                                       </span>
                                     )}
                                     {!strength && (
-                                      <span className="w-16 text-end tabular-nums text-fg-muted">
+                                      <span role="cell" className="w-16 text-end tabular-nums text-fg-muted">
                                         {trainedDays > 0 ? `~${Math.round(delivered / trainedDays)}` : "—"}
                                       </span>
                                     )}
-                                    <span className="min-w-0 flex-1">
+                                    <span role={strength ? "cell" : undefined} aria-hidden={strength ? undefined : true} className="min-w-0 flex-1">
                                       {strength &&
                                         (scheme ? (
                                           <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
@@ -946,6 +974,7 @@ export default function ProgramTree({
                                           <span className="text-fg-subtle">—</span>
                                         ))}
                                     </span>
+                                    <span role="cell" className="shrink-0">
                                     <Menu
                                       label={`Actions for ${group}`}
                                       disabled={busy}
@@ -971,8 +1000,15 @@ export default function ProgramTree({
                                           : []),
                                       ]}
                                     />
+                                    </span>
                                   </div>
-                                  {panel && <div className="px-4 pb-3">{panel}</div>}
+                                  {panel && (
+                                    <div role="row">
+                                      <div role="cell" className="px-4 pb-3">
+                                        {panel}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
