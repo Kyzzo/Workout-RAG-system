@@ -25,7 +25,26 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      // Clerk otherwise picks light or dark from the device setting; the app
+      // is dark only, so its sign-in screens and account menu use the app's
+      // colours.
+      appearance={{
+        variables: {
+          colorPrimary: "#4a40c4",
+          colorPrimaryForeground: "#ffffff",
+          colorBackground: "var(--surface)",
+          colorForeground: "var(--fg)",
+          colorMutedForeground: "var(--fg-muted)",
+          colorInput: "var(--surface-2)",
+          colorInputForeground: "var(--fg)",
+          colorNeutral: "#ffffff",
+        },
+        // Links use the light text accent: the fill accent is too dark to
+        // read as text on the dark card.
+        elements: { footerActionLink: "!text-accent-text" },
+      }}
+    >
       <html
         lang="en"
         className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
