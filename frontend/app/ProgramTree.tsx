@@ -507,7 +507,7 @@ export default function ProgramTree({
                   {!weeksDiffer && slots.length > 0 && weeks.length > 1 && " · same every week"}
                 </p>
                 <div className="mt-0.5 flex items-center gap-1">
-                  <h3 className="truncate text-lg font-semibold tracking-tight">{mesocycle.name}</h3>
+                  <h3 className="sign-type truncate text-lg">{mesocycle.name}</h3>
                   <button
                     type="button"
                     disabled={busy}

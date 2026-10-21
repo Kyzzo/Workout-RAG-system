@@ -214,7 +214,7 @@ function Workspace() {
             <header className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1">
-                  <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
+                  <h1 className="placard sign-type truncate text-2xl sm:text-[1.75rem]">
                     {programTitle(program)}
                   </h1>
                   <button
