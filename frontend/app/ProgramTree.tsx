@@ -1022,6 +1022,12 @@ export default function ProgramTree({
                                 ),
                               ];
                             })}
+                      {/* An odd count leaves the last row half empty: an
+                          empty cell keeps the grid's lines even. The dense
+                          flow places it beside the last muscle. */}
+                      {muscleGroups.length % 2 === 1 && (
+                        <div aria-hidden="true" className="border-s border-t border-line" />
+                      )}
                     </div>
                   </div>
                   )}
