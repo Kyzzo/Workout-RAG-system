@@ -516,7 +516,7 @@ export default function ChatWindow({
 
         <form
           onSubmit={handleSend}
-          className="flex items-end gap-2 rounded-2xl border border-line-strong bg-surface-2 p-1.5 ps-3.5 transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
+          className="flex items-end gap-2 rounded-2xl border border-line-control bg-surface-2 p-1.5 ps-3.5 transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-ring)] focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
         >
           <textarea
             ref={messageInputRef}

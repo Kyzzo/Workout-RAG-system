@@ -255,7 +255,7 @@ export default function ProgramWizard({
   return (
     <form onSubmit={handleGenerate} className="card animate-in flex flex-col">
       <div className="flex items-start gap-3.5 px-5 pt-5 sm:px-6 sm:pt-6">
-        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-accent to-accent-2 text-white shadow-[0_8px_20px_-8px_var(--accent-ring)]">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-accent-fg">
           <Sparkles className="size-5" />
         </span>
         <div className="min-w-0 flex-1">

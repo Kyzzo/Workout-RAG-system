@@ -18,13 +18,17 @@
   --fg: #f3f3f6;
   --fg-muted: #a6a6b3;
   --fg-subtle: #878796;
-  --accent: #4a40c4;
-  --accent-hover: #5349d6;
+  --accent: #352e94;
+  --accent-hover: #3e37a3;
   --accent-2: #9b6bff;
   --accent-fg: #ffffff;
   --accent-text: #a8a1ff;
   --accent-soft: rgba(109, 98, 255, 0.15);
-  --accent-ring: rgba(139, 130, 255, 0.55);
+  /* Focus indicator: solid, about 6:1 on the page and cards. */
+  --accent-ring: #8b82ff;
+  /* Borders that identify a form control (inputs, selects, the switch
+     track): about 3:1, where --line-strong is for decorative edges. */
+  --line-control: rgba(255, 255, 255, 0.34);
   --evidence: #43d99a;
   --evidence-soft: rgba(67, 217, 154, 0.12);
   --warn: #f4b649;
@@ -45,6 +49,7 @@
   --color-surface-3: var(--surface-3);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
+  --color-line-control: var(--line-control);
   --color-fg: var(--fg);
   --color-fg-muted: var(--fg-muted);
   --color-fg-subtle: var(--fg-subtle);
@@ -127,9 +132,7 @@
   }
   .btn-primary {
     @apply bg-accent text-accent-fg;
-    box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.18) inset,
-      0 6px 16px -6px var(--accent-ring);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset;
   }
   .btn-secondary {
     @apply border border-line-strong bg-surface-2 text-fg;
@@ -184,13 +187,14 @@
   }
 
   .input {
-    @apply h-10 w-full min-w-0 rounded-lg border border-line bg-surface-2 px-3 text-sm text-fg placeholder:text-fg-subtle;
+    @apply h-10 w-full min-w-0 rounded-lg border border-line-control bg-surface-2 px-3 text-sm text-fg placeholder:text-fg-subtle;
     transition:
       border-color 150ms ease,
       box-shadow 150ms ease;
   }
   .input:focus {
-    @apply border-accent outline-none;
+    @apply outline-none;
+    border-color: var(--accent-ring);
     box-shadow: 0 0 0 3px var(--accent-soft);
   }
   .input:disabled {
@@ -297,5 +301,16 @@
   }
   to {
     transform: translateX(300%);
+  }
+}
+
+/* Windows High Contrast and other forced-colour modes drop background
+   colours, which is all the progress fill and the "on" switch track are
+   drawn with: give them the system highlight colour instead. */
+@media (forced-colors: active) {
+  [role="progressbar"] > div,
+  [role="switch"][aria-checked="true"] {
+    forced-color-adjust: none;
+    background: Highlight;
   }
 }

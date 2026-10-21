@@ -191,7 +191,7 @@ export function Switch({
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={`relative mt-0.5 inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors duration-150 disabled:opacity-50 ${
-          checked ? "border-transparent bg-accent" : "border-line-strong bg-surface-3"
+          checked ? "border-transparent bg-accent" : "border-line-control bg-surface-3"
         }`}
       >
         <span
@@ -265,10 +265,10 @@ export function ProgressBar({ value }: { value: number | null }) {
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value === null ? undefined : Math.round(value * 100)}>
       {value === null ? (
-        <div className="h-full w-1/3 animate-[indeterminate_1.2s_var(--ease-in-out)_infinite] rounded-full bg-accent" />
+        <div className="h-full w-1/3 animate-[indeterminate_1.2s_var(--ease-in-out)_infinite] rounded-full bg-accent-text" />
       ) : (
         <div
-          className="h-full rounded-full bg-accent transition-[width] duration-300 ease-[var(--ease-out)]"
+          className="h-full rounded-full bg-accent-text transition-[width] duration-300 ease-[var(--ease-out)]"
           style={{ width: `${Math.max(4, value * 100)}%` }}
         />
       )}
