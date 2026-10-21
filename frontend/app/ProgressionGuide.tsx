@@ -1,4 +1,5 @@
-import { ChevronRight, TrendingUp } from "./Icons";
+import Image from "next/image";
+import { ChevronRight } from "./Icons";
 import { RuleSources } from "./RuleSources";
 
 // How to progress a hypertrophy program week to week. Hypertrophy programs
@@ -31,9 +32,13 @@ export default function ProgressionGuide() {
   return (
     <details className="group card overflow-hidden">
       <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 select-none">
-        <span className="grid size-8 place-items-center rounded-lg bg-accent-soft text-accent-text">
-          <TrendingUp className="size-4" />
-        </span>
+        <Image
+          src="/progress-icon.jpg"
+          alt=""
+          width={32}
+          height={32}
+          className="size-8 shrink-0 rounded-lg object-cover ring-1 ring-line-strong"
+        />
         <span className="flex-1">
           <span className="block text-sm font-semibold">How to progress</span>
           <span className="block text-xs text-fg-subtle">Double progression: add reps, then weight</span>
