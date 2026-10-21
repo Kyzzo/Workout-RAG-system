@@ -562,7 +562,7 @@ export default function ProgramTree({
         return (
           <section key={mesocycle.id} className="card flex flex-col">
             <header className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-line px-5 py-4">
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 basis-56">
                 <p className="eyebrow">
                   Weeks {mesocycle.start_week}–{mesocycle.end_week}
                   {!weeksDiffer && slots.length > 0 && weeks.length > 1 && " · same every week"}
@@ -623,7 +623,7 @@ export default function ProgramTree({
                     <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
                       <Layers className="size-4" />
                     </span>
-                    <span className="min-w-0 flex-1">
+                    <span className="min-w-0 flex-1 basis-52">
                       <span className="block text-sm font-semibold">Weekly sets by muscle</span>
                       <span className="block text-xs text-fg-subtle">
                         What the plan gives vs. research
@@ -640,7 +640,7 @@ export default function ProgramTree({
                       type="button"
                       onClick={() => toggleDosing(mesocycle.id)}
                       aria-expanded={dosingOpen}
-                      className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text"
+                      className="ms-auto inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text"
                     >
                       {dosingOpen ? "Hide details" : "Details"}
                       <ChevronDown className={`size-4 transition-transform duration-200 ${dosingOpen ? "rotate-180" : ""}`} />
