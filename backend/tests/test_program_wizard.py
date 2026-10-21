@@ -206,7 +206,7 @@ def test_generate_program_builds_the_full_structure(mock_select, db_session, use
     assert program.volume_preference == "minimal"
     assert program.trained and program.include_deload
     [block] = program.mesocycles
-    assert (block.name, block.start_week, block.end_week) == ("Upper/Lower, 4 days/week", 1, 5)
+    assert (block.name, block.start_week, block.end_week) == ("Strength block", 1, 5)
     assert [(d.name, d.order, d.rest_days_before) for d in block.day_templates] == [
         ("Upper A", 1, None), ("Lower A", 2, 1), ("Upper B", 3, 1), ("Lower B", 4, 0),
     ]

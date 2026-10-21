@@ -67,7 +67,8 @@ def generate_program(
     db.flush()
     mesocycle = models.Mesocycle(
         program_id=program.id,
-        name=f"{split.label}, {request.days_per_week} days/week",
+        # The program's name already says the split and days.
+        name=f"{request.goal.capitalize()} block",
         start_week=1,
         end_week=request.weeks,
     )

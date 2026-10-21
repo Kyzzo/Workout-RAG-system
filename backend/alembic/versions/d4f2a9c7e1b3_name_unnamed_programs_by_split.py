@@ -1,4 +1,4 @@
-"""name unnamed programs by split and days
+"""name unnamed programs by split and days, and blocks by goal
 
 Revision ID: d4f2a9c7e1b3
 Revises: c3e8a1f4b2d7
@@ -47,6 +47,19 @@ def upgrade() -> None:
             name, number = f"{base} {number}", number + 1
         names.add(name)
         bind.execute(sa.text("UPDATE programs SET name = :name WHERE id = :id"), {"name": name, "id": program_id})
+
+    # Then generated blocks, whose name now repeated the program's, become
+    # "Hypertrophy block" / "Strength block" like new ones. Blocks the user
+    # renamed don't match the generated pattern and are left alone.
+    blocks = bind.execute(sa.text(
+        "SELECT m.id, m.name, p.goal FROM mesocycles m JOIN programs p ON p.id = m.program_id"
+    )).all()
+    for block_id, block_name, goal in blocks:
+        if _BLOCK_NAME.match(block_name or ""):
+            bind.execute(
+                sa.text("UPDATE mesocycles SET name = :name WHERE id = :id"),
+                {"name": f"{goal.capitalize()} block", "id": block_id},
+            )
 
 
 def downgrade() -> None:
