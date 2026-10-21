@@ -216,6 +216,16 @@ export default function ProgramTree({
   const [openDays, setOpenDays] = useState<Set<number>>(new Set());
   // Blocks whose dosing details table is open (the chart above it always shows).
   const [openDosing, setOpenDosing] = useState<Set<number>>(new Set());
+  // Blocks whose chart is shown on phones, where it starts collapsed (the
+  // header's "below target" chip summarises it); wider screens always show it.
+  const [openCharts, setOpenCharts] = useState<Set<number>>(new Set());
+  const toggleChart = (id: number) =>
+    setOpenCharts((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const toggleDosing = (id: number) =>
     setOpenDosing((current) => {
       const next = new Set(current);
@@ -545,6 +555,7 @@ export default function ProgramTree({
         }));
         const dosingMax = Math.max(1, ...dosing.map((d) => Math.max(d.delivered, d.target ?? 0)));
         const dosingOpen = openDosing.has(mesocycle.id);
+        const chartOpen = openCharts.has(mesocycle.id);
         // Details: a value every muscle shares (weekly sets and frequency are
         // one generated answer for all of them) is shown once above the
         // table, not on every row. A value that differs stays a column.
@@ -619,7 +630,7 @@ export default function ProgramTree({
                 // per muscle against the research suggestion, always shown, with
                 // the full table (sources, frequency, actions) behind Details.
                 <section className="rounded-xl border border-line-strong bg-surface-2/70" aria-label="Weekly sets by muscle">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-3.5">
+                  <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-3.5 ${chartOpen ? "" : "pb-3.5 sm:pb-0"}`}>
                     <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
                       <Layers className="size-4" />
                     </span>
@@ -638,9 +649,18 @@ export default function ProgramTree({
                     )}
                     <button
                       type="button"
+                      onClick={() => toggleChart(mesocycle.id)}
+                      aria-expanded={chartOpen}
+                      className="ms-auto inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text sm:hidden"
+                    >
+                      {chartOpen ? "Hide chart" : "Show chart"}
+                      <ChevronDown className={`size-4 transition-transform duration-200 ${chartOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => toggleDosing(mesocycle.id)}
                       aria-expanded={dosingOpen}
-                      className="ms-auto inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text"
+                      className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text sm:ms-auto"
                     >
                       {dosingOpen ? "Hide details" : "Details"}
                       <ChevronDown className={`size-4 transition-transform duration-200 ${dosingOpen ? "rotate-180" : ""}`} />
@@ -651,7 +671,7 @@ export default function ProgramTree({
                       suggestion. Light accent for bars (the fill accent is too
                       dark to read as a mark); below target uses the warning
                       colour with an icon. Values stay in text colours. */}
-                  <ul className="grid gap-x-8 gap-y-2.5 px-4 pb-3.5 pt-3.5 sm:grid-cols-2">
+                  <ul className={`${chartOpen ? "grid" : "hidden sm:grid"} gap-x-8 gap-y-2.5 px-4 pb-3.5 pt-3.5 sm:grid-cols-2`}>
                     {dosing.map(({ group, delivered, target }) => {
                       const short = target !== undefined && delivered < target;
                       const pct = (n: number) => `${(n / dosingMax) * 100}%`;
