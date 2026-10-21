@@ -696,7 +696,7 @@ export default function ProgramTree({
                       type="button"
                       onClick={() => toggleDosing(mesocycle.id)}
                       aria-expanded={dosingOpen}
-                      className="hidden shrink-0 items-center gap-1 text-xs font-medium text-accent-text sm:ms-auto sm:inline-flex"
+                      className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text sm:ms-auto"
                     >
                       {dosingOpen ? "Hide details" : "Details"}
                       <ChevronDown className={`size-4 transition-transform duration-200 ${dosingOpen ? "rotate-180" : ""}`} />
@@ -761,25 +761,12 @@ export default function ProgramTree({
                       own, trained as half sets from other lifts, so no research line.
                     </p>
                   )}
-                  <div
-                    className={`${chartOpen ? "flex" : "hidden"} -mt-1.5 items-center justify-between gap-3 px-4 pb-3.5 sm:hidden`}
-                  >
-                    <p className="text-[11px] text-fg-subtle">
-                      Bar: sets in the plan · line: {strength ? "enough for strength (research)" : "research suggestion"}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => toggleDosing(mesocycle.id)}
-                      aria-expanded={dosingOpen}
-                      className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text"
-                    >
-                      {dosingOpen ? "Hide details" : "Details"}
-                      <ChevronDown className={`size-4 transition-transform duration-200 ${dosingOpen ? "rotate-180" : ""}`} />
-                    </button>
-                  </div>
+                  <p className={`${chartOpen ? "" : "hidden"} -mt-1.5 px-4 pb-3.5 text-[11px] text-fg-subtle sm:hidden`}>
+                    Bar: sets in the plan · line: {strength ? "enough for strength (research)" : "research suggestion"}
+                  </p>
 
                   {dosingOpen && (
-                  <div className={`animate-in border-t border-line ${chartOpen ? "" : "max-sm:hidden"}`}>
+                  <div className="animate-in border-t border-line">
                     {/* Hypertrophy frequency isn't a generated number: with weekly
                         sets matched it doesn't change growth detectably, so the
                         cited finding is shown once and each muscle shows its
@@ -890,7 +877,7 @@ export default function ProgramTree({
                               <span role={headRole} className="w-[4.5rem] text-end">Research</span>
                             )}
                             {!sharedVolume && <span role={headRole} className="w-14 text-end">Sets/wk</span>}
-                            {!strength && <span role={headRole} className="w-16 text-end">Per session</span>}
+                            {!strength && <span role={headRole} className="w-32 text-end">Average per session</span>}
                             {strength ? (
                               <span role={headRole} className="min-w-0 flex-1">Progression</span>
                             ) : (
@@ -1021,9 +1008,9 @@ export default function ProgramTree({
                                       </span>
                                     )}
                                     {!strength && (
-                                      <span role="cell" className="w-16 text-end tabular-nums text-fg-muted max-sm:order-2 max-sm:w-auto">
+                                      <span role="cell" className="w-32 text-end tabular-nums text-fg-muted max-sm:order-2 max-sm:w-auto">
                                         {trainedDays > 0 ? `~${Math.round(delivered / trainedDays)}` : "—"}
-                                        <span className="sm:hidden"> per session</span>
+                                        <span className="sm:hidden"> average per session</span>
                                       </span>
                                     )}
                                     <span
