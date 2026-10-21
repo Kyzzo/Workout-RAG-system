@@ -696,7 +696,7 @@ export default function ProgramTree({
                       type="button"
                       onClick={() => toggleDosing(mesocycle.id)}
                       aria-expanded={dosingOpen}
-                      className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text sm:ms-auto"
+                      className="hidden shrink-0 items-center gap-1 text-xs font-medium text-accent-text sm:ms-auto sm:inline-flex"
                     >
                       {dosingOpen ? "Hide details" : "Details"}
                       <ChevronDown className={`size-4 transition-transform duration-200 ${dosingOpen ? "rotate-180" : ""}`} />
@@ -761,12 +761,25 @@ export default function ProgramTree({
                       own, trained as half sets from other lifts, so no research line.
                     </p>
                   )}
-                  <p className={`${chartOpen ? "" : "hidden"} -mt-1.5 px-4 pb-3.5 text-[11px] text-fg-subtle sm:hidden`}>
-                    Bar: sets in the plan · line: {strength ? "enough for strength (research)" : "research suggestion"}
-                  </p>
+                  <div
+                    className={`${chartOpen ? "flex" : "hidden"} -mt-1.5 items-center justify-between gap-3 px-4 pb-3.5 sm:hidden`}
+                  >
+                    <p className="text-[11px] text-fg-subtle">
+                      Bar: sets in the plan · line: {strength ? "enough for strength (research)" : "research suggestion"}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => toggleDosing(mesocycle.id)}
+                      aria-expanded={dosingOpen}
+                      className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent-text"
+                    >
+                      {dosingOpen ? "Hide details" : "Details"}
+                      <ChevronDown className={`size-4 transition-transform duration-200 ${dosingOpen ? "rotate-180" : ""}`} />
+                    </button>
+                  </div>
 
                   {dosingOpen && (
-                  <div className="animate-in border-t border-line">
+                  <div className={`animate-in border-t border-line ${chartOpen ? "" : "max-sm:hidden"}`}>
                     {/* Hypertrophy frequency isn't a generated number: with weekly
                         sets matched it doesn't change growth detectably, so the
                         cited finding is shown once and each muscle shows its
