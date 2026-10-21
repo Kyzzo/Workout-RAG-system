@@ -374,7 +374,7 @@ export default function ChatWindow({
   }
 
   return (
-    <section className="card flex h-full flex-col overflow-hidden" aria-label="Research chat">
+    <section className="card flex h-full flex-col overflow-hidden" aria-label="Evidence assistant">
       <header className="flex items-center gap-3 border-b border-line px-4 py-3.5">
         <Image
           src="/chat-icon.jpg"
@@ -384,9 +384,14 @@ export default function ChatWindow({
           className="size-8 shrink-0 rounded-lg object-cover ring-1 ring-line-strong"
         />
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold">Research chat</h2>
+          <h2 className="text-sm font-semibold">Evidence assistant</h2>
           <p className="truncate text-xs text-fg-subtle">Answers and changes cite the papers</p>
         </div>
+        {/* Same green as the verified-source badges in the program. */}
+        <span className="chip shrink-0 border-transparent bg-evidence-soft text-evidence">
+          <Book className="size-3" />
+          Cited
+        </span>
         {turns.length > 0 && (
           <button type="button" onClick={clearHistory} className="icon-btn" aria-label="Clear chat history" title="Clear chat history">
             <Trash className="size-4" />
@@ -401,13 +406,14 @@ export default function ChatWindow({
       >
         {turns.length === 0 && !sending && (
           <div className="m-auto flex max-w-sm flex-col items-center gap-3 py-6 text-center">
-            <span className="grid size-11 place-items-center rounded-2xl bg-accent-soft text-accent-text">
-              <Sparkles className="size-5" />
+            <span className="grid size-11 place-items-center rounded-2xl bg-evidence-soft text-evidence">
+              <Book className="size-5" />
             </span>
-            <p className="font-medium">Ask the research</p>
+            <p className="font-medium">Ask the evidence</p>
             <p className="text-sm leading-relaxed text-fg-muted">
               Press <span className="font-medium text-fg">Ask</span>{" "}on any prescription to question or change it
-              (&quot;why this load?&quot;, &quot;make it 4 sets&quot;), or ask a general question below.
+              (&quot;why this load?&quot;, &quot;make it 4 sets&quot;), or ask a general question below. Every answer
+              links the studies it used.
             </p>
             <div className="mt-3">
               <SuggestedPrompts
@@ -533,7 +539,7 @@ export default function ChatWindow({
             placeholder={
               fieldId !== null
                 ? 'e.g. "make it 10-12 reps" or "why 3 sets?"'
-                : "Ask a research question..."
+                : "Ask the evidence..."
             }
             className="scroll-thin min-h-9 flex-1 resize-none bg-transparent py-2 text-sm leading-5 text-fg outline-none placeholder:text-fg-subtle"
           />
