@@ -2,7 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import Image from "next/image";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { API_URL } from "./apiUrl";
 import { CaveatNote } from "./Citations";
 import { useDialogs } from "./Dialogs";
@@ -281,30 +281,56 @@ export default function ChatWindow({
   // Phones: the on-screen keyboard covers the bottom of the page rather than
   // shrinking it, so the composer could end up hidden behind it. While the
   // composer has focus, scroll just enough to keep it above the keyboard
-  // (the visual viewport is the part of the page left visible).
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-    const revealComposer = () => {
+  // (the visual viewport is the part of the page left visible). The keyboard
+  // slides in over a burst of resize events, so this waits for them to
+  // settle and then does one eased scroll - several overlapping smooth
+  // scrolls interrupting each other looked choppy.
+  const revealTimer = useRef<number | null>(null);
+  const glideFrame = useRef<number | null>(null);
+  const scheduleReveal = useCallback(() => {
+    if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+    revealTimer.current = window.setTimeout(() => {
+      revealTimer.current = null;
       const composer = composerRef.current;
       if (!composer || document.activeElement !== messageInputRef.current) return;
-      const hidden = composer.getBoundingClientRect().bottom - (viewport.offsetTop + viewport.height) + 12;
-      if (hidden > 0) window.scrollBy({ top: hidden, behavior: "smooth" });
-    };
-    viewport.addEventListener("resize", revealComposer);
-    return () => viewport.removeEventListener("resize", revealComposer);
+      const viewport = window.visualViewport;
+      const visibleBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+      const distance = composer.getBoundingClientRect().bottom - visibleBottom + 12;
+      if (distance <= 0) return;
+      if (glideFrame.current !== null) cancelAnimationFrame(glideFrame.current);
+      const from = window.scrollY;
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        window.scrollTo(0, from + distance);
+        return;
+      }
+      const started = performance.now();
+      const step = (now: number) => {
+        const t = Math.min(1, (now - started) / 320);
+        window.scrollTo(0, from + distance * (1 - Math.pow(1 - t, 3))); // ease-out
+        glideFrame.current = t < 1 ? requestAnimationFrame(step) : null;
+      };
+      glideFrame.current = requestAnimationFrame(step);
+    }, 120);
   }, []);
 
   useEffect(() => {
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", scheduleReveal);
+    return () => {
+      viewport?.removeEventListener("resize", scheduleReveal);
+      if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+      if (glideFrame.current !== null) cancelAnimationFrame(glideFrame.current);
+    };
+  }, [scheduleReveal]);
+
+  useEffect(() => {
     if (fieldId === null) return;
-    // Focus without the browser's own jump, then glide the chat into view
-    // where it sits below the program (narrow screens); wide screens keep
-    // it beside the program already.
+    // Focus without the browser's own jump; where the chat sits below the
+    // program (narrow screens), the same single glide brings it into view.
+    // Wide screens keep it beside the program already.
     messageInputRef.current?.focus({ preventScroll: true });
-    if (window.matchMedia("(max-width: 1023px)").matches) {
-      composerRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-    }
-  }, [fieldId]);
+    if (window.matchMedia("(max-width: 1023px)").matches) scheduleReveal();
+  }, [fieldId, scheduleReveal]);
 
   // Grow the composer with its text (also shrinks it back after sending);
   // past the max height it scrolls instead.
