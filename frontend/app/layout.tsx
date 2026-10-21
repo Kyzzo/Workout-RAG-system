@@ -43,7 +43,7 @@ export default function RootLayout({
               />
               <div className="min-w-0 flex-1 leading-tight">
                 <p className="truncate text-sm font-semibold tracking-tight">AI Workout Structuring</p>
-                <p className="hidden truncate text-xs text-fg-subtle sm:block">Every number research-cited</p>
+                <p className="truncate text-xs text-fg-subtle">Every number research-cited</p>
               </div>
               <Show when="signed-out">
                 <SignInButton>
