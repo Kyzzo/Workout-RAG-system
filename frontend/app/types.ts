@@ -148,3 +148,13 @@ export type Program = {
   include_deload: boolean;
   mesocycles: Mesocycle[];
 };
+
+// "Moderate · 11-14 sets/wk" - the program chip on phones, where the full
+// label wraps onto its own line.
+export function shortVolumeLabel(preference: VolumePreference, goal: string): string {
+  const label = (VOLUME_LABELS[preference] ?? preference).replace(" (recommended)", "");
+  const band = VOLUME_BANDS[goal]?.[preference];
+  if (!band) return label;
+  const [low, high] = band;
+  return `${label} · ${low === high ? low : `${low}-${high}`} sets/wk`;
+}

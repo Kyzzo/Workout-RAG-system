@@ -6,7 +6,7 @@ import { DialogProvider, useDialogs } from "./Dialogs";
 import { Pencil, Plus, Trash } from "./Icons";
 import ProgramTree from "./ProgramTree";
 import ProgramWizard from "./ProgramWizard";
-import { programLabel, programTitle, volumeLabel, type Program, type ProgramSummary, type WeeklyPrescription } from "./types";
+import { programLabel, programTitle, shortVolumeLabel, volumeLabel, type Program, type ProgramSummary, type WeeklyPrescription } from "./types";
 import { Menu, Notice, Skeleton } from "./ui";
 import { useApi } from "./useApi";
 
@@ -237,7 +237,10 @@ function Workspace() {
                   <span className="chip border-transparent bg-accent-soft font-medium capitalize text-accent-text">
                     {program.goal}
                   </span>
-                  <span className="chip">{volumeLabel(program.volume_preference, program.goal)}</span>
+                  <span className="chip">
+                    <span className="sm:hidden">{shortVolumeLabel(program.volume_preference, program.goal)}</span>
+                    <span className="hidden sm:inline">{volumeLabel(program.volume_preference, program.goal)}</span>
+                  </span>
                   {strength && <span className="chip">{program.trained ? "Lifting 1+ year" : "Lifting under a year"}</span>}
                   {strength && program.include_deload && <span className="chip">Deload week</span>}
                 </div>
