@@ -192,6 +192,7 @@ export default function ChatWindow({
   // the streamed stages.
   const [stage, setStage] = useState<string | null>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLFormElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
   // Saved history, loaded once on open (each change with its current state,
@@ -277,8 +278,32 @@ export default function ChatWindow({
     if (box) box.scrollTop = box.scrollHeight;
   }, [turns, sending]);
 
+  // Phones: the on-screen keyboard covers the bottom of the page rather than
+  // shrinking it, so the composer could end up hidden behind it. While the
+  // composer has focus, scroll just enough to keep it above the keyboard
+  // (the visual viewport is the part of the page left visible).
   useEffect(() => {
-    if (fieldId !== null) messageInputRef.current?.focus();
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const revealComposer = () => {
+      const composer = composerRef.current;
+      if (!composer || document.activeElement !== messageInputRef.current) return;
+      const hidden = composer.getBoundingClientRect().bottom - (viewport.offsetTop + viewport.height) + 12;
+      if (hidden > 0) window.scrollBy({ top: hidden, behavior: "smooth" });
+    };
+    viewport.addEventListener("resize", revealComposer);
+    return () => viewport.removeEventListener("resize", revealComposer);
+  }, []);
+
+  useEffect(() => {
+    if (fieldId === null) return;
+    // Focus without the browser's own jump, then glide the chat into view
+    // where it sits below the program (narrow screens); wide screens keep
+    // it beside the program already.
+    messageInputRef.current?.focus({ preventScroll: true });
+    if (window.matchMedia("(max-width: 1023px)").matches) {
+      composerRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    }
   }, [fieldId]);
 
   // Grow the composer with its text (also shrinks it back after sending);
@@ -520,6 +545,7 @@ export default function ChatWindow({
         )}
 
         <form
+          ref={composerRef}
           onSubmit={handleSend}
           className="flex items-end gap-2 rounded-2xl border border-line-control bg-surface-2 p-1.5 ps-3.5 transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--accent-ring)] focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
         >
@@ -535,7 +561,7 @@ export default function ChatWindow({
                 ? 'e.g. "make it 10-12 reps" or "why 3 sets?"'
                 : "Ask the evidence..."
             }
-            className="scroll-thin min-h-9 flex-1 resize-none bg-transparent py-2 text-sm leading-5 text-fg outline-none placeholder:text-fg-subtle"
+            className="scroll-thin min-h-9 flex-1 resize-none bg-transparent py-1.5 text-base leading-6 text-fg outline-none placeholder:text-fg-subtle sm:py-2 sm:text-sm sm:leading-5"
           />
           <button
             type="submit"
