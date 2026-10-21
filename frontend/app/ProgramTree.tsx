@@ -620,7 +620,7 @@ export default function ProgramTree({
                       suggestion. Light accent for bars (the fill accent is too
                       dark to read as a mark); below target uses the warning
                       colour with an icon. Values stay in text colours. */}
-                  <ul className="grid gap-x-8 gap-y-2.5 px-4 pb-2 pt-3.5 sm:grid-cols-2">
+                  <ul className="grid gap-x-8 gap-y-2.5 px-4 pb-3.5 pt-3.5 sm:grid-cols-2">
                     {dosing.map(({ group, delivered, target }) => {
                       const short = target !== undefined && delivered < target;
                       const pct = (n: number) => `${(n / dosingMax) * 100}%`;
@@ -656,16 +656,6 @@ export default function ProgramTree({
                       );
                     })}
                   </ul>
-                  <p className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pb-3.5 text-[11px] text-fg-subtle">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span aria-hidden="true" className="h-2 w-3 rounded-full bg-accent-text" />
-                      Sets per week in the plan
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <span aria-hidden="true" className="h-3 w-0.5 rounded-full bg-fg-muted" />
-                      Research-suggested sets
-                    </span>
-                  </p>
 
                   {dosingOpen && (
                   <div className="animate-in border-t border-line">
