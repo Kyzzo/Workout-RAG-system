@@ -186,7 +186,8 @@
   }
 
   .input {
-    @apply h-10 w-full min-w-0 rounded-lg border border-line-control bg-surface-2 px-3 text-sm text-fg placeholder:text-fg-subtle;
+    /* 16px on phones: iOS Safari zooms into any field with smaller text. */
+    @apply h-10 w-full min-w-0 rounded-lg border border-line-control bg-surface-2 px-3 text-base text-fg placeholder:text-fg-subtle sm:text-sm;
     transition:
       border-color 150ms ease,
       box-shadow 150ms ease;
