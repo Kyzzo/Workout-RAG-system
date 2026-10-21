@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
+import openai
 import pytest
 
 from app.rag import generate
@@ -168,6 +170,18 @@ def test_failed_rerank_keeps_similarity_order():
     candidates = [_chunk("a", "p1", 0.9), _chunk("b", "p2", 0.8)]
     with patch.object(generate.client.chat.completions, "parse", side_effect=RuntimeError("down")):
         assert generate._rerank("q", candidates) == candidates
+
+
+def test_rerank_calls_time_out_and_a_hung_rerank_keeps_similarity_order():
+    # Three reranker calls hung ~80s each in the Oct 15-20 evals, holding
+    # up their whole answer: every call now carries a timeout, and one that
+    # still times out after the client's retries falls back like any failure.
+    candidates = [_chunk("a", "p1", 0.9), _chunk("b", "p2", 0.8)]
+    hung = openai.APITimeoutError(request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"))
+    with patch.object(generate.client.chat.completions, "parse", side_effect=hung) as parse:
+        assert generate._rerank("q", candidates) == candidates
+
+    assert parse.call_args.kwargs["timeout"] == generate.RERANK_TIMEOUT <= 20
 
 
 def test_select_after_rerank_never_lets_a_weak_excerpt_displace_a_strong_one():

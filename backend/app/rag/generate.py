@@ -312,6 +312,13 @@ _RERANK_PROMPT = (
 # and cost about the same tokens (only the question and rubric repeat).
 RERANK_BATCH = 15
 
+# Seconds before a reranker call is abandoned and retried (the client
+# retries twice). Of 640 calls in the Oct 15-20 chat evals, 99% took under
+# 3.6s and the slowest normal one 12s, but three hung for ~80s and held
+# their whole answer up. A hang now costs ~15s; if every try hangs,
+# retrieval falls back to similarity order (_rerank).
+RERANK_TIMEOUT = 15.0
+
 
 def _score_batch(question: str, batch: list[dict]) -> list[int]:
     # One required field per excerpt, so structured output guarantees every
@@ -327,6 +334,7 @@ def _score_batch(question: str, batch: list[dict]) -> list[int]:
     completion = client.chat.completions.parse(
         model=model,
         **({"reasoning_effort": effort} if effort else {"temperature": 0}),
+        timeout=RERANK_TIMEOUT,
         messages=[
             {"role": "system", "content": _RERANK_PROMPT},
             {"role": "user", "content": f"Question: {question}\n\nExcerpts:\n{numbered}"},
