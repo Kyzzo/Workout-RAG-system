@@ -30,13 +30,13 @@ const STEPS: React.ReactNode[] = [
 export default function ProgressionGuide() {
   return (
     <details className="group card overflow-hidden">
-      <summary className="group/summary flex cursor-pointer items-center gap-3 px-5 py-4 select-none">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
+      <summary className="group/summary flex cursor-pointer items-center gap-3 px-4 py-2.5 select-none sm:px-5 sm:py-4">
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text sm:size-8">
           <TrendingUp className="size-4" />
         </span>
         <span className="flex-1">
           <span className="block text-sm font-semibold">How to progress</span>
-          <span className="block text-xs text-fg-subtle">Double progression: add reps, then weight</span>
+          <span className="hidden text-xs text-fg-subtle sm:block">Double progression: add reps, then weight</span>
         </span>
         <ChevronRight className="size-4 text-fg-subtle transition-[rotate,color] duration-200 group-open:rotate-90 group-open:text-accent-text group-hover/summary:text-accent-text" />
       </summary>

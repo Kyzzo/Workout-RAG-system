@@ -216,24 +216,25 @@ function Workspace() {
 
         {program && (
           <>
-            <header className="flex items-start gap-3">
+            <header className="flex items-start gap-3 max-sm:items-center">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1">
-                  <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
+                  {/* On phones the program dropdown above already names it. */}
+                  <h1 className="truncate text-2xl font-semibold tracking-tight max-sm:sr-only sm:text-[1.75rem]">
                     {programTitle(program)}
                   </h1>
                   <button
                     type="button"
                     onClick={handleRename}
                     disabled={wizardRunning}
-                    className="icon-btn"
+                    className="icon-btn max-sm:hidden"
                     aria-label="Rename program"
                     title="Rename program"
                   >
                     <Pencil className="size-4" />
                   </button>
                 </div>
-                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 sm:mt-2.5">
                   <span className="chip border-transparent bg-accent-soft font-medium capitalize text-accent-text">
                     {program.goal}
                   </span>

@@ -571,8 +571,13 @@ export default function ProgramTree({
           : null;
         const sharedTrained = shared(trainedPerWeek, String);
         return (
-          <section key={mesocycle.id} className="card flex flex-col">
-            <header className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-line px-5 py-4">
+          // On phones the block drops its frame so the cards inside it
+          // (chart, weeks, days) use the full width.
+          <section
+            key={mesocycle.id}
+            className="card flex flex-col max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none"
+          >
+            <header className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-line px-1 pb-3 sm:px-5 sm:py-4 max-sm:border-b-0">
               <div className="min-w-0 flex-1 basis-56">
                 <p className="eyebrow">
                   Weeks {mesocycle.start_week}–{mesocycle.end_week}
@@ -620,7 +625,7 @@ export default function ProgramTree({
               )}
             </header>
 
-            <div className="flex flex-col gap-4 p-4 sm:p-5">
+            <div className="flex flex-col gap-4 sm:p-5">
               {blockProgress && busyKey === `block-${mesocycle.id}` && (
                 <GenerationProgress
                   progress={blockProgress}
