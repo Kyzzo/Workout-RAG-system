@@ -387,6 +387,11 @@ export default function ChatWindow({
           <h2 className="text-sm font-semibold">Evidence assistant</h2>
           <p className="truncate text-xs text-fg-subtle">Answers and changes cite the papers</p>
         </div>
+        {/* Same green as the verified-source badges in the program. */}
+        <span className="chip shrink-0 border-transparent bg-evidence-soft text-evidence">
+          <Book className="size-3" />
+          Cited
+        </span>
         {turns.length > 0 && (
           <button type="button" onClick={clearHistory} className="icon-btn" aria-label="Clear chat history" title="Clear chat history">
             <Trash className="size-4" />
