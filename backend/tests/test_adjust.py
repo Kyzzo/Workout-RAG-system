@@ -24,9 +24,9 @@ def _chunks(*ids):
     return [{"id": cid, "text": f"excerpt for {cid}", "source": f"paper-{cid}"} for cid in ids]
 
 
-def _send(db_session, user, prescription):
+def _send(db_session, user, prescription, this_week_only=False):
     return send_chat_message(
-        request=schemas.ChatMessageRequest(message="change it", field_id=prescription.id),
+        request=schemas.ChatMessageRequest(message="change it", field_id=prescription.id, this_week_only=this_week_only),
         db=db_session, current_user=user,
     )
 
@@ -313,6 +313,34 @@ def test_hypertrophy_adjustment_applies_to_every_week(mock_route, mock_reps, _ve
     weeks = db_session.get(models.ExerciseSlot, prescription.exercise_slot_id).weekly_prescriptions
     assert [wp.reps for wp in weeks] == ["10-12"] * 3
     assert all([c.citation.title for c in wp.reps_citations] == ["paper-rep-1"] for wp in weeks)
+
+
+@patch("app.routers.generation.verify_citation", return_value="primary_support")
+@patch("app.routers.generation.generate_reps")
+@patch("app.routers.chat.route_chat_message")
+def test_hypertrophy_adjustment_from_a_picked_week_stays_on_that_week(
+    mock_route, mock_reps, _verify, db_session, owner_and_prescription,
+):
+    # The week picker lets a user change one week of a hypertrophy exercise;
+    # the other weeks keep their values (and the change is still undoable,
+    # since the snapshot covers the whole exercise).
+    user, prescription = owner_and_prescription
+    for week in (2, 3):
+        db_session.add(models.WeeklyPrescription(
+            exercise_slot_id=prescription.exercise_slot_id, week_number=week, sets=3, reps="8-10", load="",
+        ))
+    db_session.flush()
+    week_two = next(wp for wp in prescription.exercise_slot.weekly_prescriptions if wp.week_number == 2)
+    mock_route.return_value = _route(week_two, "reps", "set_value", "10-12")
+    mock_reps.return_value = (SimpleNamespace(reps="10-12", chunk_ids=[], grounding="general_knowledge"), [])
+
+    result = _send(db_session, user, week_two, this_week_only=True)
+
+    db_session.expire_all()
+    weeks = sorted(db_session.get(models.ExerciseSlot, prescription.exercise_slot_id).weekly_prescriptions,
+                   key=lambda wp: wp.week_number)
+    assert [wp.reps for wp in weeks][1:] == ["10-12", "8-10"]
+    assert result.change_id is not None
 
 
 @patch("app.routers.generation.verify_citation", return_value="primary_support")

@@ -139,7 +139,7 @@ def _respond(request: schemas.ChatMessageRequest, db: Session, current_user: mod
         return _conversation_reply(getattr(decision, "conversation_kind", None))
     if decision.tool == "adjust_prescription":
         report("Previewing the swap" if decision.target_field == "exercise" else "Working on the change")
-        return _handle_adjust(decision, db, current_user, request.message)
+        return _handle_adjust(decision, db, current_user, request.message, this_week_only=request.this_week_only)
     if (
         decision.tool == "discuss_prescription"
         and request.field_id is None
@@ -359,7 +359,9 @@ def _summary(p: models.WeeklyPrescription) -> str:
     return ", ".join(parts)
 
 
-def _handle_adjust(decision, db: Session, current_user: models.User, raw_message: str) -> schemas.ChatResponse:
+def _handle_adjust(
+    decision, db: Session, current_user: models.User, raw_message: str, this_week_only: bool = False,
+) -> schemas.ChatResponse:
     if decision.field_id is None:
         raise HTTPException(
             status_code=400,
@@ -444,10 +446,11 @@ def _handle_adjust(decision, db: Session, current_user: models.User, raw_message
         updated = _generate_and_persist(
             prescription, db, generate_fn, query_fn, decision.target_field, adjustment=adjustment,
         )
-        if goal != "strength":
+        if goal != "strength" and not this_week_only:
             # Hypertrophy shows one prescription per exercise, the same every
             # week (progression is session-to-session, not scheduled), so an
-            # adjustment applies to the whole exercise, not one week of it.
+            # adjustment applies to the whole exercise, not one week of it -
+            # unless the user picked a single week to change.
             others = [wp for wp in updated.exercise_slot.weekly_prescriptions if wp.id != updated.id]
             copy_fields_to_other_weeks(updated, others, (decision.target_field,))
             db.commit()

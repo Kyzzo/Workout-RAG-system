@@ -279,6 +279,10 @@ class ChatMessageRequest(BaseModel):
     # What the message was anchored to, as shown in the UI ("Bench Press,
     # week 2") - saved with the message so reloaded history reads the same.
     anchor_label: str | None = Field(default=None, max_length=200)
+    # A hypertrophy adjustment applies to every week of the exercise unless
+    # the user picked one week to change (the UI's week picker) - then only
+    # field_id's week changes. Strength adjustments are always per week.
+    this_week_only: bool = False
 
 
 class SavedChatTurn(BaseModel):

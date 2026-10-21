@@ -33,10 +33,14 @@ function Workspace() {
 
   const [anchoredFieldId, setAnchoredFieldId] = useState<number | null>(null);
   const [anchorLabel, setAnchorLabel] = useState<string | null>(null);
+  // Asked from one picked week of a hypertrophy exercise: a change applies
+  // to that week only, not every week.
+  const [anchorThisWeekOnly, setAnchorThisWeekOnly] = useState(false);
 
   const clearAnchor = useCallback(() => {
     setAnchoredFieldId(null);
     setAnchorLabel(null);
+    setAnchorThisWeekOnly(false);
   }, []);
 
   useEffect(() => {
@@ -144,9 +148,10 @@ function Workspace() {
     .flatMap((s) => s.weekly_prescriptions)
     .find((wp) => wp.id === anchoredFieldId);
 
-  function handleAskAbout(prescription: WeeklyPrescription, label: string) {
+  function handleAskAbout(prescription: WeeklyPrescription, label: string, thisWeekOnly: boolean) {
     setAnchoredFieldId(prescription.id);
     setAnchorLabel(label);
+    setAnchorThisWeekOnly(thisWeekOnly);
   }
 
   const hasPrograms = programs !== null && programs.length > 0;
@@ -261,6 +266,7 @@ function Workspace() {
         <ChatWindow
           fieldId={anchoredFieldId}
           anchorLabel={anchorLabel}
+          thisWeekOnly={anchorThisWeekOnly}
           anchorHasPercentLoad={!!anchored && anchored.load.includes("%")}
           goal={program?.goal ?? null}
           onClearAnchor={clearAnchor}

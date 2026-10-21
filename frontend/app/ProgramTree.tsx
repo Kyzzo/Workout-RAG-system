@@ -58,7 +58,9 @@ type ProgressionResult = {
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // A block's shown week, or every week at once.
-type Week = number | "all";
+// A week number, "all" (every week as a table) or "every" (a hypertrophy
+// exercise shown once because its weeks are the same).
+type Week = number | "all" | "every";
 
 // How a value moved from the week before ("70% 1RM" -> "72.5% 1RM" is up),
 // by its leading number; null if it didn't change or can't be compared.
@@ -173,7 +175,7 @@ export default function ProgramTree({
 }: {
   program: Program;
   anchoredFieldId: number | null;
-  onAskAbout: (prescription: WeeklyPrescription, label: string) => void;
+  onAskAbout: (prescription: WeeklyPrescription, label: string, thisWeekOnly: boolean) => void;
   onChanged: () => void;
   // True while something outside the tree (the program wizard) is
   // generating this program, so the tree's own actions don't race it.
@@ -489,7 +491,17 @@ export default function ProgramTree({
           (a, b) => a - b,
         );
         const weeksDiffer = slots.some((s) => rowsToShow(s, false).length > 1);
-        const week: Week = weekByBlock[mesocycle.id] ?? weeks[0] ?? "all";
+        // Blocks whose weeks differ pick a week or "All"; a hypertrophy block
+        // that's the same every week shows it once ("Every week") and can
+        // still pick one week to change on its own.
+        const pickWeek = weeks.length > 1 && (weeksDiffer || !strength);
+        const picked = weekByBlock[mesocycle.id];
+        const week: Week =
+          picked === undefined || (picked === "every" && weeksDiffer) || (picked === "all" && !weeksDiffer)
+            ? weeksDiffer
+              ? (weeks[0] ?? "all")
+              : "every"
+            : picked;
         // A preview of the dosing table, shown on its collapsed row.
         const suggested = mesocycle.muscle_group_volumes
           .filter((v) => muscleGroups.includes(v.muscle_group))
@@ -797,22 +809,31 @@ export default function ProgramTree({
                 </details>
               )}
 
-              {weeksDiffer && weeks.length > 1 && (
+              {pickWeek && (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                   <span className="text-[13px] font-medium text-fg-muted">Week</span>
-                  <div className="min-w-0 flex-1 sm:max-w-sm">
+                  <div className="min-w-0 flex-1 sm:max-w-md">
                     <Segmented
                       label="Week shown"
                       options={[
+                        ...(weeksDiffer ? [] : [{ value: "every", label: "Every" }]),
                         ...weeks.map((w) => ({ value: String(w), label: String(w) })),
-                        { value: "all", label: "All" },
+                        ...(weeksDiffer ? [{ value: "all", label: "All" }] : []),
                       ]}
                       value={String(week)}
                       onChange={(v) =>
-                        setWeekByBlock((current) => ({ ...current, [mesocycle.id]: v === "all" ? "all" : Number(v) }))
+                        setWeekByBlock((current) => ({
+                          ...current,
+                          [mesocycle.id]: v === "all" || v === "every" ? v : Number(v),
+                        }))
                       }
                     />
                   </div>
+                  {!strength && typeof week === "number" && (
+                    <p className="basis-full text-xs text-fg-subtle">
+                      Changes made here apply to week {week} only.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -974,7 +995,7 @@ function ExerciseBlock({
   openSources: string | null;
   toggleSources: (key: string) => void;
   splitRule: RuleJustification | null;
-  onAskAbout: (prescription: WeeklyPrescription, label: string) => void;
+  onAskAbout: (prescription: WeeklyPrescription, label: string, thisWeekOnly: boolean) => void;
   onGenerate: () => void;
   onSwap: () => void;
   onDelete: () => void;
@@ -992,7 +1013,15 @@ function ExerciseBlock({
   // "All" lists every week as a table; otherwise (one week picked, or an
   // exercise that's the same every week) it's one line under the name.
   const table = week === "all" && allRows.length > 1;
-  const single = allRows.find((r) => r.wp.week_number === week) ?? allRows[0];
+  // A picked week of an exercise that's the same every week is still that
+  // week's own prescription, so changes made from it stay on that week.
+  const pickedWeek =
+    typeof week === "number" && allRows.length === 1 && allRows[0].everyWeek
+      ? slot.weekly_prescriptions.find((wp) => wp.week_number === week)
+      : undefined;
+  const single = pickedWeek
+    ? { wp: pickedWeek, everyWeek: false }
+    : (allRows.find((r) => r.wp.week_number === week) ?? allRows[0]);
   const showLoad = strength || slot.weekly_prescriptions.some((wp) => wp.load);
   const goal = strength ? "strength" : "hypertrophy";
   // Sets / reps / (load) / effort - the same widths in both views, so values
@@ -1152,12 +1181,14 @@ function ExerciseBlock({
     );
   }
 
-  function askButton(wp: WeeklyPrescription, label: string) {
+  // thisWeekOnly: asked from one week of a hypertrophy exercise, so a change
+  // stays on that week instead of applying to every week.
+  function askButton(wp: WeeklyPrescription, label: string, thisWeekOnly: boolean) {
     const isAnchored = anchoredFieldId === wp.id;
     return (
       <button
         type="button"
-        onClick={() => onAskAbout(wp, label)}
+        onClick={() => onAskAbout(wp, label, thisWeekOnly)}
         aria-pressed={isAnchored}
         aria-label={`Ask about or adjust ${label}`}
         title="Ask about or adjust this in the chat"
@@ -1190,7 +1221,7 @@ function ExerciseBlock({
         </div>
         <span className="flex shrink-0 items-center gap-0.5">
           {!table && single && rowWorking(single.wp) && <Spinner className="me-1 size-3.5 text-accent-text" />}
-          {!table && single && askButton(single.wp, singleLabel)}
+          {!table && single && askButton(single.wp, singleLabel, !single.everyWeek)}
           <Menu
             label={`Actions for ${slot.exercise_name}`}
             disabled={busy}
@@ -1254,7 +1285,7 @@ function ExerciseBlock({
                   <div className="col-span-2 grid grid-cols-2 gap-x-3 gap-y-1 sm:contents">{cells(wp, values)}</div>
                   <span className="col-start-2 row-start-1 flex items-center justify-end gap-0.5 sm:col-start-auto sm:row-start-auto">
                     {rowWorking(wp) && <Spinner className="me-1 size-3.5 text-accent-text" />}
-                    {askButton(wp, label)}
+                    {askButton(wp, label, true)}
                     {regenerate.length > 0 && <Menu label={`More for ${label}`} disabled={busy} items={regenerate} quiet />}
                   </span>
                 </div>

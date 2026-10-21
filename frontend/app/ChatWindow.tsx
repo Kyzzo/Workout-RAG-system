@@ -159,6 +159,7 @@ const COMPOSER_MAX_HEIGHT = 200;
 export default function ChatWindow({
   fieldId,
   anchorLabel,
+  thisWeekOnly = false,
   anchorHasPercentLoad = false,
   goal = null,
   onClearAnchor,
@@ -170,6 +171,9 @@ export default function ChatWindow({
   // messages in the same thread and can show a real label, not a bare id.
   fieldId: number | null;
   anchorLabel: string | null;
+  // Anchored to one picked week of a hypertrophy exercise: a change applies
+  // to that week only (the backend otherwise applies it to every week).
+  thisWeekOnly?: boolean;
   // For suggested prompts: the anchored value has a %1RM load, and the
   // selected program's goal (general questions differ by goal).
   anchorHasPercentLoad?: boolean;
@@ -325,6 +329,7 @@ export default function ChatWindow({
           field_id: fieldId,
           history,
           anchor_label: sentAnchor,
+          this_week_only: fieldId !== null && thisWeekOnly,
         }),
       });
 
