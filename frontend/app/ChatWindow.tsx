@@ -580,7 +580,7 @@ function SuggestedPrompts({
                 type="button"
                 disabled={disabled}
                 onClick={() => onPick(p)}
-                className="min-h-7 rounded-full border border-line bg-surface-2 px-2.5 py-1 text-start text-xs text-fg-muted transition-[background-color,border-color,color,transform] duration-150 hover:border-line-strong hover:bg-surface-3 hover:text-fg active:scale-[0.97] disabled:opacity-50"
+                className="min-h-7 rounded-full border border-line bg-surface-2 px-2.5 py-1 text-start text-xs text-fg-muted transition-[background-color,border-color,color,transform] duration-150 hover:border-accent-ring/55 hover:bg-accent-soft hover:text-accent-text active:scale-[0.97] disabled:opacity-50"
               >
                 {p}
               </button>

@@ -559,7 +559,7 @@ export default function ProgramTree({
                 // control. Accent stays on the control only (accent = action).
                 <details className="group rounded-xl border border-line-strong bg-surface-2/70">
                   <summary className="flex cursor-pointer items-center gap-3 px-4 py-3.5 select-none">
-                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-3 text-fg-muted">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
                       <Layers className="size-4" />
                     </span>
                     <span className="min-w-0 flex-1">
@@ -823,8 +823,10 @@ export default function ProgramTree({
                   return (
                     <div
                       key={day.id}
-                      className={`rounded-xl border transition-colors duration-150 ${
-                        open ? "border-line-strong bg-surface-2/40" : "border-line hover:border-line-strong"
+                      // Outline, arrow and badge turn purple together: on the open
+                      // day, and on hover anywhere over a closed one.
+                      className={`group/day rounded-xl border transition-colors duration-150 ${
+                        open ? "border-accent-ring/45 bg-surface-2/40" : "border-line hover:border-accent-ring/45"
                       }`}
                     >
                       <div className="flex items-center gap-1 pe-2">
@@ -832,7 +834,7 @@ export default function ProgramTree({
                           type="button"
                           onClick={() => toggleDay(day.id)}
                           aria-expanded={open}
-                          className="group/day flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-3 text-start"
+                          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-3 text-start"
                         >
                           {/* Purple marks the open day, and previews it on hover. */}
                           <ChevronRight
