@@ -4,19 +4,28 @@
    colours: bg-surface, text-fg-muted, border-line, bg-accent...), with a
    light and a dark value. Semantic roles are fixed: accent = actions and
    the anchored value, evidence = verified sources, warn = caveats and
-   fit notes, danger = destructive actions and errors. */
+   fit notes, danger = destructive actions and errors.
+   Atmosphere ("after hours"): neutrals carry a slight warm tint, the page
+   is lit by two soft light pools - a warm streetlight and a cool neon in
+   the accent hue - under a static film grain, and cards are frosted glass
+   that lets that light through. Light mode is warm sepia paper. The glow
+   and grain tokens are decoration only and never carry meaning. */
 :root {
   color-scheme: light;
-  --bg: #f6f6f8;
-  --bg-glow: rgba(91, 79, 245, 0.09);
-  --surface: #ffffff;
-  --surface-2: #f3f3f6;
-  --surface-3: #e9e9ee;
-  --line: rgba(17, 17, 34, 0.09);
-  --line-strong: rgba(17, 17, 34, 0.17);
-  --fg: #0c0c12;
-  --fg-muted: #4b4b58;
-  --fg-subtle: #686876;
+  --bg: #f3efe8;
+  --surface: #fbf9f5;
+  --surface-2: #f1ece4;
+  --surface-3: #e6dfd4;
+  --line: rgba(46, 32, 16, 0.1);
+  --line-strong: rgba(46, 32, 16, 0.19);
+  --fg: #16120d;
+  --fg-muted: #4d453b;
+  --fg-subtle: #685f53;
+  --glow-warm: rgba(214, 146, 64, 0.18);
+  --glow-cool: rgba(91, 79, 245, 0.09);
+  --glass: rgba(251, 249, 245, 0.74);
+  --glass-edge: rgba(255, 255, 255, 0.7);
+  --grain-opacity: 0.05;
   --accent: #5b4ff5;
   --accent-hover: #4b3fe6;
   --accent-2: #8b5cf6;
@@ -40,16 +49,20 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --bg: #08080b;
-    --bg-glow: rgba(109, 98, 255, 0.16);
-    --surface: #111116;
-    --surface-2: #18181e;
-    --surface-3: #222229;
-    --line: rgba(255, 255, 255, 0.075);
-    --line-strong: rgba(255, 255, 255, 0.14);
-    --fg: #f3f3f6;
-    --fg-muted: #a6a6b3;
-    --fg-subtle: #878796;
+    --bg: #090807;
+    --surface: #131210;
+    --surface-2: #1a1816;
+    --surface-3: #24211e;
+    --line: rgba(255, 238, 214, 0.075);
+    --line-strong: rgba(255, 238, 214, 0.14);
+    --fg: #f4f1ec;
+    --fg-muted: #aba59c;
+    --fg-subtle: #8d877e;
+    --glow-warm: rgba(255, 166, 72, 0.17);
+    --glow-cool: rgba(109, 98, 255, 0.22);
+    --glass: rgba(20, 18, 16, 0.62);
+    --glass-edge: rgba(255, 238, 214, 0.06);
+    --grain-opacity: 0.07;
     --accent: #5b4ff5;
     --accent-hover: #6a5ffa;
     --accent-2: #9b6bff;
@@ -93,6 +106,7 @@
   --color-danger-solid: var(--danger-solid);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-instrument-serif);
   --shadow-card: var(--shadow-card);
   --shadow-pop: var(--shadow-pop);
 }
@@ -107,14 +121,42 @@
   }
 
   body {
-    background:
-      radial-gradient(1100px 520px at 15% -12%, var(--bg-glow), transparent 65%),
-      radial-gradient(800px 420px at 100% 0%, var(--bg-glow), transparent 60%),
-      var(--bg);
-    background-repeat: no-repeat;
+    background: var(--bg);
     color: var(--fg);
     font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
     font-feature-settings: "ss01", "cv11";
+  }
+
+  /* The light: fixed to the viewport so it stays put while content
+     scrolls over it, like a street seen through glass. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(900px 600px at 92% -10%, var(--glow-warm), transparent 62%),
+      radial-gradient(1000px 640px at -8% 108%, var(--glow-cool), transparent 64%),
+      radial-gradient(1400px 900px at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.06));
+  }
+
+  /* Film grain: one static noise tile over everything, never animated. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    pointer-events: none;
+    opacity: var(--grain-opacity);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
   }
 
   :focus-visible {
@@ -135,8 +177,52 @@
 }
 
 @layer components {
+  /* Frosted widgets: the page's light shows through, and a hairline
+     highlight on the top edge catches it. */
   .card {
-    @apply rounded-2xl border border-line bg-surface shadow-card;
+    @apply rounded-[1.375rem] border border-line;
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(20px) saturate(1.25);
+    backdrop-filter: blur(20px) saturate(1.25);
+    box-shadow:
+      inset 0 1px 0 var(--glass-edge),
+      var(--shadow-card);
+  }
+  @supports not (backdrop-filter: blur(1px)) {
+    .card {
+      background: var(--surface);
+    }
+  }
+
+  /* Editorial serif for titles - the one display voice in the app. */
+  .display {
+    font-family: var(--font-display), ui-serif, Georgia, serif;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+  }
+
+  /* An icon tile lit from below in the accent hue, in place of a
+     gradient fill. */
+  .glyph {
+    @apply grid shrink-0 place-items-center rounded-xl border border-line-strong bg-surface-2 text-accent-text;
+    box-shadow:
+      inset 0 1px 0 var(--glass-edge),
+      0 10px 24px -12px var(--accent-ring);
+  }
+
+  /* First paint of a view: its sections rise in one after another. */
+  .stagger > * {
+    animation: rise-in 280ms var(--ease-out) both;
+  }
+  .stagger > :nth-child(2) {
+    animation-delay: 50ms;
+  }
+  .stagger > :nth-child(3) {
+    animation-delay: 100ms;
+  }
+  .stagger > :nth-child(n + 4) {
+    animation-delay: 150ms;
   }
 
   /* Buttons: one primary per view, secondary for other actions, ghost
@@ -241,8 +327,9 @@
     @apply inline-flex items-center gap-1 h-6 px-2 rounded-full border border-line bg-surface-2 text-xs text-fg-muted whitespace-nowrap;
   }
 
+  /* Metadata reads like a timestamp: mono, small, widely tracked. */
   .eyebrow {
-    @apply text-xs font-medium uppercase tracking-[0.08em] text-fg-subtle;
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-fg-subtle;
   }
 
   /* Short entrance for content that appears on a click (expanded days,
@@ -317,6 +404,7 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-in,
   .animate-pop,
+  .stagger > *,
   dialog.dialog[open] {
     animation: fade-in 150ms ease;
   }

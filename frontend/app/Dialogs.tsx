@@ -117,7 +117,7 @@ function DialogView({ request, onDone }: { request: Request; onDone: () => void 
             </span>
           )}
           <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <h2 id="dialog-title" className="text-base font-semibold tracking-tight">
+            <h2 id="dialog-title" className="display text-[1.4rem]">
               {request.title}
             </h2>
             {request.body && <div className="text-sm leading-relaxed text-fg-muted">{request.body}</div>}
