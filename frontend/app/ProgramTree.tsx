@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { runBlockGeneration } from "./blockGeneration";
 import { CaveatNote, SourcesBadge, SourcesPanel } from "./Citations";
 import { useDialogs } from "./Dialogs";
@@ -77,6 +77,23 @@ function range(values: number[]) {
   const low = Math.min(...values);
   const high = Math.max(...values);
   return low === high ? `${low}` : `${low}–${high}`;
+}
+
+// The value every muscle shares, or null if any muscle differs or lacks one.
+function shared<T>(items: (T | undefined)[], key: (item: T) => string): T | null {
+  const first = items[0];
+  if (first === undefined) return null;
+  return items.every((item) => item !== undefined && key(item) === key(first)) ? first : null;
+}
+
+// One value at the top of the dosing details, shown once for every muscle.
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1 px-4 py-3">
+      <span className="text-[11px] text-fg-subtle">{label}</span>
+      <span className="flex items-center gap-2 text-[15px] font-semibold tabular-nums">{children}</span>
+    </div>
+  );
 }
 
 // sets=0 with an empty load is the backend's "not generated yet" placeholder
@@ -528,6 +545,20 @@ export default function ProgramTree({
         }));
         const dosingMax = Math.max(1, ...dosing.map((d) => Math.max(d.delivered, d.target ?? 0)));
         const dosingOpen = openDosing.has(mesocycle.id);
+        // Details: a value every muscle shares (weekly sets and frequency are
+        // one generated answer for all of them) is shown once above the
+        // table, not on every row. A value that differs stays a column.
+        const sharedVolume = shared(
+          muscleGroups.map((g) => mesocycle.muscle_group_volumes.find((v) => v.muscle_group === g)),
+          (v) => `${v.weekly_sets}|${v.supporting_citations.length}`,
+        );
+        const sharedFrequency = strength
+          ? shared(
+              muscleGroups.map((g) => mesocycle.muscle_group_frequencies.find((f) => f.muscle_group === g)),
+              (f) => `${f.frequency}|${f.supporting_citations.length}`,
+            )
+          : null;
+        const sharedTrained = shared(trainedPerWeek, String);
         return (
           <section key={mesocycle.id} className="card flex flex-col">
             <header className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-line px-5 py-4">
@@ -677,15 +708,76 @@ export default function ProgramTree({
                         />
                       </div>
                     )}
+                    {(sharedFrequency || sharedVolume || sharedTrained !== null) && (
+                      <div className="border-b border-line">
+                        <div className="grid divide-y divide-line sm:auto-cols-fr sm:grid-flow-col sm:divide-x sm:divide-y-0">
+                          {sharedFrequency && (
+                            <Fact label="Research frequency">
+                              {sharedFrequency.frequency}x/wk
+                              <SourcesBadge
+                                what="frequency"
+                                citations={sharedFrequency.supporting_citations}
+                                note={sharedFrequency.grounding_note}
+                                open={openSources === `freq-${sharedFrequency.id}`}
+                                onToggle={() => toggleSources(`freq-${sharedFrequency.id}`)}
+                              />
+                            </Fact>
+                          )}
+                          {sharedVolume && (
+                            <Fact label="Suggested sets per muscle">
+                              <span>
+                                {sharedVolume.weekly_sets}
+                                <span className="text-xs font-normal text-fg-subtle">/wk</span>
+                              </span>
+                              <SourcesBadge
+                                what="weekly sets"
+                                citations={sharedVolume.supporting_citations}
+                                note={sharedVolume.grounding_note}
+                                open={openSources === `volume-${sharedVolume.id}`}
+                                onToggle={() => toggleSources(`volume-${sharedVolume.id}`)}
+                              />
+                            </Fact>
+                          )}
+                          {sharedTrained !== null && (
+                            <Fact label="You train each muscle">
+                              <span>
+                                {sharedTrained}x<span className="text-xs font-normal text-fg-subtle">/wk</span>
+                              </span>
+                            </Fact>
+                          )}
+                        </div>
+                        {sharedFrequency && openSources === `freq-${sharedFrequency.id}` && (
+                          <div className="px-4 pb-3">
+                            <SourcesPanel
+                              heading={`Why research suggests ${sharedFrequency.frequency}x/week per muscle`}
+                              citations={sharedFrequency.supporting_citations}
+                              note={sharedFrequency.grounding_note}
+                              question={`Why train each muscle ${sharedFrequency.frequency}x a week for ${program.goal}?`}
+                              onClose={() => setOpenSources(null)}
+                            />
+                          </div>
+                        )}
+                        {sharedVolume && openSources === `volume-${sharedVolume.id}` && (
+                          <div className="px-4 pb-3">
+                            <SourcesPanel
+                              heading={`Why research suggests ${sharedVolume.weekly_sets} weekly sets per muscle`}
+                              citations={sharedVolume.supporting_citations}
+                              note={sharedVolume.grounding_note}
+                              question={`Why ${sharedVolume.weekly_sets} weekly sets per muscle in a ${program.goal} program?`}
+                              onClose={() => setOpenSources(null)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="scroll-thin overflow-x-auto">
-                      <table className="w-full min-w-[34rem] text-sm">
+                      <table className="w-full min-w-[24rem] text-sm">
                         <thead>
                           <tr className="text-start text-xs text-fg-subtle">
                             <th className="px-4 py-2.5 text-start font-medium">Muscle</th>
-                            <th className="px-3 py-2.5 text-end font-medium">You train it</th>
-                            {strength && <th className="px-3 py-2.5 text-end font-medium">Research</th>}
-                            <th className="px-3 py-2.5 text-end font-medium">Suggested sets/wk</th>
-                            <th className="px-3 py-2.5 text-end font-medium">Plan gives</th>
+                            {sharedTrained === null && <th className="px-3 py-2.5 text-end font-medium">You train it</th>}
+                            {strength && !sharedFrequency && <th className="px-3 py-2.5 text-end font-medium">Research</th>}
+                            {!sharedVolume && <th className="px-3 py-2.5 text-end font-medium">Suggested sets/wk</th>}
                             {!strength && <th className="px-3 py-2.5 text-end font-medium">Per session</th>}
                             {strength && <th className="px-3 py-2.5 text-start font-medium">Progression</th>}
                             <th className="w-12 px-2 py-2.5">
@@ -703,14 +795,13 @@ export default function ProgramTree({
                             const schemeKey = `scheme-${scheme?.id}`;
                             const delivered = deliveredSets(mesocycle, group);
                             const trainedDays = daysTraining(mesocycle, group);
-                            const short = volume !== undefined && delivered < volume.weekly_sets;
                             const rowBusy = [
                               `volume-${mesocycle.id}-${group}`,
                               `frequency-${mesocycle.id}-${group}`,
                               `progression-${mesocycle.id}-${group}`,
                             ].includes(busyKey ?? "");
                             const panel =
-                              volume && openSources === volumeKey ? (
+                              !sharedVolume && volume && openSources === volumeKey ? (
                                 <SourcesPanel
                                   heading={`Why research suggests ${volume.weekly_sets} weekly sets for ${group}`}
                                   citations={volume.supporting_citations}
@@ -721,7 +812,7 @@ export default function ProgramTree({
                                   question={`Why ${volume.weekly_sets} weekly sets per muscle in a ${program.goal} program?`}
                                   onClose={() => setOpenSources(null)}
                                 />
-                              ) : strength && frequency && openSources === freqKey ? (
+                              ) : strength && !sharedFrequency && frequency && openSources === freqKey ? (
                                 <SourcesPanel
                                   heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
                                   citations={frequency.supporting_citations}
@@ -755,10 +846,12 @@ export default function ProgramTree({
                                     {rowBusy && <Spinner className="size-3.5 text-accent-text" />}
                                   </span>
                                 </td>
-                                <td className="px-3 py-2.5 text-end tabular-nums text-fg-muted">
-                                  {trainedDays}x/wk
-                                </td>
-                                {strength && (
+                                {sharedTrained === null && (
+                                  <td className="px-3 py-2.5 text-end tabular-nums text-fg-muted">
+                                    {trainedDays}x/wk
+                                  </td>
+                                )}
+                                {strength && !sharedFrequency && (
                                   <td className="px-3 py-2.5 text-end tabular-nums">
                                     {frequency ? (
                                       <span className="inline-flex items-center gap-1.5">
@@ -776,6 +869,7 @@ export default function ProgramTree({
                                     )}
                                   </td>
                                 )}
+                                {!sharedVolume && (
                                 <td className="px-3 py-2.5 text-end tabular-nums">
                                   {volume ? (
                                     <span className="inline-flex items-center gap-1.5">
@@ -792,16 +886,7 @@ export default function ProgramTree({
                                     <span className="text-fg-subtle">—</span>
                                   )}
                                 </td>
-                                <td className={`px-3 py-2.5 text-end tabular-nums ${short ? "text-warn" : "text-fg-muted"}`}>
-                                  <span
-                                    className="inline-flex items-center gap-1"
-                                    title={short ? "Below the suggestion - add an exercise or a day" : undefined}
-                                  >
-                                    {short && <Alert className="size-3.5" />}
-                                    {delivered}
-                                    {short && <span className="sr-only"> (below the suggestion - add an exercise or a day)</span>}
-                                  </span>
-                                </td>
+                                )}
                                 {!strength && (
                                   <td className="px-3 py-2.5 text-end tabular-nums text-fg-muted">
                                     {trainedDays > 0 ? `~${Math.round(delivered / trainedDays)}` : "—"}
@@ -811,7 +896,13 @@ export default function ProgramTree({
                                   <td className="px-3 py-2.5">
                                     {scheme ? (
                                       <span className="inline-flex items-center gap-1.5">
-                                        <span className="capitalize">{schemeLabel(scheme.scheme)}</span>
+                                        {scheme.scheme === "constant" ? (
+                                          <span>
+                                            None scheduled <span className="text-fg-muted">· accessories only</span>
+                                          </span>
+                                        ) : (
+                                          <span className="capitalize">{schemeLabel(scheme.scheme)}</span>
+                                        )}
                                         <SourcesBadge
                                           what={`${group} progression`}
                                           citations={scheme.supporting_citations}
