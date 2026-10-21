@@ -89,9 +89,9 @@ function shared<T>(items: (T | undefined)[], key: (item: T) => string): T | null
 // One value at the top of the dosing details, shown once for every muscle.
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-1 px-4 py-3">
+    <div className="flex min-w-0 flex-col gap-1 px-3 py-2.5 sm:px-4 sm:py-3">
       <span className="text-[11px] text-fg-subtle">{label}</span>
-      <span className="flex items-center gap-2 text-[15px] font-semibold tabular-nums">{children}</span>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] font-semibold tabular-nums">{children}</span>
     </div>
   );
 }
@@ -751,7 +751,7 @@ export default function ProgramTree({
                     )}
                     {(sharedFrequency || sharedVolume || sharedTrained !== null) && (
                       <div className="border-b border-line">
-                        <div className="grid divide-y divide-line sm:auto-cols-fr sm:grid-flow-col sm:divide-x sm:divide-y-0">
+                        <div className="grid auto-cols-fr grid-flow-col divide-x divide-line">
                           {sharedFrequency && (
                             <Fact label="Research frequency">
                               {sharedFrequency.frequency}x/wk
@@ -811,44 +811,43 @@ export default function ProgramTree({
                         )}
                       </div>
                     )}
-                    {/* Two columns of muscles on wider screens so the expanded
-                        view stays short; each reads top to bottom, and a row's
-                        sources open right under it in its own column. */}
-                    <div className="grid sm:grid-cols-2">
-                      {[muscleGroups.slice(0, Math.ceil(muscleGroups.length / 2)), muscleGroups.slice(Math.ceil(muscleGroups.length / 2))].map(
-                        (column, columnIndex) => (
+                    {/* Two columns of muscles, phones included, so the expanded
+                        view stays short. Rows read left to right like the chart,
+                        and a row's sources open full width under its pair: the
+                        dense flow fills the cell beside a row before the panel. */}
+                    <div role="table" aria-label="Dosing by muscle" className="grid grid-flow-row-dense grid-cols-2">
+                      {[0, 1].map((headerIndex) => {
+                        // The second heading row is visual only. Phones put each
+                        // cell on two lines, so headings are for screen readers.
+                        const headRole = headerIndex === 0 ? "columnheader" : undefined;
+                        return (
                           <div
-                            key={columnIndex}
-                            role="table"
-                            aria-label={`Dosing by muscle, ${columnIndex + 1} of 2`}
-                            className={columnIndex === 1 ? "sm:border-s sm:border-line" : undefined}
+                            key={`header-${headerIndex}`}
+                            role={headerIndex === 0 ? "row" : undefined}
+                            aria-hidden={headerIndex === 1 ? true : undefined}
+                            className={`flex items-center gap-3 py-2 ps-4 pe-2 text-[11px] font-medium text-fg-subtle max-sm:sr-only ${
+                              headerIndex === 1 ? "border-s border-line" : ""
+                            }`}
                           >
-                            {/* The second column's headings are visual only on
-                                wider screens; phones stack the columns, so they
-                                stay for screen readers there. */}
-                            <div
-                              role="row"
-                              className={`flex items-center gap-3 py-2 ps-4 pe-2 text-[11px] font-medium text-fg-subtle ${
-                                columnIndex === 1 ? "max-sm:sr-only" : ""
-                              }`}
-                            >
-                              <span role="columnheader" className="w-24 shrink-0">Muscle</span>
-                              {sharedTrained === null && <span role="columnheader" className="w-12 text-end">Trained</span>}
-                              {strength && !sharedFrequency && (
-                                <span role="columnheader" className="w-[4.5rem] text-end">Research</span>
-                              )}
-                              {!sharedVolume && <span role="columnheader" className="w-14 text-end">Sets/wk</span>}
-                              {!strength && <span role="columnheader" className="w-16 text-end">Per session</span>}
-                              {strength ? (
-                                <span role="columnheader" className="min-w-0 flex-1">Progression</span>
-                              ) : (
-                                <span aria-hidden="true" className="min-w-0 flex-1" />
-                              )}
-                              <span role="columnheader" className="w-8 shrink-0">
-                                <span className="sr-only">Actions</span>
-                              </span>
-                            </div>
-                            {column.map((group) => {
+                            <span role={headRole} className="w-24 shrink-0">Muscle</span>
+                            {sharedTrained === null && <span role={headRole} className="w-12 text-end">Trained</span>}
+                            {strength && !sharedFrequency && (
+                              <span role={headRole} className="w-[4.5rem] text-end">Research</span>
+                            )}
+                            {!sharedVolume && <span role={headRole} className="w-14 text-end">Sets/wk</span>}
+                            {!strength && <span role={headRole} className="w-16 text-end">Per session</span>}
+                            {strength ? (
+                              <span role={headRole} className="min-w-0 flex-1">Progression</span>
+                            ) : (
+                              <span aria-hidden="true" className="min-w-0 flex-1" />
+                            )}
+                            <span role={headRole} className="w-8 shrink-0">
+                              <span className="sr-only">Actions</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                            {muscleGroups.map((group, index) => {
                               const frequency = mesocycle.muscle_group_frequencies.find((f) => f.muscle_group === group);
                               const volume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group);
                               const scheme = mesocycle.progression_schemes.find((p) => p.muscle_group === group);
@@ -900,18 +899,25 @@ export default function ProgramTree({
                                     onClose={() => setOpenSources(null)}
                                   />
                                 ) : null;
-                              return (
-                                <div key={group} className="border-t border-line">
-                                  <div role="row" className="flex items-center gap-3 py-1 ps-4 pe-2 text-[13px]">
-                                    <span role="rowheader" className="flex w-24 shrink-0 items-center gap-1.5 font-medium">
+                              return [
+                                <div
+                                  key={group}
+                                  role="row"
+                                  className={`flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-line py-2 ps-3 pe-1 text-[13px] sm:flex-nowrap sm:py-1 sm:ps-4 sm:pe-2 ${
+                                    index % 2 === 1 ? "border-s" : ""
+                                  }`}
+                                >
+                                    <span role="rowheader" className="flex min-w-0 flex-1 items-center gap-1.5 font-medium sm:w-24 sm:flex-none sm:shrink-0">
                                       <span className="truncate">{capitalize(group)}</span>
                                       {rowBusy && <Spinner className="size-3 shrink-0 text-accent-text" />}
                                     </span>
                                     {sharedTrained === null && (
-                                      <span role="cell" className="w-12 text-end tabular-nums text-fg-muted">{trainedDays}x/wk</span>
+                                      <span role="cell" className="w-12 text-end tabular-nums text-fg-muted max-sm:order-2 max-sm:w-auto">
+                                        {trainedDays}x/wk
+                                      </span>
                                     )}
                                     {strength && !sharedFrequency && (
-                                      <span role="cell" className="inline-flex w-[4.5rem] items-center justify-end gap-1.5 tabular-nums">
+                                      <span role="cell" className="inline-flex w-[4.5rem] items-center justify-end gap-1.5 tabular-nums max-sm:order-2 max-sm:w-auto">
                                         {frequency ? (
                                           <>
                                             {frequency.frequency}x/wk
@@ -929,7 +935,7 @@ export default function ProgramTree({
                                       </span>
                                     )}
                                     {!sharedVolume && (
-                                      <span role="cell" className="inline-flex w-14 items-center justify-end gap-1.5 tabular-nums">
+                                      <span role="cell" className="inline-flex w-14 items-center justify-end gap-1.5 tabular-nums max-sm:order-2 max-sm:w-auto">
                                         {volume ? (
                                           <>
                                             {volume.weekly_sets}
@@ -947,17 +953,22 @@ export default function ProgramTree({
                                       </span>
                                     )}
                                     {!strength && (
-                                      <span role="cell" className="w-16 text-end tabular-nums text-fg-muted">
+                                      <span role="cell" className="w-16 text-end tabular-nums text-fg-muted max-sm:order-2 max-sm:w-auto">
                                         {trainedDays > 0 ? `~${Math.round(delivered / trainedDays)}` : "—"}
+                                        <span className="sm:hidden"> per session</span>
                                       </span>
                                     )}
-                                    <span role={strength ? "cell" : undefined} aria-hidden={strength ? undefined : true} className="min-w-0 flex-1">
+                                    <span
+                                      role={strength ? "cell" : undefined}
+                                      aria-hidden={strength ? undefined : true}
+                                      className={`min-w-0 flex-1 max-sm:order-2 ${strength ? "max-sm:basis-full" : "max-sm:hidden"}`}
+                                    >
                                       {strength &&
                                         (scheme ? (
                                           <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                                             {scheme.scheme === "constant" ? (
                                               <span>
-                                                None <span className="text-xs text-fg-muted">· accessories only</span>
+                                                None <span className="text-xs text-fg-muted max-sm:hidden">· accessories only</span>
                                               </span>
                                             ) : (
                                               <span className="capitalize">{schemeLabel(scheme.scheme)}</span>
@@ -974,7 +985,7 @@ export default function ProgramTree({
                                           <span className="text-fg-subtle">—</span>
                                         ))}
                                     </span>
-                                    <span role="cell" className="shrink-0">
+                                    <span role="cell" className="shrink-0 max-sm:order-1">
                                     <Menu
                                       label={`Actions for ${group}`}
                                       disabled={busy}
@@ -1001,20 +1012,16 @@ export default function ProgramTree({
                                       ]}
                                     />
                                     </span>
-                                  </div>
-                                  {panel && (
-                                    <div role="row">
-                                      <div role="cell" className="px-4 pb-3">
-                                        {panel}
-                                      </div>
+                                </div>,
+                                panel && (
+                                  <div key={`${group}-sources`} role="row" className="col-span-2 border-t border-line">
+                                    <div role="cell" className="px-4 py-3">
+                                      {panel}
                                     </div>
-                                  )}
-                                </div>
-                              );
+                                  </div>
+                                ),
+                              ];
                             })}
-                          </div>
-                        ),
-                      )}
                     </div>
                   </div>
                   )}
