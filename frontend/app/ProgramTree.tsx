@@ -770,191 +770,185 @@ export default function ProgramTree({
                         )}
                       </div>
                     )}
-                    <div className="scroll-thin overflow-x-auto">
-                      <table className="w-full min-w-[24rem] text-sm">
-                        <thead>
-                          <tr className="text-start text-xs text-fg-subtle">
-                            <th className="px-4 py-2.5 text-start font-medium">Muscle</th>
-                            {sharedTrained === null && <th className="px-3 py-2.5 text-end font-medium">You train it</th>}
-                            {strength && !sharedFrequency && <th className="px-3 py-2.5 text-end font-medium">Research</th>}
-                            {!sharedVolume && <th className="px-3 py-2.5 text-end font-medium">Suggested sets/wk</th>}
-                            {!strength && <th className="px-3 py-2.5 text-end font-medium">Per session</th>}
-                            {strength && <th className="px-3 py-2.5 text-start font-medium">Progression</th>}
-                            <th className="w-12 px-2 py-2.5">
-                              <span className="sr-only">Actions</span>
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {muscleGroups.map((group) => {
-                            const frequency = mesocycle.muscle_group_frequencies.find((f) => f.muscle_group === group);
-                            const volume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group);
-                            const scheme = mesocycle.progression_schemes.find((p) => p.muscle_group === group);
-                            const freqKey = `freq-${frequency?.id}`;
-                            const volumeKey = `volume-${volume?.id}`;
-                            const schemeKey = `scheme-${scheme?.id}`;
-                            const delivered = deliveredSets(mesocycle, group);
-                            const trainedDays = daysTraining(mesocycle, group);
-                            const rowBusy = [
-                              `volume-${mesocycle.id}-${group}`,
-                              `frequency-${mesocycle.id}-${group}`,
-                              `progression-${mesocycle.id}-${group}`,
-                            ].includes(busyKey ?? "");
-                            const panel =
-                              !sharedVolume && volume && openSources === volumeKey ? (
-                                <SourcesPanel
-                                  heading={`Why research suggests ${volume.weekly_sets} weekly sets for ${group}`}
-                                  citations={volume.supporting_citations}
-                                  note={volume.grounding_note}
-                                  // Muscle-generic: weekly volume and frequency are one shared
-                                  // answer for every muscle, so naming the muscle wrote (and paid
-                                  // for) 14 copies of the same summary.
-                                  question={`Why ${volume.weekly_sets} weekly sets per muscle in a ${program.goal} program?`}
-                                  onClose={() => setOpenSources(null)}
-                                />
-                              ) : strength && !sharedFrequency && frequency && openSources === freqKey ? (
-                                <SourcesPanel
-                                  heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
-                                  citations={frequency.supporting_citations}
-                                  note={frequency.grounding_note}
-                                  question={`Why train each muscle ${frequency.frequency}x a week for ${program.goal}?`}
-                                  onClose={() => setOpenSources(null)}
-                                />
-                              ) : scheme && openSources === schemeKey ? (
-                                <SourcesPanel
-                                  heading={
-                                    scheme.scheme === "constant"
-                                      ? `Why ${group} has no scheduled progression`
-                                      : `Why ${schemeLabel(scheme.scheme)} progression: ` +
-                                        (program.trained ? "you've lifted consistently for 1+ year" : "you're newer to lifting")
-                                  }
-                                  citations={scheme.supporting_citations}
-                                  note={scheme.grounding_note}
-                                  question={
-                                    scheme.scheme === "constant"
-                                      ? undefined
-                                      : `Why ${schemeLabel(scheme.scheme)} progression for ${program.goal}?`
-                                  }
-                                  onClose={() => setOpenSources(null)}
-                                />
-                              ) : null;
-                            return [
-                              <tr key={group} className="border-t border-line">
-                                <td className="px-4 py-2.5 font-medium">
-                                  <span className="flex items-center gap-2">
-                                    {capitalize(group)}
-                                    {rowBusy && <Spinner className="size-3.5 text-accent-text" />}
-                                  </span>
-                                </td>
-                                {sharedTrained === null && (
-                                  <td className="px-3 py-2.5 text-end tabular-nums text-fg-muted">
-                                    {trainedDays}x/wk
-                                  </td>
-                                )}
-                                {strength && !sharedFrequency && (
-                                  <td className="px-3 py-2.5 text-end tabular-nums">
-                                    {frequency ? (
-                                      <span className="inline-flex items-center gap-1.5">
-                                        {frequency.frequency}x/wk
-                                        <SourcesBadge
-                                          what={`${group} frequency`}
-                                          citations={frequency.supporting_citations}
-                                          note={frequency.grounding_note}
-                                          open={openSources === freqKey}
-                                          onToggle={() => toggleSources(freqKey)}
-                                        />
-                                      </span>
-                                    ) : (
-                                      <span className="text-fg-subtle">—</span>
-                                    )}
-                                  </td>
-                                )}
-                                {!sharedVolume && (
-                                <td className="px-3 py-2.5 text-end tabular-nums">
-                                  {volume ? (
-                                    <span className="inline-flex items-center gap-1.5">
-                                      {volume.weekly_sets}
-                                      <SourcesBadge
-                                        what={`${group} weekly sets`}
-                                        citations={volume.supporting_citations}
-                                        note={volume.grounding_note}
-                                        open={openSources === volumeKey}
-                                        onToggle={() => toggleSources(volumeKey)}
-                                      />
+                    {/* Two columns of muscles on wider screens so the expanded
+                        view stays short; each reads top to bottom, and a row's
+                        sources open right under it in its own column. */}
+                    <div className="grid sm:grid-cols-2">
+                      {[muscleGroups.slice(0, Math.ceil(muscleGroups.length / 2)), muscleGroups.slice(Math.ceil(muscleGroups.length / 2))].map(
+                        (column, columnIndex) => (
+                          <div key={columnIndex} className={columnIndex === 1 ? "sm:border-s sm:border-line" : undefined}>
+                            <div
+                              className={`items-center gap-3 py-2 ps-4 pe-2 text-[11px] font-medium text-fg-subtle ${
+                                columnIndex === 1 ? "hidden sm:flex" : "flex"
+                              }`}
+                            >
+                              <span className="w-24 shrink-0">Muscle</span>
+                              {sharedTrained === null && <span className="w-12 text-end">Trained</span>}
+                              {strength && !sharedFrequency && <span className="w-[4.5rem] text-end">Research</span>}
+                              {!sharedVolume && <span className="w-14 text-end">Sets/wk</span>}
+                              {!strength && <span className="w-16 text-end">Per session</span>}
+                              <span className="min-w-0 flex-1">{strength && "Progression"}</span>
+                              <span className="w-8 shrink-0" />
+                            </div>
+                            {column.map((group) => {
+                              const frequency = mesocycle.muscle_group_frequencies.find((f) => f.muscle_group === group);
+                              const volume = mesocycle.muscle_group_volumes.find((v) => v.muscle_group === group);
+                              const scheme = mesocycle.progression_schemes.find((p) => p.muscle_group === group);
+                              const freqKey = `freq-${frequency?.id}`;
+                              const volumeKey = `volume-${volume?.id}`;
+                              const schemeKey = `scheme-${scheme?.id}`;
+                              const delivered = deliveredSets(mesocycle, group);
+                              const trainedDays = daysTraining(mesocycle, group);
+                              const rowBusy = [
+                                `volume-${mesocycle.id}-${group}`,
+                                `frequency-${mesocycle.id}-${group}`,
+                                `progression-${mesocycle.id}-${group}`,
+                              ].includes(busyKey ?? "");
+                              const panel =
+                                !sharedVolume && volume && openSources === volumeKey ? (
+                                  <SourcesPanel
+                                    heading={`Why research suggests ${volume.weekly_sets} weekly sets for ${group}`}
+                                    citations={volume.supporting_citations}
+                                    note={volume.grounding_note}
+                                    // Muscle-generic: weekly volume and frequency are one shared
+                                    // answer for every muscle, so naming the muscle wrote (and paid
+                                    // for) 14 copies of the same summary.
+                                    question={`Why ${volume.weekly_sets} weekly sets per muscle in a ${program.goal} program?`}
+                                    onClose={() => setOpenSources(null)}
+                                  />
+                                ) : strength && !sharedFrequency && frequency && openSources === freqKey ? (
+                                  <SourcesPanel
+                                    heading={`Why research suggests ${frequency.frequency}x/week for ${group}`}
+                                    citations={frequency.supporting_citations}
+                                    note={frequency.grounding_note}
+                                    question={`Why train each muscle ${frequency.frequency}x a week for ${program.goal}?`}
+                                    onClose={() => setOpenSources(null)}
+                                  />
+                                ) : scheme && openSources === schemeKey ? (
+                                  <SourcesPanel
+                                    heading={
+                                      scheme.scheme === "constant"
+                                        ? `Why ${group} has no scheduled progression`
+                                        : `Why ${schemeLabel(scheme.scheme)} progression: ` +
+                                          (program.trained ? "you've lifted consistently for 1+ year" : "you're newer to lifting")
+                                    }
+                                    citations={scheme.supporting_citations}
+                                    note={scheme.grounding_note}
+                                    question={
+                                      scheme.scheme === "constant"
+                                        ? undefined
+                                        : `Why ${schemeLabel(scheme.scheme)} progression for ${program.goal}?`
+                                    }
+                                    onClose={() => setOpenSources(null)}
+                                  />
+                                ) : null;
+                              return (
+                                <div key={group} className="border-t border-line">
+                                  <div className="flex items-center gap-3 py-1 ps-4 pe-2 text-[13px]">
+                                    <span className="flex w-24 shrink-0 items-center gap-1.5 font-medium">
+                                      <span className="truncate">{capitalize(group)}</span>
+                                      {rowBusy && <Spinner className="size-3 shrink-0 text-accent-text" />}
                                     </span>
-                                  ) : (
-                                    <span className="text-fg-subtle">—</span>
-                                  )}
-                                </td>
-                                )}
-                                {!strength && (
-                                  <td className="px-3 py-2.5 text-end tabular-nums text-fg-muted">
-                                    {trainedDays > 0 ? `~${Math.round(delivered / trainedDays)}` : "—"}
-                                  </td>
-                                )}
-                                {strength && (
-                                  <td className="px-3 py-2.5">
-                                    {scheme ? (
-                                      <span className="inline-flex items-center gap-1.5">
-                                        {scheme.scheme === "constant" ? (
-                                          <span>
-                                            None scheduled <span className="text-fg-muted">· accessories only</span>
+                                    {sharedTrained === null && (
+                                      <span className="w-12 text-end tabular-nums text-fg-muted">{trainedDays}x/wk</span>
+                                    )}
+                                    {strength && !sharedFrequency && (
+                                      <span className="inline-flex w-[4.5rem] items-center justify-end gap-1.5 tabular-nums">
+                                        {frequency ? (
+                                          <>
+                                            {frequency.frequency}x/wk
+                                            <SourcesBadge
+                                              what={`${group} frequency`}
+                                              citations={frequency.supporting_citations}
+                                              note={frequency.grounding_note}
+                                              open={openSources === freqKey}
+                                              onToggle={() => toggleSources(freqKey)}
+                                            />
+                                          </>
+                                        ) : (
+                                          <span className="text-fg-subtle">—</span>
+                                        )}
+                                      </span>
+                                    )}
+                                    {!sharedVolume && (
+                                      <span className="inline-flex w-14 items-center justify-end gap-1.5 tabular-nums">
+                                        {volume ? (
+                                          <>
+                                            {volume.weekly_sets}
+                                            <SourcesBadge
+                                              what={`${group} weekly sets`}
+                                              citations={volume.supporting_citations}
+                                              note={volume.grounding_note}
+                                              open={openSources === volumeKey}
+                                              onToggle={() => toggleSources(volumeKey)}
+                                            />
+                                          </>
+                                        ) : (
+                                          <span className="text-fg-subtle">—</span>
+                                        )}
+                                      </span>
+                                    )}
+                                    {!strength && (
+                                      <span className="w-16 text-end tabular-nums text-fg-muted">
+                                        {trainedDays > 0 ? `~${Math.round(delivered / trainedDays)}` : "—"}
+                                      </span>
+                                    )}
+                                    <span className="min-w-0 flex-1">
+                                      {strength &&
+                                        (scheme ? (
+                                          <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                                            {scheme.scheme === "constant" ? (
+                                              <span>
+                                                None <span className="text-xs text-fg-muted">· accessories only</span>
+                                              </span>
+                                            ) : (
+                                              <span className="capitalize">{schemeLabel(scheme.scheme)}</span>
+                                            )}
+                                            <SourcesBadge
+                                              what={`${group} progression`}
+                                              citations={scheme.supporting_citations}
+                                              note={scheme.grounding_note}
+                                              open={openSources === schemeKey}
+                                              onToggle={() => toggleSources(schemeKey)}
+                                            />
                                           </span>
                                         ) : (
-                                          <span className="capitalize">{schemeLabel(scheme.scheme)}</span>
-                                        )}
-                                        <SourcesBadge
-                                          what={`${group} progression`}
-                                          citations={scheme.supporting_citations}
-                                          note={scheme.grounding_note}
-                                          open={openSources === schemeKey}
-                                          onToggle={() => toggleSources(schemeKey)}
-                                        />
-                                      </span>
-                                    ) : (
-                                      <span className="text-fg-subtle">—</span>
-                                    )}
-                                  </td>
-                                )}
-                                <td className="px-2 py-1.5 text-end">
-                                  <Menu
-                                    label={`Actions for ${group}`}
-                                    disabled={busy}
-                                    items={[
-                                      {
-                                        label: "Generate weekly volume",
-                                        icon: <Zap className="size-4" />,
-                                        onSelect: () => generateVolume(mesocycle, group),
-                                      },
-                                      ...(strength
-                                        ? [
-                                            {
-                                              label: "Generate frequency",
-                                              icon: <Zap className="size-4" />,
-                                              onSelect: () => generateFrequency(mesocycle, group),
-                                            },
-                                            {
-                                              label: "Generate progression",
-                                              icon: <Zap className="size-4" />,
-                                              onSelect: () => generateProgression(mesocycle, group),
-                                            },
-                                          ]
-                                        : []),
-                                    ]}
-                                  />
-                                </td>
-                              </tr>,
-                              panel && (
-                                <tr key={`${group}-sources`}>
-                                  <td colSpan={8} className="px-4 pb-3">
-                                    {panel}
-                                  </td>
-                                </tr>
-                              ),
-                            ];
-                          })}
-                        </tbody>
-                      </table>
+                                          <span className="text-fg-subtle">—</span>
+                                        ))}
+                                    </span>
+                                    <Menu
+                                      label={`Actions for ${group}`}
+                                      disabled={busy}
+                                      items={[
+                                        {
+                                          label: "Generate weekly volume",
+                                          icon: <Zap className="size-4" />,
+                                          onSelect: () => generateVolume(mesocycle, group),
+                                        },
+                                        ...(strength
+                                          ? [
+                                              {
+                                                label: "Generate frequency",
+                                                icon: <Zap className="size-4" />,
+                                                onSelect: () => generateFrequency(mesocycle, group),
+                                              },
+                                              {
+                                                label: "Generate progression",
+                                                icon: <Zap className="size-4" />,
+                                                onSelect: () => generateProgression(mesocycle, group),
+                                              },
+                                            ]
+                                          : []),
+                                      ]}
+                                    />
+                                  </div>
+                                  {panel && <div className="px-4 pb-3">{panel}</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ),
+                      )}
                     </div>
                   </div>
                   )}
