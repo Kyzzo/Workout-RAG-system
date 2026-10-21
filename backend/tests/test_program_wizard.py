@@ -202,6 +202,7 @@ def test_generate_program_builds_the_full_structure(mock_select, db_session, use
     program = schemas.ProgramOut.model_validate(generate_program(request=request, db=db_session, current_user=user))
 
     assert program.user_id == user.id and program.goal == "strength"
+    assert program.name == "Upper/Lower · 4 days"
     assert program.volume_preference == "minimal"
     assert program.trained and program.include_deload
     [block] = program.mesocycles
@@ -215,6 +216,16 @@ def test_generate_program_builds_the_full_structure(mock_select, db_session, use
         assert [(wp.week_number, wp.sets, wp.load) for wp in slot.weekly_prescriptions] == [
             (w, 0, "") for w in range(1, 6)  # placeholders, ready for generation
         ]
+
+
+@patch("app.routers.programs.select_exercises")
+def test_generated_program_names_number_repeats(mock_select, db_session, user):
+    mock_select.side_effect = lambda days, goal, label: _picks_covering(days)
+    request = schemas.ProgramGenerateRequest(goal="strength", split="upper_lower", days_per_week=4)
+
+    names = [generate_program(request=request, db=db_session, current_user=user).name for _ in range(3)]
+
+    assert names == ["Upper/Lower · 4 days", "Upper/Lower · 4 days 2", "Upper/Lower · 4 days 3"]
 
 
 @patch("app.routers.programs.select_exercises", side_effect=ExerciseSelectionError("no"))

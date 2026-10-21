@@ -7,6 +7,7 @@ import { Book, ChevronRight, Close, Sparkles } from "./Icons";
 import { RuleSources } from "./RuleSources";
 import {
   VOLUME_LABELS,
+  programTitle,
   volumeLabel,
   type Program,
   type ProgramSummary,
@@ -217,14 +218,14 @@ export default function ProgramWizard({
           include_deload: goal === "strength" && includeDeload,
         },
       });
-      onCreated({ id: program.id, goal: program.goal });
+      onCreated({ id: program.id, goal: program.goal, name: program.name });
 
       const { failures, cancelled: stopped } = await runBlockGeneration(api, program.id, program.mesocycles[0].id, {
         onProgress: setProgress,
         onStepDone: onRefresh,
         isCancelled: () => cancelled.current,
       });
-      setNotice(stopped ? `Stopped - program #${program.id} is partly generated.` : `Program #${program.id} is ready.`);
+      setNotice(stopped ? `Stopped - ${programTitle(program)} is partly generated.` : `${programTitle(program)} is ready.`);
       if (failures.length > 0) setError(`${failures.length} step(s) failed:\n${failures.join("\n")}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

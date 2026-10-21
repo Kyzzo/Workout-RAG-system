@@ -10,6 +10,21 @@ from ..rag.rule_justifications import RULES, justify_rule
 from ..splits import SPLITS, plan_days
 
 router = APIRouter(prefix="/programs", tags=["programs"])
+
+
+def default_program_name(db: Session, user_id: int, split_label: str, days_per_week: int) -> str:
+    # What the program is, e.g. "Upper/Lower · 4 days" (the goal has its own
+    # chip). A second program with the same split and days gets " 2", etc.
+    base = f"{split_label} · {days_per_week} days"
+    taken = {
+        name for (name,) in db.query(models.Program.name).filter(models.Program.user_id == user_id).all()
+    }
+    if base not in taken:
+        return base
+    number = 2
+    while f"{base} {number}" in taken:
+        number += 1
+    return f"{base} {number}"
 splits_router = APIRouter(prefix="/splits", tags=["programs"])
 rules_router = APIRouter(prefix="/rules", tags=["programs"])
 
@@ -46,6 +61,7 @@ def generate_program(
     program = models.Program(
         user_id=current_user.id, goal=request.goal, volume_preference=request.volume_preference,
         trained=request.trained, include_deload=request.include_deload,
+        name=default_program_name(db, current_user.id, split.label, request.days_per_week),
     )
     db.add(program)
     db.flush()
