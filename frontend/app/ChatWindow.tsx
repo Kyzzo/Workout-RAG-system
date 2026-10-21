@@ -370,11 +370,11 @@ export default function ChatWindow({
   return (
     <section className="card flex h-full flex-col overflow-hidden" aria-label="Research chat">
       <header className="flex items-center gap-3 border-b border-line px-4 py-3.5">
-        <span className="plate size-8 rounded-lg">
+        <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-accent to-accent-2 text-white">
           <Message className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="sign-type text-[15px]">Research chat</h2>
+          <h2 className="text-sm font-semibold">Research chat</h2>
           <p className="truncate text-xs text-fg-subtle">Answers and changes cite the papers</p>
         </div>
         {turns.length > 0 && (

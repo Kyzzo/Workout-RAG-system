@@ -4,24 +4,19 @@
    colours: bg-surface, text-fg-muted, border-line, bg-accent...), with a
    light and a dark value. Semantic roles are fixed: accent = actions and
    the anchored value, evidence = verified sources, warn = caveats and
-   fit notes, danger = destructive actions and errors.
-   Look ("last train"): matte, desaturated warm greys with no colour glow,
-   one cool fluorescent strip under the header, and monochrome signage -
-   the program title as a placard, icon tiles as sign plates. The accent
-   stays the only colour that asks for a click. */
+   fit notes, danger = destructive actions and errors. */
 :root {
   color-scheme: light;
-  --bg: #f2f1ee;
-  --surface: #fbfaf8;
-  --surface-2: #f0efec;
-  --surface-3: #e5e4e0;
-  --line: rgba(28, 26, 22, 0.09);
-  --line-strong: rgba(28, 26, 22, 0.17);
-  --fg: #111110;
-  --fg-muted: #4a4945;
-  --fg-subtle: #66645f;
-  --tube: rgba(255, 255, 255, 0.95);
-  --tube-glow: rgba(120, 140, 170, 0.18);
+  --bg: #f6f6f8;
+  --bg-glow: rgba(91, 79, 245, 0.09);
+  --surface: #ffffff;
+  --surface-2: #f3f3f6;
+  --surface-3: #e9e9ee;
+  --line: rgba(17, 17, 34, 0.09);
+  --line-strong: rgba(17, 17, 34, 0.17);
+  --fg: #0c0c12;
+  --fg-muted: #4b4b58;
+  --fg-subtle: #686876;
   --accent: #5b4ff5;
   --accent-hover: #4b3fe6;
   --accent-2: #8b5cf6;
@@ -45,17 +40,16 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --bg: #0b0b0a;
-    --surface: #131312;
-    --surface-2: #1a1a18;
-    --surface-3: #242422;
-    --line: rgba(255, 250, 240, 0.075);
-    --line-strong: rgba(255, 250, 240, 0.14);
-    --fg: #f2f1ee;
-    --fg-muted: #a9a7a1;
-    --fg-subtle: #8a8882;
-    --tube: rgba(236, 242, 250, 0.85);
-    --tube-glow: rgba(200, 220, 255, 0.16);
+    --bg: #08080b;
+    --bg-glow: rgba(109, 98, 255, 0.16);
+    --surface: #111116;
+    --surface-2: #18181e;
+    --surface-3: #222229;
+    --line: rgba(255, 255, 255, 0.075);
+    --line-strong: rgba(255, 255, 255, 0.14);
+    --fg: #f3f3f6;
+    --fg-muted: #a6a6b3;
+    --fg-subtle: #878796;
     --accent: #5b4ff5;
     --accent-hover: #6a5ffa;
     --accent-2: #9b6bff;
@@ -113,7 +107,11 @@
   }
 
   body {
-    background: var(--bg);
+    background:
+      radial-gradient(1100px 520px at 15% -12%, var(--bg-glow), transparent 65%),
+      radial-gradient(800px 420px at 100% 0%, var(--bg-glow), transparent 60%),
+      var(--bg);
+    background-repeat: no-repeat;
     color: var(--fg);
     font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
     font-feature-settings: "ss01", "cv11";
@@ -139,44 +137,6 @@
 @layer components {
   .card {
     @apply rounded-2xl border border-line bg-surface shadow-card;
-  }
-
-  /* The fluorescent tube: a thin strip of cool light along the bottom of
-     the header, fading out at both ends, with a soft spill below. */
-  .tube {
-    position: relative;
-  }
-  .tube::after {
-    content: "";
-    position: absolute;
-    inset-inline: 0;
-    bottom: -1px;
-    height: 1px;
-    pointer-events: none;
-    background: linear-gradient(90deg, transparent, var(--tube) 18%, var(--tube) 82%, transparent);
-    box-shadow: 0 2px 22px 3px var(--tube-glow);
-  }
-
-  /* A sign plate: monochrome, high contrast, for icon tiles. */
-  .plate {
-    @apply grid shrink-0 place-items-center bg-fg text-bg;
-  }
-
-  /* The placard: the one heading on a page set as a sign - black with
-     white type in a metal frame, in both modes. */
-  .placard {
-    @apply inline-block max-w-full rounded-md px-3.5 py-1.5 tracking-[-0.03em];
-    background: #0c0c0b;
-    color: #f4f3f0;
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.06) inset,
-      0 0 0 3px var(--surface-3),
-      0 0 0 4px var(--line-strong);
-  }
-
-  /* Signage type: heavy and set close (tighter only at placard size). */
-  .sign-type {
-    @apply font-bold tracking-[-0.015em];
   }
 
   /* Buttons: one primary per view, secondary for other actions, ghost
@@ -281,9 +241,8 @@
     @apply inline-flex items-center gap-1 h-6 px-2 rounded-full border border-line bg-surface-2 text-xs text-fg-muted whitespace-nowrap;
   }
 
-  /* Transit captions: small, uppercase, semibold, widely tracked. */
   .eyebrow {
-    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-fg-subtle;
+    @apply text-xs font-medium uppercase tracking-[0.08em] text-fg-subtle;
   }
 
   /* Short entrance for content that appears on a click (expanded days,
