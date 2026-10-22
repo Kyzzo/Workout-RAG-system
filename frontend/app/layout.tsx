@@ -50,7 +50,7 @@ export default function RootLayout({
         lang="en"
         className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       >
-        <body className="flex min-h-full flex-col">
+        <body className="flex min-h-full flex-col overflow-x-clip">
           <header className="sticky top-0 z-40 border-b border-line bg-bg/75 backdrop-blur-xl">
             <div className="mx-auto flex h-14 w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
               <Image

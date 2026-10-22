@@ -272,7 +272,10 @@ export default function ProgramWizard({
         )}
       </div>
 
-      <fieldset disabled={running} className="grid grid-cols-1 gap-4 px-5 pt-5 sm:grid-cols-6 sm:px-6">
+      {/* min-w-0: a fieldset is otherwise at least as wide as its widest
+          content (the longest dropdown option), which pushed the form past
+          a phone screen and let the page scroll sideways. */}
+      <fieldset disabled={running} className="grid min-w-0 grid-cols-1 gap-4 px-5 pt-5 sm:grid-cols-6 sm:px-6 [&>*]:min-w-0">
         <div className="flex flex-col gap-1.5 sm:col-span-6">
           <span className="text-[13px] font-medium text-fg-muted">Goal</span>
           <Segmented label="Goal" options={GOALS} value={goal} onChange={setGoal} disabled={running} />
