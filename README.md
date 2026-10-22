@@ -1,4 +1,4 @@
-# AI Workout Tracker
+# Citeset
 
 [![Backend tests](https://github.com/Kyzzo/Workout-RAG-system/actions/workflows/backend-tests.yml/badge.svg)](https://github.com/Kyzzo/Workout-RAG-system/actions/workflows/backend-tests.yml)
 [![Frontend checks](https://github.com/Kyzzo/Workout-RAG-system/actions/workflows/frontend-checks.yml/badge.svg)](https://github.com/Kyzzo/Workout-RAG-system/actions/workflows/frontend-checks.yml)

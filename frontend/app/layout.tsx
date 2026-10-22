@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Workout Structuring",
+  title: "Citeset",
   description: "Strength and hypertrophy programs where every number is research-cited.",
 };
 
@@ -61,7 +61,7 @@ export default function RootLayout({
                 className="size-8 shrink-0 rounded-lg object-cover ring-1 ring-line-strong"
               />
               <div className="min-w-0 flex-1 leading-tight">
-                <p className="truncate text-sm font-semibold tracking-tight">AI Workout Structuring</p>
+                <p className="truncate text-sm font-semibold tracking-tight">Citeset: AI Workout Structuring</p>
                 <p className="truncate text-xs text-fg-subtle">Every number research-cited</p>
               </div>
               <Show when="signed-out">

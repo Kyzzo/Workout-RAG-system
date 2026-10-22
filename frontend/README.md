@@ -1,6 +1,6 @@
 # Frontend
 
-Next.js app for the AI Workout Tracker. See the [root README](../README.md)
+Next.js app for Citeset. See the [root README](../README.md)
 for what the project does.
 
 It renders programs with a citation badge on each value and a weekly sets

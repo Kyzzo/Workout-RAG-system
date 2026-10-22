@@ -1,4 +1,4 @@
-# Backend — AI Workout Structuring App
+# Backend — Citeset
 
 FastAPI backend. See the [root README](../README.md) for the project overview,
 [docs/](../docs/README.md) for design decisions, and
