@@ -113,6 +113,14 @@ def _response_schema(days: list[PlannedDay]) -> type[pydantic.BaseModel]:
     return pydantic.create_model("ExerciseSelection", **day_models)
 
 
+# (exercise_name, primary, secondaries, is_compound) for an optional muscle
+# the model skipped although nothing else that day trains it.
+_STANDARD_OPTIONAL = {
+    "lower back": ("Back Extension", "lower back", ["glutes", "hamstrings"], False),
+    "front delts": ("Dumbbell Front Raise", "front delts", [], False),
+}
+
+
 def _flatten(day: PlannedDay, day_response) -> list[tuple[str, str, list[str], bool]]:
     """(exercise_name, primary, secondaries, is_compound), compounds first,
     trimmed to MAX_EXERCISES deterministically rather than failing: every
@@ -123,15 +131,22 @@ def _flatten(day: PlannedDay, day_response) -> list[tuple[str, str, list[str], b
         secondaries = _clean_secondaries(primary, pick.secondary_muscle_groups)
         return (pick.exercise_name.strip(), primary, secondaries, pick.is_compound)
 
-    required, optional = [], []
+    required, optional, skipped = [], [], []
     for group in day.muscle_groups:
         pick = getattr(day_response, _field(group), None)
         if pick is not None:
             (optional if group in COVERED_AS_SECONDARY_OK else required).append(pick_tuple(pick, group))
+        elif group in COVERED_AS_SECONDARY_OK:
+            skipped.append(group)
     extras = [pick_tuple(pick, pick.muscle_group) for pick in day_response.extras[:MAX_EXTRAS]]
 
     covered = {g for p in required + extras for g in p[2]}
     needed_optional = [p for p in optional if p[1] not in covered]
+    # An optional muscle left out on a day where nothing else trains it (lower
+    # back on a Torso day, whose hinges are on the Limbs day): add a standard
+    # exercise rather than failing the whole program. The model did this on
+    # both attempts for Torso/Limbs (Oct 22, 2026).
+    needed_optional += [_STANDARD_OPTIONAL[g] for g in skipped if g not in covered]
     redundant_optional = [p for p in optional if p[1] in covered]
     picks = required + needed_optional
     room = MAX_EXERCISES - len(picks)

@@ -278,6 +278,21 @@ def test_front_delts_and_lower_back_may_be_covered_as_secondaries_but_lats_may_n
     assert _problems(days, _parsed(days, no_lats)) == ["Pull has no exercise for lats"]
 
 
+def test_skipped_optional_muscle_nothing_trains_gets_a_standard_exercise():
+    # Torso/Limbs: the Torso day lists lower back, but its hinges are on the
+    # Limbs day. The model skipped lower back anyway on both attempts, which
+    # failed the whole program; it's now filled with a standard exercise.
+    days = [d for d in plan_days(SPLITS["torso_limbs"], 6) if d.day_type == "Torso"]
+    picks = _picks_covering(days)
+    picks = [[p for p in day if p[1] != "lower back"] for day in picks]
+
+    assert _problems(days, _parsed(days, picks)) == []
+    from app.rag.exercise_selection import _flatten
+
+    flattened = _flatten(days[0], getattr(_parsed(days, picks), "day_1"))
+    assert ("Back Extension", "lower back", ["glutes", "hamstrings"], False) in flattened
+
+
 def test_selection_cleans_secondaries():
     days = [d for d in plan_days(SPLITS["ppl"], 6) if d.day_type == "Pull"]
     picks = _picks_covering(days)
