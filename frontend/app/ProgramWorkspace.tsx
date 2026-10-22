@@ -22,7 +22,7 @@ export default function ProgramWorkspace() {
 function Workspace() {
   const api = useApi();
   const dialogs = useDialogs();
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const clerk = useClerk();
   // Signed-out visitors browse as a guest: they see an empty workspace (the
   // generator and the evidence assistant), and their first press, tap or
@@ -46,6 +46,23 @@ function Workspace() {
   // to that week only, not every week.
   const [anchorThisWeekOnly, setAnchorThisWeekOnly] = useState(false);
 
+  // Everything below belongs to one account. Clerk signs out (and switches
+  // accounts) without reloading the page, so a new user kept the last one's
+  // selected program - its load then failed with a 404 - and briefly their
+  // program list. Reset during render, before anything shows.
+  const [stateOwner, setStateOwner] = useState(userId);
+  if (userId !== stateOwner) {
+    setStateOwner(userId);
+    setPrograms(null);
+    setSelectedId(null);
+    setProgram(null);
+    setError(null);
+    setWizardOpen(false);
+    setAnchoredFieldId(null);
+    setAnchorLabel(null);
+    setAnchorThisWeekOnly(false);
+  }
+
   const clearAnchor = useCallback(() => {
     setAnchoredFieldId(null);
     setAnchorLabel(null);
@@ -68,7 +85,7 @@ function Workspace() {
     return () => {
       cancelled = true;
     };
-  }, [api, isSignedIn]);
+  }, [api, isSignedIn, userId]);
 
   // Refetches the whole nested program after any structural change or
   // generation call, rather than patching nested state by hand - the

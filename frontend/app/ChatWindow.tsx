@@ -182,7 +182,7 @@ export default function ChatWindow({
   // Lets the program view refetch after an adjust changes a stored value.
   onPrescriptionUpdated?: () => void;
 }) {
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn, userId } = useAuth();
   const dialogs = useDialogs();
   const [message, setMessage] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -194,6 +194,16 @@ export default function ChatWindow({
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLFormElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+
+  // A new account (or signing out) starts with an empty conversation: Clerk
+  // signs out without reloading the page, so the last user's chat stayed on
+  // screen in guest mode. Reset during render, before anything shows.
+  const [turnsOwner, setTurnsOwner] = useState(userId);
+  if (userId !== turnsOwner) {
+    setTurnsOwner(userId);
+    setTurns([]);
+    setMessage("");
+  }
 
   // Saved history, loaded once on open (each change with its current state,
   // so Undo / Confirm buttons are right after a reload).
@@ -219,7 +229,7 @@ export default function ChatWindow({
       stale = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSignedIn]);
+  }, [isSignedIn, userId]);
 
   async function call<T>(path: string, method: string, body?: unknown): Promise<T> {
     const token = await getToken();
