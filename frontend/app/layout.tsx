@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider, Show, SignInButton, UserButton } from "@clerk/nextjs";
 import Image from "next/image";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -77,6 +78,8 @@ export default function RootLayout({
             </div>
           </header>
           {children}
+          {/* Vercel Web Analytics: page views and visitors, no cookies. */}
+          <Analytics />
         </body>
       </html>
     </ClerkProvider>
