@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useAuth, useClerk } from "@clerk/nextjs";
+import { useCallback, useEffect, useState, type KeyboardEvent, type SyntheticEvent } from "react";
 import ChatWindow from "./ChatWindow";
 import { DialogProvider, useDialogs } from "./Dialogs";
 import { Pencil, Plus, Trash } from "./Icons";
@@ -21,7 +22,15 @@ export default function ProgramWorkspace() {
 function Workspace() {
   const api = useApi();
   const dialogs = useDialogs();
-  const [programs, setPrograms] = useState<ProgramSummary[] | null>(null);
+  const { isLoaded, isSignedIn } = useAuth();
+  const clerk = useClerk();
+  // Signed-out visitors browse as a guest: they see an empty workspace (the
+  // generator and the evidence assistant), and their first press, tap or
+  // keystroke inside it opens sign-in instead of doing anything.
+  const guest = isLoaded && !isSignedIn;
+  const [loadedPrograms, setPrograms] = useState<ProgramSummary[] | null>(null);
+  // A guest has no programs; until Clerk has loaded, nothing is known yet.
+  const programs = guest ? [] : loadedPrograms;
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [program, setProgram] = useState<Program | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +53,7 @@ function Workspace() {
   }, []);
 
   useEffect(() => {
+    if (!isSignedIn) return;
     let cancelled = false;
     (async () => {
       try {
@@ -58,7 +68,7 @@ function Workspace() {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, isSignedIn]);
 
   // Refetches the whole nested program after any structural change or
   // generation call, rather than patching nested state by hand - the
@@ -154,6 +164,18 @@ function Workspace() {
     setAnchorThisWeekOnly(thisWeekOnly);
   }
 
+  // Guest gate: stops the interaction before any control sees it (no focus,
+  // no open select, no request) and opens sign-in. Tab still moves around.
+  function promptSignIn(event: SyntheticEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.type !== "click") clerk.openSignIn();
+  }
+  function gateKeys(event: KeyboardEvent) {
+    if (event.key === "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    promptSignIn(event);
+  }
+
   const hasPrograms = programs !== null && programs.length > 0;
   const showWizard = programs !== null && (!hasPrograms || wizardOpen || wizardRunning);
   const strength = program?.goal === "strength";
@@ -161,7 +183,11 @@ function Workspace() {
   return (
     // Wide screens: program on the left, chat as a sticky panel on the right
     // so it stays in view while the program scrolls. Narrow screens stack.
-    <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_25rem] lg:gap-8 lg:px-8 lg:py-8 xl:grid-cols-[minmax(0,1fr)_27rem]">
+    <div
+      onPointerDownCapture={guest ? promptSignIn : undefined}
+      onClickCapture={guest ? promptSignIn : undefined}
+      onKeyDownCapture={guest ? gateKeys : undefined}
+      className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_25rem] lg:gap-8 lg:px-8 lg:py-8 xl:grid-cols-[minmax(0,1fr)_27rem]">
       <main className="flex min-w-0 flex-col gap-5">
         {hasPrograms && (
           <div className="flex items-center gap-2">
@@ -204,7 +230,7 @@ function Workspace() {
 
         {error && <Notice tone="error">{error}</Notice>}
 
-        {selectedId !== null && program === null && !error && (
+        {!guest && selectedId !== null && program === null && !error && (
           <div className="card flex flex-col gap-4 p-6" aria-busy="true" aria-label="Loading program">
             <Skeleton className="h-7 w-1/3" />
             <Skeleton className="h-4 w-1/2" />
@@ -214,7 +240,7 @@ function Workspace() {
           </div>
         )}
 
-        {program && (
+        {program && !guest && (
           <>
             <header className="flex items-start gap-3 max-sm:items-center">
               <div className="min-w-0 flex-1">

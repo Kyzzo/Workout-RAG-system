@@ -1,9 +1,8 @@
-import { auth } from "@clerk/nextjs/server";
 import ProgramWorkspace from "./ProgramWorkspace";
 
-export default async function Home() {
-  await auth.protect();
-
+// Open to signed-out visitors: they see the generator and the evidence
+// assistant as a guest, and any interaction opens sign-in (ProgramWorkspace).
+export default function Home() {
   return (
     <div className="flex flex-1 flex-col">
       <ProgramWorkspace />

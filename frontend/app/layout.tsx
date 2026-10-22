@@ -66,7 +66,8 @@ export default function RootLayout({
                 <p className="truncate text-xs text-fg-subtle">Every number research-cited</p>
               </div>
               <Show when="signed-out">
-                <SignInButton>
+                <span className="chip">Guest</span>
+                <SignInButton mode="modal">
                   <button type="button" className="btn btn-primary btn-sm">
                     Sign in
                   </button>

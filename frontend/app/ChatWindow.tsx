@@ -182,7 +182,7 @@ export default function ChatWindow({
   // Lets the program view refetch after an adjust changes a stored value.
   onPrescriptionUpdated?: () => void;
 }) {
-  const { getToken } = useAuth();
+  const { getToken, isSignedIn } = useAuth();
   const dialogs = useDialogs();
   const [message, setMessage] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -198,6 +198,7 @@ export default function ChatWindow({
   // Saved history, loaded once on open (each change with its current state,
   // so Undo / Confirm buttons are right after a reload).
   useEffect(() => {
+    if (!isSignedIn) return; // guests have no history (and no token)
     let stale = false;
     (async () => {
       try {
@@ -218,7 +219,7 @@ export default function ChatWindow({
       stale = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isSignedIn]);
 
   async function call<T>(path: string, method: string, body?: unknown): Promise<T> {
     const token = await getToken();
