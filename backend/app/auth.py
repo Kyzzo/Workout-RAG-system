@@ -15,7 +15,9 @@ from .database import get_db
 load_dotenv()
 
 CLERK_PUBLISHABLE_KEY = os.environ["CLERK_PUBLISHABLE_KEY"]
-CLERK_ALLOWED_ORIGINS = os.environ["CLERK_ALLOWED_ORIGINS"].split(",")
+# Stripped: a pasted value once ended in a newline, so that origin never
+# matched and its browser requests failed CORS ("Failed to fetch").
+CLERK_ALLOWED_ORIGINS = [o.strip() for o in os.environ["CLERK_ALLOWED_ORIGINS"].split(",") if o.strip()]
 
 if CLERK_PUBLISHABLE_KEY.startswith("pk_test_"):
     _encoded_domain = CLERK_PUBLISHABLE_KEY[len("pk_test_"):]
