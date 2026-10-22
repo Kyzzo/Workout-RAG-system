@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { runBlockGeneration } from "./blockGeneration";
 import { CaveatNote, SourcesBadge, SourcesPanel } from "./Citations";
@@ -663,9 +664,13 @@ export default function ProgramTree({
                 // the full table (sources, frequency, actions) behind Details.
                 <section className="rounded-xl border border-line-strong bg-surface-2/70" aria-label="Weekly sets by muscle">
                   <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-3.5 ${chartOpen ? "" : "pb-3.5 sm:pb-0"}`}>
-                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
-                      <Layers className="size-4" />
-                    </span>
+                    <Image
+                      src="/weekly-sets.jpg"
+                      alt=""
+                      width={36}
+                      height={36}
+                      className="size-9 shrink-0 rounded-lg object-cover ring-1 ring-line-strong"
+                    />
                     <span className="min-w-0 flex-1 basis-52">
                       <span className="block text-sm font-semibold">Weekly sets by muscle</span>
                       <span className="hidden text-xs text-fg-subtle sm:block">
