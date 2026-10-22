@@ -194,18 +194,31 @@ function Workspace() {
             <label htmlFor="program-select" className="sr-only">
               Program
             </label>
-            <select
-              id="program-select"
-              value={selectedId ?? ""}
-              onChange={(e) => handleSelect(Number(e.target.value))}
-              className="input h-10 flex-1 bg-surface font-medium shadow-card"
-            >
-              {programs.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {programLabel(p)}
-                </option>
-              ))}
-            </select>
+            {/* Wider screens show the program's name as the page title, so the
+                closed dropdown reads "Select program" instead of repeating
+                it (the chosen name is hidden, not removed: screen readers and
+                the open list still have it). Phones hide the title, so their
+                dropdown keeps showing the name. */}
+            <div className="relative flex-1">
+              <select
+                id="program-select"
+                value={selectedId ?? ""}
+                onChange={(e) => handleSelect(Number(e.target.value))}
+                className="input h-10 w-full bg-surface font-medium shadow-card sm:text-transparent"
+              >
+                {programs.map((p) => (
+                  <option key={p.id} value={p.id} className="text-fg">
+                    {programLabel(p)}
+                  </option>
+                ))}
+              </select>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-y-0 start-3 hidden items-center text-sm text-fg-subtle sm:flex"
+              >
+                Select program
+              </span>
+            </div>
             <button
               type="button"
               onClick={() => setWizardOpen(true)}
