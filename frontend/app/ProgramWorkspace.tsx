@@ -199,7 +199,7 @@ function Workspace() {
                 it (the chosen name is hidden, not removed: screen readers and
                 the open list still have it). Phones hide the title, so their
                 dropdown keeps showing the name. */}
-            <div className="relative flex-1">
+            <div className="relative min-w-0 flex-1">
               <select
                 id="program-select"
                 value={selectedId ?? ""}

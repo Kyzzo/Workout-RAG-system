@@ -48,7 +48,9 @@ export default function RootLayout({
     >
       <html
         lang="en"
-        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+        // overflow-x-clip here too: iOS Safari ignores it on body alone and
+        // still lets the page pan sideways.
+        className={`${geistSans.variable} ${geistMono.variable} h-full overflow-x-clip antialiased`}
       >
         <body className="flex min-h-full flex-col overflow-x-clip">
           <header className="sticky top-0 z-40 border-b border-line bg-bg/75 backdrop-blur-xl">
