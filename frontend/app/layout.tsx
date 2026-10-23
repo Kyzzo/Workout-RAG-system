@@ -1,7 +1,7 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import { Analytics } from "@vercel/analytics/next";
 import type { Metadata, Viewport } from "next";
-import { Big_Shoulders, Big_Shoulders_Stencil, Newsreader, Overpass_Mono } from "next/font/google";
+import { Newsreader, Overpass_Mono } from "next/font/google";
 import { Providers } from "./_state/Providers";
 import "./globals.css";
 import "./_styles/wall.css";
@@ -9,8 +9,6 @@ import "./_styles/program.css";
 import "./_styles/panels.css";
 import "./_styles/chat.css";
 
-const display = Big_Shoulders({ subsets: ["latin"], variable: "--font-shoulders", axes: ["opsz"], display: "swap", adjustFontFallback: false });
-const stencil = Big_Shoulders_Stencil({ subsets: ["latin"], variable: "--font-stencil-face", weight: "800", display: "swap", adjustFontFallback: false });
 const serif = Newsreader({ subsets: ["latin"], variable: "--font-newsreader", style: ["normal", "italic"], axes: ["opsz"], display: "swap" });
 const mono = Overpass_Mono({ subsets: ["latin"], variable: "--font-overpass-mono", display: "swap" });
 
@@ -52,7 +50,7 @@ const clerkAppearance = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const fonts = `${display.variable} ${stencil.variable} ${serif.variable} ${mono.variable}`;
+  const fonts = `${serif.variable} ${mono.variable}`;
   const body = (
     <html lang="en" className={fonts}>
       <body>

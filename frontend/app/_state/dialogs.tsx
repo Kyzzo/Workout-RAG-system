@@ -143,11 +143,6 @@ function DialogView({ request, onDone }: { request: Request; onDone: (r: Request
           done(isPrompt ? text : true);
         }}
       >
-        {destructive && (
-          <div className="dlg-hazard" aria-hidden>
-            <span />
-          </div>
-        )}
         <header className="dlg-head">
           {destructive && (
             <span className="dlg-flag">

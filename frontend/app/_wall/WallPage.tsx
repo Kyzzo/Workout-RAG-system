@@ -101,7 +101,7 @@ function Hero({ eyebrow }: { eyebrow: string }) {
   return (
     <section className="hero">
       <p className="label">{eyebrow}</p>
-      <h1 className="hero-title painted">
+      <h1 className="hero-title">
         Nothing
         <br />
         scheduled.
@@ -163,7 +163,7 @@ function WallHead({ summary, program }: { summary: TrackerSummary; program: Prog
     <section className="wallhead" aria-label="Where you are">
       <div className="level" aria-label={phase === "before" ? `Starts in ${daysUntilStart} days` : `Week ${currentWeek} of ${totalWeeks}`}>
         <span className="label level-label">{phase === "before" ? "Starts in" : phase === "after" ? "Finished" : "Week"}</span>
-        <span className="level-num painted" aria-hidden>
+        <span className="level-num" aria-hidden>
           {phase === "before" ? pad2(daysUntilStart) : pad2(currentWeek)}
         </span>
         <span className="level-of mono" aria-hidden>

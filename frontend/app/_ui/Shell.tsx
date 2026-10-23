@@ -83,13 +83,6 @@ export function Shell({ children }: { children: ReactNode }) {
       <ChatSheet />
       <GeneratorSheet />
       <SourcesPanel />
-      <svg width="0" height="0" className="sr-only" aria-hidden focusable="false">
-        {/* rough, sprayed edges for paint on concrete */}
-        <filter id="rough" x="-5%" y="-5%" width="110%" height="110%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="7" result="n" />
-          <feDisplacementMap in="SourceGraphic" in2="n" scale="2.6" xChannelSelector="R" yChannelSelector="G" />
-        </filter>
-      </svg>
     </div>
   );
 }

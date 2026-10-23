@@ -115,7 +115,7 @@ function Dossier() {
         {summary && (
           <>
             {/* Long split names ("Push/Pull/Legs") may break after a slash, never mid-word. */}
-            <h1 className="doss-title painted">{programTitle(summary).replace(/\//g, "/\u200B")}</h1>
+            <h1 className="doss-title">{programTitle(summary).replace(/\//g, "/\u200B")}</h1>
             <Meta summary={summary} program={program} />
             <div className="doss-actions">
               <TrackingControl program={program} onTrack={(id) => {

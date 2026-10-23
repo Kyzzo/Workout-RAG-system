@@ -25,7 +25,7 @@ export function DateHead({ date, today }: { date: ISODate; today: ISODate }) {
   const { year, month } = monthOf(date);
   return (
     <div className="sess-date">
-      <span className="sess-day painted" aria-hidden>
+      <span className="sess-day" aria-hidden>
         {String(dayOfMonth(date)).padStart(2, "0")}
       </span>
       <span className="sess-when">
@@ -118,8 +118,8 @@ function Checklist({ session, program, today, totalWeeks, logs }: { session: Ses
     <article className="slab sess" data-status={session.status} aria-labelledby={`sess-${session.key}`}>
       <DateHead date={session.date} today={today} />
 
-      <div className="sess-plate plate">
-        <h2 id={`sess-${session.key}`} className="sess-name engraved">
+      <div className="sess-plate">
+        <h2 id={`sess-${session.key}`} className="sess-name">
           {session.dayName}
         </h2>
         <span className="sess-state">

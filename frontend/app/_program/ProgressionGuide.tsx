@@ -23,7 +23,7 @@ export function ProgressionGuide() {
           <ol className="guide-steps">
             {DOUBLE_PROGRESSION_STEPS.map((step, i) => (
               <li key={step.lead}>
-                <span className="guide-n painted" aria-hidden>
+                <span className="guide-n" aria-hidden>
                   {i + 1}
                 </span>
                 <p>
