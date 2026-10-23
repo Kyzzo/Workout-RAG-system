@@ -100,6 +100,9 @@ export type ProgramSummary = {
   id: number;
   goal: string;
   name?: string | null;
+  volume_preference?: VolumePreference;
+  trained?: boolean;
+  include_deload?: boolean;
 };
 
 // The program's name, or "Program #22" until it's renamed (like a new
@@ -158,3 +161,95 @@ export function shortVolumeLabel(preference: VolumePreference, goal: string): st
   const [low, high] = band;
   return `${label} · ${low === high ? low : `${low}-${high}`} sets/wk`;
 }
+
+export type Goal = "hypertrophy" | "strength";
+
+export type SplitOut = {
+  key: string;
+  label: string;
+  allowed_days: number[];
+  day_types: string[];
+};
+
+export type GenerateProgramRequest = {
+  goal: Goal;
+  split: string;
+  days_per_week: number;
+  weeks: number;
+  volume_preference: VolumePreference;
+  trained: boolean;
+  include_deload: boolean;
+};
+
+export type GenerateWeeklyVolumeResponse = {
+  volume: MuscleGroupVolume;
+  delivered_weekly_sets: number;
+  exercises_added: string[];
+};
+
+export type GenerateFrequencyResponse = {
+  frequency: MuscleGroupFrequency;
+  days_added: DayTemplate[];
+};
+
+export type GenerateProgressionResponse = {
+  scheme: ProgressionScheme;
+  updated_prescriptions: WeeklyPrescription[];
+};
+
+export type SwapExerciseResponse = {
+  slot: ExerciseSlot;
+  old_name: string;
+  new_name: string;
+  // Every value the swap changes anywhere in the block. Entries containing
+  // " - the new exercise:" describe the new exercise itself.
+  changes: string[];
+  change_id: number | null;
+  pending: boolean;
+};
+
+export type ChangeOut = { id: number; kind: string; description: string; status: string };
+
+export type CitationOut = { id: number; title: string; snippet: string };
+
+export type RebalanceField = "reps" | "load" | "rir";
+
+export type RebalanceOut = {
+  prescription_id: number;
+  changed_field: RebalanceField;
+  message: string;
+  options: { field: RebalanceField; value: string; label: string }[];
+};
+
+export type ChatCitation = {
+  title: string;
+  snippet: string;
+  field: "sets" | "reps" | "load" | "rir" | null;
+};
+
+export type ChatResponse = {
+  mode: "adjust_prescription" | "discuss_prescription" | "answer_general_question";
+  prescription: WeeklyPrescription | null;
+  answer: string | null;
+  citations: ChatCitation[];
+  grounding_note: string | null;
+  rebalance: RebalanceOut | null;
+  swap: SwapExerciseResponse | null;
+  change_id: number | null;
+};
+
+export type ChangeStatus = "pending" | "applied" | "undone" | "cancelled";
+
+export type SavedChatTurn = {
+  role: "user" | "assistant";
+  content: Record<string, unknown>;
+  change_status: ChangeStatus | null;
+};
+
+export type ChatMessageRequest = {
+  message: string;
+  field_id: number | null;
+  history: { role: "user" | "assistant"; content: string }[];
+  anchor_label: string | null;
+  this_week_only: boolean;
+};
