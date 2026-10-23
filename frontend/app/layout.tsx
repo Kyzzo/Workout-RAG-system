@@ -1,63 +1,90 @@
-import { ClerkProvider } from "@clerk/nextjs";
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import { ClerkProvider, Show, SignInButton, UserButton } from "@clerk/nextjs";
+import Image from "next/image";
 import { Analytics } from "@vercel/analytics/next";
-import type { Metadata, Viewport } from "next";
-import { Newsreader, Overpass_Mono } from "next/font/google";
-import { Providers } from "./_state/Providers";
 import "./globals.css";
-import "./_styles/wall.css";
-import "./_styles/program.css";
-import "./_styles/panels.css";
-import "./_styles/chat.css";
 
-const serif = Newsreader({ subsets: ["latin"], variable: "--font-newsreader", style: ["normal", "italic"], axes: ["opsz"], display: "swap" });
-const mono = Overpass_Mono({ subsets: ["latin"], variable: "--font-overpass-mono", display: "swap" });
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
 
 export const metadata: Metadata = {
   title: "Citeset",
   description: "Strength and hypertrophy programs where every number is research-cited.",
 };
 
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  viewportFit: "cover",
-  themeColor: "#121211",
-  colorScheme: "dark",
-  interactiveWidget: "resizes-content",
-};
-
-// The fixture preview (`npm run preview`) runs without Clerk; never in a
-// production build.
-const PREVIEW = process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_CITESET_PREVIEW === "1";
-
-const clerkAppearance = {
-  variables: {
-    colorPrimary: "#d9dadb",
-    colorPrimaryForeground: "#151515",
-    colorBackground: "#1d1d1c",
-    colorForeground: "#e7e6e2",
-    colorMuted: "#262625",
-    colorMutedForeground: "#9d9c98",
-    colorNeutral: "#e7e6e2",
-    colorInput: "#121212",
-    colorInputForeground: "#e7e6e2",
-    colorBorder: "#3b3b3a",
-    colorRing: "#c9cdd0",
-    colorModalBackdrop: "rgba(6, 6, 6, 0.78)",
-    borderRadius: "2px",
-    fontFamily: "var(--font-overpass-mono), ui-monospace, monospace",
-  },
-};
-
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const fonts = `${serif.variable} ${mono.variable}`;
-  const body = (
-    <html lang="en" className={fonts}>
-      <body>
-        <Providers>{children}</Providers>
-        <Analytics />
-      </body>
-    </html>
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <ClerkProvider
+      // Clerk otherwise picks light or dark from the device setting; the app
+      // is dark only, so its sign-in screens and account menu use the app's
+      // colours.
+      appearance={{
+        variables: {
+          colorPrimary: "var(--accent)",
+          colorPrimaryForeground: "#ffffff",
+          colorBackground: "var(--surface)",
+          colorForeground: "var(--fg)",
+          colorMutedForeground: "var(--fg-muted)",
+          colorInput: "var(--surface-2)",
+          colorInputForeground: "var(--fg)",
+          colorNeutral: "#ffffff",
+        },
+        // Links use the light text accent: the fill accent is too dark to
+        // read as text on the dark card.
+        elements: { footerActionLink: "!text-accent-text" },
+      }}
+    >
+      <html
+        lang="en"
+        // overflow-x-clip here too: iOS Safari ignores it on body alone and
+        // still lets the page pan sideways.
+        className={`${geistSans.variable} ${geistMono.variable} h-full overflow-x-clip antialiased`}
+      >
+        <body className="flex min-h-full flex-col overflow-x-clip">
+          <header className="sticky top-0 z-40 border-b border-line bg-bg/75 backdrop-blur-xl">
+            <div className="mx-auto flex h-14 w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
+              <Image
+                src="/progress-icon.jpg"
+                alt=""
+                width={32}
+                height={32}
+                priority
+                className="size-8 shrink-0 rounded-lg object-cover ring-1 ring-line-strong"
+              />
+              <div className="min-w-0 flex-1 leading-tight">
+                <p className="truncate text-sm font-semibold tracking-tight">Citeset: AI Workout Structuring</p>
+                <p className="truncate text-xs text-fg-subtle">Every number research-cited</p>
+              </div>
+              <Show when="signed-out">
+                <span className="chip">Guest</span>
+                <SignInButton mode="modal">
+                  <button type="button" className="btn btn-primary btn-sm">
+                    Sign in
+                  </button>
+                </SignInButton>
+              </Show>
+              <Show when="signed-in">
+                <UserButton />
+              </Show>
+            </div>
+          </header>
+          {children}
+          {/* Vercel Web Analytics: page views and visitors, no cookies. */}
+          <Analytics />
+        </body>
+      </html>
+    </ClerkProvider>
   );
-  return PREVIEW ? body : <ClerkProvider appearance={clerkAppearance}>{body}</ClerkProvider>;
 }
